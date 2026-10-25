@@ -88,3 +88,18 @@ además hay **"Copiar mensaje"** para reenviarlo manualmente.
 - **Marca**: cambiá "Skala Venezuela" en la barra superior y el texto del hero.
 - **Colores**: editá las variables `:root` al inicio de `css/styles.css`.
 - **Productos**: los datos están en `js/main.js` (arreglos `BANOS` y `KITS`).
+
+## Curvatura y unidades por caja
+
+- **Iconos de curvatura:** cada tarjeta muestra el rango (ej. `1A–4C`) y un icono por cada
+  curvatura que cubre (Liso ●, Ondulado ◒, Cacheado ◉, Crespo ✦), con los mismos colores
+  de la *Guía de curvatura*. Se calculan solos a partir del campo `hair` (`js/producto.js`).
+- **Unidades por caja:** baños de crema = **6 unidades** (`UNIDADES_POR_CAJA_BANO` en
+  `js/producto.js`). Kits = *información no disponible*; cuando se confirme, cambiar
+  `p.unidades = null` por el número en `js/main.js`. El mensaje de WhatsApp incluye las
+  unidades cuando se conocen.
+
+## Tests
+
+- Unitarios (sin dependencias): `node --test tests/producto.test.js`
+- En navegador (requiere Playwright): `node tests/e2e.js`

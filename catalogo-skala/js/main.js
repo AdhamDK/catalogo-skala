@@ -44,6 +44,13 @@ const KITS = [
   { code: "KT-08", name: "Kit Mais Cachos", line: "Definición", benefit: "Define y controla los rizos.", hair: "3A–4C", stock: 10 },
 ];
 
+/* Unidades por caja (ver js/producto.js).
+   - Baños de crema: cada caja trae 6 unidades de 1 kg.
+   - Kits: dato pendiente -> se muestra "información no disponible".
+     Cuando se confirme, cambiar null por el número (ej. 12). */
+BANOS.forEach((p) => { p.unidades = UNIDADES_POR_CAJA_BANO; });
+KITS.forEach((p) => { p.unidades = null; });
+
 /* -------------------- PEDIDO (estado) -------------------- */
 let pedido = {};
 try { pedido = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { pedido = {}; }
@@ -80,15 +87,14 @@ function placeholder(name) {
 
 function cardHTML(p, group) {
   const b = stockBadge(p.stock);
-  const vid = `assets/img/${p.code}.mp4`;
-const poster = `assets/img/${p.code}.png`;
+  const img = `assets/img/${p.code}.png`;
   const q = pedido[p.code] || 0;
   return `
   <article class="card">
     <div class="card-img">
       <span class="card-badge ${b.cls}">${b.label}</span>
-      <video src="${vid}" poster="${poster}" alt="${p.name}" loading="lazy"
-           onerror="this.onerror=null; this.poster='${poster}';" />
+      <img src="${img}" alt="${p.name}" loading="lazy"
+           onerror="this.onerror=null; this.src=placeholder('${p.name}');" />
     </div>
     <div class="card-body">
       <span class="card-line">${p.line}</span>
@@ -96,7 +102,8 @@ const poster = `assets/img/${p.code}.png`;
       <p class="card-benefit">${p.benefit}</p>
       <div class="card-meta">
         <span>${group}</span>
-        <span>${p.hair}</span>
+        <span class="card-hair">${p.hair} <span class="hair-icons">${iconosCabelloHTML(p.hair)}</span></span>
+        <span class="card-units">${textoUnidades(p)}</span>
       </div>
       <div class="card-order">
         <div class="qty">
@@ -191,8 +198,10 @@ function buildMessage(c) {
     .sort((a, b) => a[0].localeCompare(b[0]));
   const total = items.reduce((a, [, q]) => a + q, 0);
   const lineas = items.map(([code, q]) => {
-    const name = map[code] ? map[code].name : code;
-    return `• ${name} (${code}) — ${q} caja${q === 1 ? "" : "s"}`;
+    const p = map[code];
+    const name = p ? p.name : code;
+    const und = p && p.unidades ? ` (${q * p.unidades} unidades)` : "";
+    return `• ${name} (${code}) — ${q} caja${q === 1 ? "" : "s"}${und}`;
   });
   const parts = [
     "Hola! Quiero cotizar este pedido de Skala:",

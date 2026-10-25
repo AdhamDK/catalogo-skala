@@ -641,3 +641,29 @@ fieldset.pay legend {
   .order-hint { display: none; }
 }
 
+
+/* ---------- Iconos de curvatura y unidades (tarjetas) ---------- */
+.card-meta .card-hair { display: inline-flex; align-items: center; gap: 6px; }
+.card-meta .hair-icons { display: inline-flex; gap: 3px; padding: 0; background: none; }
+.card-meta .hair-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px; height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: #fff;
+  cursor: help;
+}
+/* Mismos colores que la Guía de curvatura */
+.hair-icon.hair-liso { background: var(--verde); }
+.hair-icon.hair-ondulado { background: var(--naranja); }
+.hair-icon.hair-cacheado { background: var(--rosa); }
+.hair-icon.hair-crespo { background: #a05bd0; }
+.card-meta .card-units { background: #eef6e4; color: var(--verde-osc); font-weight: 600; }
+.products-kits .card-meta .card-units { background: var(--crema); color: var(--tinta-suave); font-weight: 500; }
+.section-note { margin: 6px 0 0; color: var(--tinta-suave); font-size: 0.95rem; }
+@media print {
+  .hair-icon { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
