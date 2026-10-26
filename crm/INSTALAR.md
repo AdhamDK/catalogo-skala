@@ -28,7 +28,7 @@ Tiempo: ~10 minutos. Usá la cuenta de Google de la empresa (será la dueña de 
 1. **Implementar → Nueva implementación → tipo: App web**.
 2. *Ejecutar como*: **Yo** · *Quién tiene acceso*: **Cualquier persona**.
 3. **Implementar** y copiá la **URL de la app web** (termina en `/exec`).
-4. Prueba: abrila en el navegador; debe mostrar `{"ok":true,"app":"skala-crm","version":2}`.
+4. Prueba: abrila en el navegador; debe mostrar `{"ok":true,"app":"skala-crm","version":2,"claves":true}`.
 
 > "Cualquier persona" es necesario para que el catálogo pueda llamarla. Sin usuario y clave
 > válidos no se puede leer ni escribir nada; cada acción se valida según el rol.

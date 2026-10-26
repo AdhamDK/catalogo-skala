@@ -337,7 +337,7 @@ test("acción desconocida, JSON inválido y GET de salud", () => {
   const g = preparar();
   assert.equal(g.post({ action: "borrarTodo" }).code, "unknown_action");
   assert.equal(JSON.parse(g.ctx.doPost({ postData: { contents: "{no" } }).getContent()).code, "bad_json");
-  assert.deepEqual(g.get({}), { ok: true, app: "skala-crm", version: 2 });
+  assert.deepEqual(g.get({}), { ok: true, app: "skala-crm", version: 2, claves: true });
 });
 
 test("GPS_CLIENTES puede escribir las 10 primeras columnas sin borrar las extra", () => {

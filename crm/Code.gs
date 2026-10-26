@@ -38,7 +38,7 @@ var HOJAS = {
 /* -------------------- Entradas HTTP -------------------- */
 function doGet(e) {
   var p = (e && e.parameter) || {};
-  if (!p.action) return json_({ ok: true, app: 'skala-crm', version: 2 });
+  if (!p.action) return json_({ ok: true, app: 'skala-crm', version: 2, claves: true });
   return json_(manejar_(p));
 }
 
