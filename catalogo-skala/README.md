@@ -122,12 +122,17 @@ WhatsApp) · **Despachador** (sus entregas: en ruta → entregado, con llamar y 
 Estados: pendiente → confirmado → en ruta → entregado (o cancelado, con motivo).
 Sin señal, el pedido queda en el teléfono y se sube solo después.
 
+- **Panel del equipo: `panel.html`** (app instalable en el teléfono). Páginas: Inicio, Nuevo
+  pedido (lista rápida), Pedidos + detalle, Entregas, Clientes + ficha, Resumen, Usuarios, Más.
+  El catálogo (`index.html`) solo lleva al panel; el carrito se comparte entre ambos.
+- Archivos: `js/datos.js` (productos), `js/crm-api.js` (conexión), `js/panel.js` (app),
+  `css/panel.css`, `manifest.webmanifest`, `sw.js` (al cambiar archivos subí `VERSION`).
 - Instalación de la hoja y la API: `crm/INSTALAR.md` (raíz del repo, no se publica).
-- Configurar la URL en `js/crm.js` → `CRM_API_URL`.
+- Configurar la URL en `js/crm-api.js` → `CRM_API_URL`.
 - Spec: `docs/specs/modo-vendedor-crm.md`.
 
 ## Tests
 
 - Unitarios (sin dependencias): `node --test tests/producto.test.js tests/crm-core.test.js ../crm/tests/code.test.js`
 - En navegador (requiere Playwright): `node tests/e2e.js` — prueba 320, 360, 390, 768 y 1280 px.
-- CRM con los 4 roles de punta a punta (backend simulado): `node tests/e2e-crm.js`
+- Panel del equipo con los 4 roles de punta a punta (backend simulado, HTTP): `node tests/e2e-panel.js`

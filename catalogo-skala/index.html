@@ -32,7 +32,7 @@
       <span class="brand-mark"><img src="assets/img/web/logo-96.png" alt="Skala Venezuela" width="38" height="38"></span>
       <span class="brand-text">Skala <em>Venezuela</em></span>
     </a>
-    <button type="button" class="btn-cuenta" id="btnCuenta" aria-haspopup="dialog">Ingresar</button>
+    <button type="button" class="btn-cuenta" id="btnCuenta">Ingresar</button>
     <nav class="nav" aria-label="Principal">
       <a href="#inicio">Inicio</a>
       <a href="#banos">Baños de crema</a>
@@ -286,186 +286,19 @@
           <strong>Cliente</strong><span>Enviar mi pedido a Skala por WhatsApp</span>
         </button>
         <button type="button" class="modo-btn" id="btnModoVendedor">
-          <strong>Vendedor</strong><span>Ingresar, registrar el pedido y enviarlo al grupo</span>
+          <strong>Vendedor</strong><span>Abrir el panel del equipo con estos productos</span>
         </button>
       </div>
       <div class="modal-actions"><button type="button" class="btn btn-ghost" data-cerrar>Cancelar</button></div>
     </div>
   </div>
 
-  <!-- Ingresar -->
-  <div class="modal" id="loginModal" hidden>
-    <form class="modal-box modal-mini" id="loginForm" role="dialog" aria-modal="true" aria-labelledby="loginTitulo" tabindex="-1" novalidate>
-      <h3 id="loginTitulo">Ingresar</h3>
-      <p class="modal-sub">Acceso para el equipo de Skala.</p>
-      <label class="field field-full"><span>Usuario</span>
-        <input id="loginUsuario" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" placeholder="ej. oscar" required />
-      </label>
-      <label class="field field-full"><span>Clave</span>
-        <span class="clave-wrap">
-          <input id="loginPin" type="password" maxlength="64" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Tu clave" required />
-          <button type="button" class="ver-clave" data-ver="loginPin" aria-label="Mostrar clave">Ver</button>
-        </span>
-      </label>
-      <p class="form-warn" id="loginError" hidden></p>
-      <div class="modal-actions">
-        <button type="submit" class="btn btn-primary" id="btnLogin">Entrar</button>
-        <button type="button" class="btn btn-ghost" data-cerrar>Cancelar</button>
-      </div>
-    </form>
-  </div>
-
-  <!-- Nuevo pedido (vendedor / administración / master) -->
-  <div class="modal" id="vendModal" hidden>
-    <form class="modal-box" id="vendForm" role="dialog" aria-modal="true" aria-labelledby="vendTitulo" tabindex="-1" novalidate>
-      <div class="vend-head">
-        <h3 id="vendTitulo">Nuevo pedido</h3>
-        <span class="vend-quien js-quien"></span>
-      </div>
-      <p class="modal-sub" id="vendResumen"></p>
-
-      <div id="vendPaso1">
-        <label class="field field-full"><span>Buscar cliente (nombre, negocio o teléfono)</span>
-          <input id="vBuscar" type="search" placeholder="Ej. Bella o 0412…" autocomplete="off" enterkeyhint="search" />
-        </label>
-        <ul class="vend-resultados" id="vResultados" hidden></ul>
-        <input type="hidden" id="vClienteId" />
-        <p class="vend-cliente-sel" id="vClienteSel" hidden></p>
-
-        <div class="form-grid">
-          <label class="field"><span>Nombre del cliente</span>
-            <input id="vContacto" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Persona de contacto" />
-          </label>
-          <label class="field"><span>Nombre del negocio</span>
-            <input id="vNegocio" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Peluquería / tienda" />
-          </label>
-          <label class="field"><span>RIF / Cédula</span>
-            <input id="vRif" type="text" autocomplete="off" autocapitalize="characters" enterkeyhint="next" placeholder="J-12345678-9" />
-          </label>
-          <label class="field"><span>Teléfono 1 *</span>
-            <input id="vTel1" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="0412-1234567" />
-          </label>
-          <label class="field"><span>Teléfono 2</span>
-            <input id="vTel2" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="Opcional" />
-          </label>
-          <label class="field field-full"><span>Dirección</span>
-            <input id="vDireccion" type="text" autocomplete="off" enterkeyhint="next" placeholder="Dirección de entrega" />
-          </label>
-        </div>
-
-        <div class="gps-box">
-          <button type="button" class="btn btn-ghost btn-gps" id="btnGps">Tomar ubicación GPS del cliente</button>
-          <span class="gps-estado" id="gpsEstado">Sin ubicación</span>
-          <input type="hidden" id="vLat" /><input type="hidden" id="vLng" />
-        </div>
-
-        <fieldset class="pay">
-          <legend>Método de pago</legend>
-          <label class="pay-opt"><input type="radio" name="vPago" value="Bolívares · Contado" /> Bolívares · Contado</label>
-          <label class="pay-opt"><input type="radio" name="vPago" value="Bolívares · Crédito" /> Bolívares · Crédito</label>
-          <label class="pay-opt"><input type="radio" name="vPago" value="Divisas · Contado" /> Divisas · Contado</label>
-          <label class="pay-opt"><input type="radio" name="vPago" value="Divisas · Crédito" /> Divisas · Crédito</label>
-        </fieldset>
-
-        <label class="field field-full"><span>Nota (entrega, descuento, etc.)</span>
-          <textarea id="vNota" rows="2" maxlength="300" placeholder="Opcional"></textarea>
-        </label>
-        <p class="form-warn" id="vError" hidden></p>
-      </div>
-
-      <div id="vendPaso2" hidden>
-        <p class="vend-ok" id="vendOk"></p>
-        <label class="field field-full" id="vMensajeWrap"><span>Mensaje para el grupo</span>
-          <textarea id="vMensaje" readonly rows="10"></textarea>
-        </label>
-      </div>
-
-      <div class="modal-actions">
-        <button type="submit" class="btn btn-primary" id="btnGuardar">Guardar pedido</button>
-        <button type="button" class="btn btn-primary" id="btnGrupo" hidden>Enviar al grupo de WhatsApp</button>
-        <a class="btn btn-ghost" id="btnCopiaCliente" target="_blank" rel="noopener" hidden>Copia al cliente</a>
-        <button type="button" class="btn btn-ghost" id="btnIrPanel" hidden>Ver pedidos</button>
-        <button type="button" class="btn btn-ghost" data-cerrar>Cerrar</button>
-      </div>
-    </form>
-  </div>
-
-  <!-- Panel según el rol -->
-  <div class="modal" id="panelModal" hidden>
-    <div class="modal-box modal-panel" role="dialog" aria-modal="true" aria-labelledby="panelTitulo" tabindex="-1">
-      <div class="vend-head">
-        <h3 id="panelTitulo">Panel</h3>
-        <span class="vend-quien js-quien"></span>
-      </div>
-      <div class="pend-subir" id="pendSubir" hidden>
-        <span id="pendSubirTxt"></span>
-        <button type="button" class="btn btn-ghost" id="btnSubirPend">Subir ahora</button>
-      </div>
-      <div class="tabs" role="tablist" id="panelTabs"></div>
-      <div id="panelContenido"></div>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-primary" id="btnNuevoPedido" hidden>Nuevo pedido</button>
-        <button type="button" class="btn btn-ghost" id="btnRecargar">Actualizar</button>
-        <button type="button" class="btn btn-ghost" data-cerrar>Cerrar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Confirmar / cambiar despachador -->
-  <div class="modal" id="asignarModal" hidden>
-    <form class="modal-box modal-mini" id="asignarForm" role="dialog" aria-modal="true" aria-labelledby="asignarTitulo" tabindex="-1" novalidate>
-      <h3 id="asignarTitulo">Confirmar pedido</h3>
-      <p class="modal-sub" id="asignarSub"></p>
-      <label class="field field-full"><span>Despachador</span>
-        <select id="asignarDespachador" required></select>
-      </label>
-      <p class="form-warn" id="asignarError" hidden></p>
-      <div class="modal-actions">
-        <button type="submit" class="btn btn-primary" id="btnAsignar">Confirmar</button>
-        <button type="button" class="btn btn-ghost" data-cerrar>Cancelar</button>
-      </div>
-    </form>
-  </div>
-
-  <!-- Usuario (solo Master) -->
-  <div class="modal" id="usuarioModal" hidden>
-    <form class="modal-box modal-mini" id="usuarioForm" role="dialog" aria-modal="true" aria-labelledby="usuarioTitulo" tabindex="-1" novalidate>
-      <h3 id="usuarioTitulo">Nuevo usuario</h3>
-      <input type="hidden" id="uId" />
-      <label class="field field-full"><span>Usuario (para ingresar)</span>
-        <input id="uUsuario" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="ej. kevin" />
-      </label>
-      <label class="field field-full"><span>Nombre</span>
-        <input id="uNombre" type="text" autocapitalize="words" autocomplete="off" placeholder="ej. Kevin Pérez" />
-      </label>
-      <label class="field field-full"><span>Rol</span>
-        <select id="uRol">
-          <option value="vendedor">Vendedor</option>
-          <option value="despachador">Despachador</option>
-          <option value="admin">Administración</option>
-          <option value="master">Master</option>
-        </select>
-      </label>
-      <label class="field field-full"><span id="uPinLabel">Clave</span>
-        <span class="clave-wrap">
-          <input id="uPin" type="password" maxlength="64" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Letras y números" />
-          <button type="button" class="ver-clave" data-ver="uPin" aria-label="Mostrar clave">Ver</button>
-        </span>
-      </label>
-      <p class="nota-chica" id="uPinAyuda">Mínimo 6 caracteres con letras y números (Master: 8). Puede llevar símbolos como * # @ !</p>
-      <label class="check"><input type="checkbox" id="uActivo" checked /> Activo (puede ingresar)</label>
-      <p class="form-warn" id="usuarioError" hidden></p>
-      <div class="modal-actions">
-        <button type="submit" class="btn btn-primary" id="btnGuardarUsuario">Guardar</button>
-        <button type="button" class="btn btn-ghost" data-cerrar>Cancelar</button>
-      </div>
-    </form>
-  </div>
-
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="js/producto.js"></script>
+  <script src="js/datos.js"></script>
   <script src="js/crm-core.js"></script>
+  <script src="js/crm-api.js"></script>
   <script src="js/main.js"></script>
   <script src="js/crm.js"></script>
 </body>

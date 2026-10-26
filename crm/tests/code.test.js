@@ -366,3 +366,31 @@ test("un PIN numérico viejo (v1) sigue sirviendo para entrar", () => {
   g.hojas.Usuarios.filas[fila][4] = "'" + g.ctx.hashPin_(u.id, "1234");
   assert.equal(g.post({ action: "login", usuario: "oscar", pin: "1234" }).ok, true);
 });
+
+test("detalle de pedido con historial; respeta lo que cada rol puede ver", () => {
+  const g = preparar();
+  const ta = login(g, "ana", "Ana*2222");
+  const id = pedir(g, login(g)).pedido.id;
+  g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: idDe(g, "luis") });
+  const d = g.post({ action: "pedido", token: ta, pedido_id: id });
+  assert.equal(d.pedido.id, id);
+  assert.equal(d.pedido.items.length, 2);
+  assert.equal(d.pedido.cliente_datos.telefono, "0412-1234567");
+  assert.deepEqual(d.pedido.historial.map((h) => h.accion), ["creado", "confirmado"]);
+  assert.equal(g.post({ action: "pedido", token: login(g, "kevin", "Kevin9876"), pedido_id: id }).code, "not_found");
+  assert.equal(g.post({ action: "pedido", token: login(g, "pedro", "Pedro6666"), pedido_id: id }).code, "not_found");
+  assert.equal(g.post({ action: "pedido", token: login(g, "luis", "Luis5555"), pedido_id: id }).ok, true);
+});
+
+test("pedidos de un cliente (ficha) y límite en la lista de clientes", () => {
+  const g = preparar();
+  const to = login(g), tk = login(g, "kevin", "Kevin9876"), ta = login(g, "ana", "Ana*2222");
+  const r = pedir(g, to);
+  pedir(g, to, { cliente: { negocio: "Otro", telefono: "0416-1112233" } });
+  pedir(g, tk); // mismo cliente, otro vendedor
+  const cid = r.cliente_id;
+  assert.equal(g.post({ action: "pedidos", token: ta, cliente_id: cid }).pedidos.length, 2);
+  assert.equal(g.post({ action: "pedidos", token: to, cliente_id: cid }).pedidos.length, 1); // solo los suyos
+  assert.equal(g.post({ action: "clientes", token: ta, q: "", limite: 1 }).clientes.length, 1);
+  assert.equal(g.post({ action: "clientes", token: ta, q: "", limite: 100 }).clientes.length, 2);
+});

@@ -61,6 +61,7 @@ var ACCIONES = {
   clientes: [accionClientes_, TOMAN_PEDIDOS],
   guardarPedido: [accionGuardarPedido_, TOMAN_PEDIDOS],
   pedidos: [accionPedidos_, ROLES],
+  pedido: [accionPedido_, ROLES],
   estado: [accionEstado_, ROLES],
   despachadores: [accionDespachadores_, GESTION],
   resumen: [accionResumen_, TOMAN_PEDIDOS],
@@ -276,7 +277,8 @@ function accionClientes_(p) {
     return false;
   });
   lista.sort(function (a, b) { return String(b.updated_at).localeCompare(String(a.updated_at)); });
-  return { ok: true, clientes: lista.slice(0, 20).map(clientePublico_) };
+  var limite = Math.min(Math.max(Number(p.limite) || 20, 1), 200);
+  return { ok: true, clientes: lista.slice(0, limite).map(clientePublico_) };
 }
 
 function numeroGps_(v, min, max) {
@@ -431,9 +433,11 @@ function accionPedidos_(p, ses) {
   var desde = new Date(Date.now() - dias * 86400000).toISOString();
   var estados = (Array.isArray(p.estados) ? p.estados : (p.estado ? [p.estado] : []))
     .filter(function (e) { return ESTADOS.indexOf(e) !== -1; });
+  var clienteId = txt_(p.cliente_id, 60);
   var items = leer_('PedidoItems');
   var lista = leer_('Pedidos').filter(function (x) {
     if (!puedeVer_(ses, x)) return false;
+    if (clienteId) return String(x.cliente_id) === clienteId; // ficha del cliente: todo su historial visible
     if (estados.length && estados.indexOf(String(x.estado)) === -1) return false;
     // Lo que sigue abierto se muestra aunque sea viejo
     var abierto = ['pendiente', 'confirmado', 'en_ruta'].indexOf(String(x.estado)) !== -1;
@@ -451,6 +455,18 @@ function accionPedidos_(p, ses) {
       return o;
     })
   };
+}
+
+/* Detalle de un pedido + su historial (respetando lo que el rol puede ver) */
+function accionPedido_(p, ses) {
+  var x = leer_('Pedidos').filter(function (y) { return String(y.id) === String(p.pedido_id); })[0];
+  if (!x || !puedeVer_(ses, x)) return { ok: false, error: 'Pedido no encontrado.', code: 'not_found' };
+  var o = pedidoConItems_(x, leer_('PedidoItems'));
+  var c = leer_('Clientes').filter(function (y) { return String(y.id) === String(x.cliente_id); })[0];
+  if (c) o.cliente_datos = clientePublico_(c);
+  o.historial = leer_('Historial').filter(function (h) { return String(h.pedido_id) === String(x.id); })
+    .map(function (h) { return { fecha: String(h.fecha), usuario: String(h.usuario), accion: String(h.accion), detalle: String(h.detalle) }; });
+  return { ok: true, pedido: o };
 }
 
 /* Reglas de cambio de estado por rol. Devuelve '' si se permite, o el motivo del rechazo. */

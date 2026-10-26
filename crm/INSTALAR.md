@@ -34,18 +34,25 @@ Tiempo: ~10 minutos. Usá la cuenta de Google de la empresa (será la dueña de 
 > válidos no se puede leer ni escribir nada; cada acción se valida según el rol.
 
 ## 4. Conectar el catálogo
-Pegá la URL en `catalogo-skala/js/crm.js` → `const CRM_API_URL = "…/exec";` y subí el cambio.
+Pegá la URL en `catalogo-skala/js/crm-api.js` → `const CRM_API_URL = "…/exec";` y subí el cambio.
 (Ya está configurada con la URL de Skala.)
 
 ## Si cambiás `Code.gs` más adelante
 **Implementar → Administrar implementaciones → ✏️ → Versión: Nueva versión → Implementar.**
 Así la URL `/exec` no cambia.
 
+## El panel del equipo
+Todo el equipo trabaja en **`panel.html`** (desde el catálogo: botón **Ingresar**).
+En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iPhone: Compartir →
+**Agregar a inicio**). Abre a pantalla completa con el ícono de Skala.
+
 ## Uso diario
-- **Vendedor**: arma el pedido en el catálogo → **Guardar** → **Enviar al grupo**.
-- **Administración**: **Ingresar → Por confirmar → Confirmar** (elige despachador).
-- **Despachador**: **Ingresar → Por entregar** → *En ruta* → *Entregado* (con Llamar y Mapa).
-- **Master**: todo lo anterior + **Resumen** + **Usuarios** (crear, PIN, rol, activar).
+- **Vendedor**: **Nuevo** → elige productos con + / − → **Continuar** → datos del cliente
+  (o buscarlo) + GPS → **Guardar pedido** → **Enviar al grupo**.
+- **Administración**: **Inicio / Pedidos → Por confirmar** → abrir el pedido → **Confirmar** (elige despachador).
+- **Despachador**: **Entregas** → abrir el pedido → *Salió en ruta* → *Entregado* (con Llamar, WhatsApp y Mapa).
+- **Master**: todo lo anterior + **Más → Resumen** y **Más → Usuarios** (crear, clave, rol, activar).
+- **Clientes**: ficha con datos, mapa e historial de pedidos; "Nuevo pedido para este cliente".
 - Claves: mínimo 6 caracteres con letras y números (Master: 8); pueden llevar símbolos.
 - Si alguien olvida la clave: el Master le pone una nueva (Usuarios → Editar).
 - **La hoja NO debe compartirse con "Cualquier persona con el enlace"**: dejala en

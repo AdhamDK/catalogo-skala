@@ -25,6 +25,13 @@ El rol se lee de la hoja en cada llamada: un cambio de rol o desactivación apli
 Admin/Master pueden corregir (reabrir a pendiente, reasignar despachador).
 Cada cambio queda en la hoja `Historial` (fecha, pedido, usuario, acción, detalle).
 
+## Panel del equipo (v3)
+`panel.html`: app instalable (manifest + service worker) con páginas por hash y barra inferior:
+Inicio · Nuevo (lista rápida de productos → datos del cliente → listo) · Pedidos (+ detalle con
+historial y acciones) · Clientes (+ ficha con historial) · Más (Resumen, Usuarios, catálogo, salir).
+Despachador: Inicio · Entregas · Más. El catálogo comparte el carrito (`skala_pedido_v1`) y solo
+lleva al panel.
+
 ## Ingreso
 Botón **Ingresar** en la barra superior: **usuario + clave** (mínimo 6 caracteres con letras y
 números, símbolos permitidos; Master mínimo 8). Botón "Ver" para mostrarla. Los PIN numéricos de
@@ -50,9 +57,10 @@ como rol `vendedor` conservando id y PIN.
 |---|---|---|
 | `login` | público | usuario, clave |
 | `yo` | todos | — |
-| `clientes` | M, A, V | q |
+| `clientes` | M, A, V | q, limite? |
 | `guardarPedido` | M, A, V | client_ref, cliente{…}, items[], pago, nota |
-| `pedidos` | todos (filtrado por rol) | estados[]?, dias? |
+| `pedidos` | todos (filtrado por rol) | estados[]?, dias?, cliente_id? |
+| `pedido` | todos (si lo puede ver) | pedido_id → pedido + items + cliente + historial |
 | `estado` | según tabla | pedido_id, estado, motivo?, despachador_id? |
 | `despachadores` | M, A | — |
 | `resumen` | M, A, V | dias |

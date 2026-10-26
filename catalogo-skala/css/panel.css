@@ -1,0 +1,190 @@
+/* ============================================================
+   Skala — Panel del equipo (app). Mobile first.
+   Usa los tokens y componentes de styles.css (botones, campos, tabs…).
+   ============================================================ */
+body.app { background: var(--crema); min-height: 100dvh; }
+body.app.con-nav { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
+
+/* ---------- Barra superior ---------- */
+.app-bar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: 10px;
+  min-height: 56px; padding: 6px 12px;
+  padding-top: max(6px, env(safe-area-inset-top));
+  padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right));
+  background: rgba(253, 247, 239, 0.95); backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(38, 36, 31, 0.08);
+}
+.app-atras {
+  display: inline-grid; place-items: center; width: 44px; height: 44px; margin-left: -8px;
+  border: none; background: none; border-radius: 50%; cursor: pointer; color: var(--tinta);
+}
+.app-atras svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.app-atras:not([hidden]) + .app-logo { display: none; }
+.app-logo { border-radius: 8px; flex: 0 0 auto; }
+.app-titulo {
+  flex: 1; min-width: 0; margin: 0; font-size: 1.2rem; font-weight: 800; line-height: 1.1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.app-quien { font-size: 0.75rem; color: var(--tinta-suave); text-align: right; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-pend { margin: 8px 16px 0; }
+
+/* ---------- Contenido ---------- */
+.app-main {
+  max-width: 720px; margin: 0 auto; padding: 16px;
+  padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right));
+  outline: none;
+}
+.cargando { color: var(--tinta-suave); padding: 24px 0; text-align: center; }
+.aviso-error { text-align: center; padding: 24px 8px; color: var(--rosa-osc); }
+.tarjeta {
+  background: #fff; border: 1px solid rgba(38, 36, 31, 0.08); border-radius: 18px;
+  padding: 16px; margin: 0 0 12px; box-shadow: 0 4px 16px rgba(38, 36, 31, 0.05);
+}
+.tarjeta h2 { margin: 0 0 4px; font-size: 1.35rem; }
+.btn-bloque { display: flex; width: 100%; margin: 0 0 10px; }
+.fila-botones { display: flex; gap: 8px; flex-wrap: wrap; }
+.fila-botones .btn { flex: 1 1 140px; }
+.buscador input {
+  width: 100%; min-height: 48px; padding: 10px 14px; border-radius: 14px;
+  border: 1px solid rgba(38, 36, 31, 0.15); background: #fff; font: inherit; font-size: 16px;
+}
+
+/* ---------- Ingresar ---------- */
+.login { max-width: 420px; margin: 16px auto; text-align: left; }
+.login-logo { display: block; margin: 0 auto 8px; border-radius: 16px; }
+.login h2 { text-align: center; }
+.login .modal-sub { text-align: center; }
+.login .btn-primary { margin-top: 8px; }
+
+/* ---------- Inicio ---------- */
+.saludo h2 { margin: 0; font-size: 1.6rem; }
+.saludo p { margin: 0 0 12px; color: var(--tinta-suave); }
+a.stat { text-decoration: none; color: inherit; display: block; }
+a.stat:active { background: #fff; }
+.accesos { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; margin: 4px 0 8px; }
+.acceso {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  min-height: 84px; padding: 10px; border-radius: 16px; background: #fff; border: 1px solid rgba(38, 36, 31, 0.08);
+  font-weight: 600; font-size: 0.9rem; color: var(--tinta); text-align: center;
+}
+.acceso svg { width: 28px; height: 28px; fill: none; stroke: var(--rosa); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- Listas de pedidos ---------- */
+.lista-ped, .lista-cli, .menu-mas, .lista-prod { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.fila-ped {
+  display: block; padding: 12px 14px; background: #fff; border-radius: 14px;
+  border: 1px solid rgba(38, 36, 31, 0.08); border-left: 5px solid var(--naranja); color: inherit;
+}
+.fila-ped:active { background: var(--crema-2); }
+.est-borde-confirmado { border-left-color: #4a90d9; }
+.est-borde-en_ruta { border-left-color: #a05bd0; }
+.est-borde-entregado { border-left-color: var(--verde); }
+.est-borde-cancelado { border-left-color: #b9b2a6; }
+.fila-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.chip-estado {
+  flex: 0 0 auto; padding: 3px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 700;
+  background: #fff3e6; color: #8a4a0f;
+}
+.est-confirmado { background: #e7f0fb; color: #1f5b9a; }
+.est-en_ruta { background: #f2e9fa; color: #6b3596; }
+.est-entregado { background: #eef6e4; color: var(--verde-osc); }
+.est-cancelado { background: #efede9; color: var(--tinta-suave); }
+
+/* ---------- Detalle de pedido ---------- */
+.ped-titulo { font-size: 1.3rem; margin: 0; }
+.botones-contacto { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.botones-contacto .btn { flex: 1 1 90px; min-height: 44px; padding: 8px 12px; font-size: 0.92rem; }
+.acciones-ped { display: grid; gap: 8px; margin: 0 0 12px; }
+.acciones-ped .btn { width: 100%; }
+.total-ped { margin: 10px 0; }
+.datos { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 8px 0 0; font-size: 0.92rem; }
+.datos dt { color: var(--tinta-suave); }
+.datos dd { margin: 0; }
+.historial { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 0.9rem; }
+
+/* ---------- Nuevo pedido ---------- */
+.lista-prod { gap: 6px; margin-top: 4px; }
+.prod {
+  display: grid; grid-template-columns: 64px 1fr; grid-template-areas: "img info" "img qty";
+  gap: 4px 12px; align-items: center; padding: 10px; background: #fff; border-radius: 14px;
+  border: 2px solid transparent;
+}
+.prod.elegido { border-color: var(--verde); background: #f8fcf3; }
+.prod picture { grid-area: img; display: block; }
+.prod img { width: 64px; height: 64px; object-fit: contain; border-radius: 10px; background: #f6fbf0; }
+.prod-info { grid-area: info; min-width: 0; display: flex; flex-direction: column; }
+.prod-info strong { font-size: 1rem; line-height: 1.2; }
+.prod-info span { font-size: 0.8rem; color: var(--tinta-suave); }
+.prod .hair-icons { display: inline-flex; gap: 3px; margin-top: 2px; }
+.prod .hair-icon { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font-size: 0.65rem; color: #fff; }
+.prod .qty { grid-area: qty; justify-self: start; }
+@media (min-width: 420px) {
+  .prod { grid-template-columns: 64px 1fr auto; grid-template-areas: "img info qty"; }
+  .prod .qty { justify-self: end; }
+}
+.barra-accion {
+  position: sticky; bottom: calc(68px + env(safe-area-inset-bottom)); z-index: 20;
+  display: flex; align-items: center; gap: 8px; margin: 12px -16px 0; padding: 10px 16px;
+  background: rgba(38, 36, 31, 0.97); color: #fff;
+}
+.barra-accion > div { flex: 1; min-width: 0; line-height: 1.2; }
+.barra-accion > div span { font-size: 0.82rem; opacity: 0.8; }
+.barra-accion .btn { min-height: 44px; padding: 8px 16px; }
+.barra-accion .btn-ghost { color: #fff; border-color: rgba(255, 255, 255, 0.5); }
+#fCliente .barra-accion > .btn-primary { flex: 1; }
+.resumen-carrito {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin: 0 0 14px; padding: 12px 14px;
+  background: #fff; border-radius: 14px; border: 1px solid rgba(38, 36, 31, 0.08); color: inherit;
+}
+.resumen-carrito span { grid-column: 1; font-size: 0.85rem; color: var(--tinta-suave); }
+.resumen-carrito em { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-style: normal; font-weight: 700; color: var(--rosa-osc); min-height: 44px; display: grid; place-items: center; }
+.listo h2 { font-size: 1.3rem; }
+
+/* ---------- Clientes ---------- */
+.buscador + .lista-cli { margin-top: 10px; }
+.lista-cli a {
+  display: flex; flex-direction: column; padding: 12px 14px; background: #fff; border-radius: 14px;
+  border: 1px solid rgba(38, 36, 31, 0.08); color: inherit; min-height: 56px;
+}
+.lista-cli span { font-size: 0.85rem; color: var(--tinta-suave); }
+
+/* ---------- Más ---------- */
+.perfil { display: flex; flex-direction: column; }
+.perfil span { color: var(--tinta-suave); font-size: 0.9rem; }
+.menu-mas { margin-bottom: 12px; }
+.menu-mas a { display: flex; flex-direction: column; padding: 14px; background: #fff; border-radius: 14px; border: 1px solid rgba(38, 36, 31, 0.08); color: inherit; }
+.menu-mas span { font-size: 0.85rem; color: var(--tinta-suave); }
+.usuarios-lista { margin-top: 4px; }
+
+/* ---------- Navegación inferior ---------- */
+.app-nav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  display: flex; justify-content: space-around;
+  padding: 4px max(4px, env(safe-area-inset-left)) max(4px, env(safe-area-inset-bottom)) max(4px, env(safe-area-inset-right));
+  background: #fff; border-top: 1px solid rgba(38, 36, 31, 0.1); box-shadow: 0 -4px 16px rgba(38, 36, 31, 0.06);
+}
+.app-nav a {
+  position: relative; flex: 1; max-width: 120px; min-height: 56px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font-size: 0.72rem; font-weight: 600; color: var(--tinta-suave); border-radius: 12px;
+}
+.app-nav svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.app-nav a.activa { color: var(--rosa-osc); }
+.app-nav a.activa svg { stroke-width: 2.4; }
+.app-nav .badge {
+  position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 999px; background: var(--rosa); color: #fff; font-size: 0.7rem; line-height: 18px; text-align: center;
+}
+
+@media (min-width: 900px) {
+  .app-main { padding-top: 24px; }
+  .barra-accion { margin: 12px 0 0; border-radius: 14px; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .fila-ped:hover, .lista-cli a:hover, .menu-mas a:hover, .acceso:hover { border-color: rgba(38, 36, 31, 0.25); }
+}
+
+/* Avisos: abajo, sobre la barra de navegación (no tapan el título) */
+body.app .toast { top: auto; bottom: calc(80px + env(safe-area-inset-bottom)); }
+body.app:not(.con-nav) .toast { bottom: calc(16px + env(safe-area-inset-bottom)); }
