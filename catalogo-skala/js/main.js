@@ -321,9 +321,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   /* Botones del pedido / modal */
-  /* "Armar pedido": primero se elige Cliente o Vendedor (js/vendedor.js) */
+  /* "Armar pedido": primero se elige Cliente o Vendedor (js/crm.js) */
   document.getElementById("btnArmarPedido").addEventListener("click", () => {
-    if (window.SkalaVendedor) window.SkalaVendedor.elegirModo();
+    if (window.SkalaCRM) window.SkalaCRM.elegirModo();
     else openModal();
   });
   document.getElementById("btnClose").addEventListener("click", closeModal);

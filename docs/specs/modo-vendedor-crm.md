@@ -1,59 +1,60 @@
-# Spec: Modo vendedor + mini CRM (Google Sheets)
+# Spec: CRM de pedidos con roles (Google Sheets)
 
-Estado: implementado (v1) · Fecha: 2026-10-25
+Estado: v2 implementado · Fecha: 2026-10-25
+Arquitectura: catálogo estático en Netlify + Google Sheets (en Drive) con Apps Script como API.
 
-## Objetivo
-El vendedor toma pedidos en la calle desde el catálogo web. Cada pedido queda
-registrado en Google Sheets (CRM simple) y se envía al grupo de WhatsApp de la empresa.
+## Roles
+| | Master | Administración | Vendedor | Despachador |
+|---|:-:|:-:|:-:|:-:|
+| Tomar pedidos | ✔ | ✔ | ✔ | — |
+| Ver pedidos | todos | todos | los suyos | los asignados (confirmado / en ruta / entregado) |
+| Confirmar + asignar despachador | ✔ | ✔ | — | — |
+| Marcar en ruta / entregado | ✔ | ✔ | — | ✔ (los suyos) |
+| Cancelar (con motivo) | ✔ | ✔ | los suyos en *pendiente* | — |
+| Reabrir (volver a pendiente) | ✔ | ✔ | — | — |
+| Buscar / editar clientes | ✔ | ✔ | ✔ | — (ve los datos dentro del pedido) |
+| Usuarios (crear, PIN, rol, activar) | ✔ | — | — | — |
+| Resumen | todo | todo | sus ventas | — |
 
-## Flujo
-1. Botón **"Armar pedido por WhatsApp"** → hoja con 2 opciones: **Cliente** / **Vendedor**.
-2. **Cliente** → flujo actual sin cambios (modal + wa.me al número de la empresa).
-3. **Vendedor**:
-   1. Si no hay sesión: elegir vendedor (lista desde la hoja `Vendedores`) + PIN de 4–6 dígitos.
-   2. Sesión de 12 h (token firmado HMAC, guardado en el teléfono). Botón "Salir".
-   3. Formulario del pedido: buscar cliente existente o crear uno nuevo
-      (nombre del cliente, negocio, RIF/cédula, dirección, teléfono 1, teléfono 2,
-      ubicación GPS con un toque), método de pago y nota.
-   4. **Guardar y enviar al grupo** → se guarda en Sheets → se abre el menú de compartir
-      del teléfono (o `wa.me/?text=`) para elegir el grupo de la empresa.
-   5. Si no hay señal, el pedido queda **pendiente de subir** en el teléfono y se reintenta.
-4. **Mis pedidos** (en el menú cuando hay sesión): lista por estado
-   (pendiente / entregado / cancelado), marcar **Entregado** o **Cancelado** (con motivo),
-   reenviar al grupo.
+El servidor valida el rol en **cada** acción (la interfaz solo oculta botones).
+El rol se lee de la hoja en cada llamada: un cambio de rol o desactivación aplica al instante.
 
-## Datos (Google Sheets, un archivo en Google Drive)
+## Estados del pedido
+`pendiente` → `confirmado` (admin asigna despachador) → `en_ruta` → `entregado`;
+`cancelado` desde cualquier estado no entregado (motivo obligatorio).
+Admin/Master pueden corregir (reabrir a pendiente, reasignar despachador).
+Cada cambio queda en la hoja `Historial` (fecha, pedido, usuario, acción, detalle).
+
+## Ingreso
+Botón **Ingresar** en la barra superior: **usuario + PIN** (4–6 números; Master 6).
+5 intentos fallidos → 10 min de bloqueo. Token HMAC de 12 h.
+"Armar pedido": sin sesión pregunta Cliente/Vendedor; con sesión de vendedor/admin/master
+va directo al formulario del pedido.
+
+## Hojas
 | Hoja | Columnas |
 |---|---|
-| `Vendedores` | id, nombre, pin_hash, activo |
-| `Clientes` | id, nombre, rif_cedula, direccion, latitud, longitud, telefono, updated_at, sync_status, deleted, contacto, telefono2, vendedor_id, created_at |
-| `Pedidos` | id, fecha, vendedor_id, vendedor, cliente_id, cliente, negocio, total_cajas, detalle_unidades, pago, nota, estado, estado_at, estado_por, motivo, client_ref, created_at, updated_at |
+| `Usuarios` | id, usuario, nombre, rol, pin_hash, activo, created_at |
+| `Clientes` | (10 de GPS_CLIENTES) id, nombre, rif_cedula, direccion, latitud, longitud, telefono, updated_at, sync_status, deleted + contacto, telefono2, vendedor_id, created_at |
+| `Pedidos` | id, fecha, vendedor_id, vendedor, cliente_id, cliente, negocio, total_cajas, detalle_unidades, pago, nota, estado, estado_at, estado_por, motivo, client_ref, created_at, updated_at, despachador_id, despachador, confirmado_por, confirmado_at, entregado_por, entregado_at |
 | `PedidoItems` | pedido_id, code, producto, cajas, unidades_caja, unidad, total_unidades |
+| `Historial` | fecha, pedido_id, usuario, accion, detalle |
 
-- **Compatibilidad con GPS_CLIENTES:** las primeras 10 columnas de `Clientes` son idénticas
-  a las de GPS_CLIENTES (`backend/Code.gs`). `nombre` = nombre del negocio (lo que se ve en
-  el mapa); `contacto` = nombre de la persona. GPS_CLIENTES solo escribe las 10 primeras
-  columnas, así que puede apuntar a esta misma hoja sin borrar los datos extra.
-- IDs de pedido: `SKL-AAMMDD-NNN` (correlativo diario, hora de Caracas).
-- `client_ref` (UUID generado en el teléfono) evita pedidos duplicados al reintentar.
+Migración: si existe la hoja `Vendedores` (v1), *Preparar hojas* copia sus filas a `Usuarios`
+como rol `vendedor` conservando id y PIN.
 
-## API (Apps Script Web App, POST JSON como `text/plain` para evitar preflight CORS)
-| action | entrada | salida |
+## API (POST JSON `text/plain`)
+| action | roles | entrada |
 |---|---|---|
-| `vendedores` | — | `[{id, nombre}]` activos |
-| `login` | vendedor_id, pin | token, vendedor |
-| `clientes` | token, q | hasta 20 clientes que coinciden (nombre, contacto, teléfono, RIF) |
-| `guardarPedido` | token, client_ref, cliente{…}, items[{code, producto, cajas, unidades_caja, unidad}], pago, nota | pedido (con id), cliente_id |
-| `pedidos` | token, estado?, dias? | pedidos del vendedor con items |
-| `estado` | token, pedido_id, estado (entregado/cancelado/pendiente), motivo? | pedido |
+| `login` | público | usuario, pin |
+| `yo` | todos | — |
+| `clientes` | M, A, V | q |
+| `guardarPedido` | M, A, V | client_ref, cliente{…}, items[], pago, nota |
+| `pedidos` | todos (filtrado por rol) | estados[]?, dias? |
+| `estado` | según tabla | pedido_id, estado, motivo?, despachador_id? |
+| `despachadores` | M, A | — |
+| `resumen` | M, A, V | dias |
+| `usuarios` / `guardarUsuario` | M | id?, usuario, nombre, rol, activo, pin? |
 
-## Seguridad (básica, a propósito)
-- PIN guardado como SHA-256 con sal (nunca en texto plano). Se asigna desde el menú
-  **Skala CRM → Asignar PIN** dentro de la hoja.
-- 5 intentos fallidos → bloqueo de 10 min por vendedor.
-- Token HMAC con secreto en *Script Properties*; vence a las 12 h.
-- Un vendedor solo ve y cambia sus propios pedidos.
-
-## Fuera de alcance (v1)
-Precios, inventario, roles de administrador, publicación automática en grupos de WhatsApp
-(no existe una vía oficial y gratuita; se usa el menú de compartir).
+## Fuera de alcance
+Precios, inventario, envío automático a grupos de WhatsApp (se usa el menú compartir).

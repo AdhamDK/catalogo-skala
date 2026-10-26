@@ -44,7 +44,7 @@ function fechaLegible(fecha) {
 /* Mensaje para el grupo de la empresa. */
 function mensajeGrupo(ped, c) {
   c = c || {};
-  const estado = ped.estado && ped.estado !== "pendiente" ? ` — ${String(ped.estado).toUpperCase()}` : "";
+  const estado = ped.estado && ped.estado !== "pendiente" ? ` — ${nombreEstado(ped.estado).toUpperCase()}` : "";
   const nombre = [...new Set([c.nombre, c.contacto].filter(Boolean))].join(" · ");
   const tels = [c.telefono, c.telefono2].filter(Boolean).join(" / ");
   const mapa = linkMapa(c.latitud, c.longitud);
@@ -71,6 +71,47 @@ function mensajeGrupo(ped, c) {
   return lineas.filter((l) => l !== null).join("\n");
 }
 
+/* -------------------- Roles (v2) --------------------
+   La interfaz usa esto para mostrar botones; el servidor (crm/Code.gs) vuelve a validar todo. */
+const NOMBRES_ESTADO = { pendiente: "Pendiente", confirmado: "Confirmado", en_ruta: "En ruta", entregado: "Entregado", cancelado: "Cancelado" };
+function nombreEstado(e) { return NOMBRES_ESTADO[e] || String(e || ""); }
+
+function puedeTomarPedidos(rol) { return rol === "master" || rol === "admin" || rol === "vendedor"; }
+
+function accionesPedido(rol, uid, p) {
+  const e = p.estado;
+  if (rol === "master" || rol === "admin") {
+    if (e === "pendiente") return ["confirmar", "cancelar"];
+    if (e === "confirmado") return ["en_ruta", "reasignar", "cancelar"];
+    if (e === "en_ruta") return ["entregado", "reasignar", "cancelar"];
+    return ["reabrir"];
+  }
+  if (rol === "vendedor") return e === "pendiente" && String(p.vendedor_id) === String(uid) ? ["cancelar"] : [];
+  if (rol === "despachador" && String(p.despachador_id) === String(uid)) {
+    if (e === "confirmado") return ["en_ruta", "entregado"];
+    if (e === "en_ruta") return ["entregado"];
+  }
+  return [];
+}
+
+function pestanasPanel(rol) {
+  if (rol === "despachador") {
+    return [
+      { id: "curso", nombre: "Por entregar", estados: ["confirmado", "en_ruta"] },
+      { id: "entregado", nombre: "Entregados", estados: ["entregado"] },
+    ];
+  }
+  const tabs = [
+    { id: "pendiente", nombre: rol === "vendedor" ? "Pendientes" : "Por confirmar", estados: ["pendiente"] },
+    { id: "curso", nombre: "En curso", estados: ["confirmado", "en_ruta"] },
+    { id: "entregado", nombre: "Entregados", estados: ["entregado"] },
+    { id: "cancelado", nombre: "Cancelados", estados: ["cancelado"] },
+    { id: "resumen", nombre: "Resumen" },
+  ];
+  if (rol === "master") tabs.push({ id: "usuarios", nombre: "Usuarios" });
+  return tabs;
+}
+
 function validarCliente(c) {
   const faltan = [];
   if (!String(c.negocio || c.nombre || c.contacto || "").trim()) faltan.push("Nombre del cliente o del negocio");
@@ -92,5 +133,6 @@ function nuevoRef() {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { itemsDePedido, telefonoWhatsapp, linkMapa, fechaLegible, mensajeGrupo, validarCliente, expiracionToken, nuevoRef };
+  module.exports = { itemsDePedido, telefonoWhatsapp, linkMapa, fechaLegible, mensajeGrupo, validarCliente, expiracionToken, nuevoRef,
+    nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel };
 }

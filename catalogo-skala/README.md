@@ -113,19 +113,21 @@ El CSS parte del teléfono y agrega pantallas grandes con `@media (min-width: 56
 - Si agregás un producto: poné `assets/img/CODIGO.png` y generá `web/CODIGO-400.webp` y
   `web/CODIGO-800.webp` (si faltan, se usa el PNG).
 
-## Modo vendedor (CRM en Google Sheets)
+## CRM de pedidos con roles (Google Sheets)
 
-Al tocar **Armar pedido por WhatsApp** se elige **Cliente** (flujo de siempre) o **Vendedor**.
-El vendedor entra con su PIN, carga el cliente (con GPS), guarda el pedido en Google Sheets y
-lo envía al grupo de WhatsApp. En **Mis pedidos** los marca como entregados o cancelados.
+Botón **Ingresar** (usuario + PIN) en la barra superior. Roles:
+**Master** (todo + usuarios + resumen) · **Administración** (confirma pedidos y asigna
+despachador) · **Vendedor** (toma pedidos en la calle con GPS y los envía al grupo de
+WhatsApp) · **Despachador** (sus entregas: en ruta → entregado, con llamar y mapa).
+Estados: pendiente → confirmado → en ruta → entregado (o cancelado, con motivo).
 Sin señal, el pedido queda en el teléfono y se sube solo después.
 
-- Instalación de la hoja y la API: `crm/INSTALAR.md` (en la raíz del repo, no se publica).
-- Configurar la URL en `js/vendedor.js` → `CRM_API_URL`.
+- Instalación de la hoja y la API: `crm/INSTALAR.md` (raíz del repo, no se publica).
+- Configurar la URL en `js/crm.js` → `CRM_API_URL`.
 - Spec: `docs/specs/modo-vendedor-crm.md`.
 
 ## Tests
 
 - Unitarios (sin dependencias): `node --test tests/producto.test.js tests/crm-core.test.js ../crm/tests/code.test.js`
 - En navegador (requiere Playwright): `node tests/e2e.js` — prueba 320, 360, 390, 768 y 1280 px.
-- Modo vendedor de punta a punta (backend simulado): `node tests/e2e-vendedor.js`
+- CRM con los 4 roles de punta a punta (backend simulado): `node tests/e2e-crm.js`

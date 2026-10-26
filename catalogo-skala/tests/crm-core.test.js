@@ -93,3 +93,48 @@ test("nuevoRef genera ids únicos", () => {
   assert.match(a, /^[0-9a-f-]{20,}$/);
   assert.notEqual(a, b);
 });
+
+/* ---------- v2: roles ---------- */
+const P = (estado, extra = {}) => ({ id: "SKL-1", estado, vendedor_id: "U3", despachador_id: "U5", ...extra });
+
+test("acciones de gestión (master/admin) según estado", () => {
+  for (const rol of ["master", "admin"]) {
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("pendiente")), ["confirmar", "cancelar"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("confirmado")), ["en_ruta", "reasignar", "cancelar"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("en_ruta")), ["entregado", "reasignar", "cancelar"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("entregado")), ["reabrir"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("cancelado")), ["reabrir"]);
+  }
+});
+
+test("vendedor: solo cancelar sus pedidos pendientes", () => {
+  assert.deepEqual(core.accionesPedido("vendedor", "U3", P("pendiente")), ["cancelar"]);
+  assert.deepEqual(core.accionesPedido("vendedor", "U4", P("pendiente")), []);
+  assert.deepEqual(core.accionesPedido("vendedor", "U3", P("confirmado")), []);
+});
+
+test("despachador: en ruta / entregado solo en los asignados", () => {
+  assert.deepEqual(core.accionesPedido("despachador", "U5", P("confirmado")), ["en_ruta", "entregado"]);
+  assert.deepEqual(core.accionesPedido("despachador", "U5", P("en_ruta")), ["entregado"]);
+  assert.deepEqual(core.accionesPedido("despachador", "U6", P("en_ruta")), []);
+  assert.deepEqual(core.accionesPedido("despachador", "U5", P("entregado")), []);
+});
+
+test("pestañas del panel por rol", () => {
+  const ids = (rol) => core.pestanasPanel(rol).map((t) => t.id);
+  assert.deepEqual(ids("vendedor"), ["pendiente", "curso", "entregado", "cancelado", "resumen"]);
+  assert.deepEqual(ids("admin"), ["pendiente", "curso", "entregado", "cancelado", "resumen"]);
+  assert.deepEqual(ids("master"), ["pendiente", "curso", "entregado", "cancelado", "resumen", "usuarios"]);
+  assert.deepEqual(ids("despachador"), ["curso", "entregado"]);
+  assert.equal(core.pestanasPanel("admin")[0].nombre, "Por confirmar");
+  assert.equal(core.pestanasPanel("despachador")[0].nombre, "Por entregar");
+  assert.deepEqual(core.pestanasPanel("admin")[1].estados, ["confirmado", "en_ruta"]);
+});
+
+test("puedeTomarPedidos y nombre de estado", () => {
+  assert.equal(core.puedeTomarPedidos("vendedor"), true);
+  assert.equal(core.puedeTomarPedidos("master"), true);
+  assert.equal(core.puedeTomarPedidos("despachador"), false);
+  assert.equal(core.nombreEstado("en_ruta"), "En ruta");
+  assert.match(core.mensajeGrupo({ ...PEDIDO, estado: "en_ruta" }, CLIENTE), /^\*PEDIDO SKL-261025-007 — EN RUTA\*/);
+});
