@@ -42,6 +42,12 @@
       if (e.target.id === "modoModal" || e.target.closest("[data-cerrar]")) cerrarModo();
     });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("modoModal").hidden) cerrarModo(); });
+
+    /* Tema claro / oscuro (pie de página) */
+    const btnTema = $("btnTema");
+    const pintarTema = () => { btnTema.textContent = SkalaTema.actual() === "oscuro" ? "Tema claro" : "Tema oscuro"; };
+    btnTema.addEventListener("click", () => { SkalaTema.fijar(SkalaTema.actual() === "oscuro" ? "claro" : "oscuro"); pintarTema(); });
+    pintarTema();
   });
 
   window.SkalaCRM = { elegirModo };

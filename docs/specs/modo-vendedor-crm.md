@@ -20,8 +20,11 @@ El servidor valida el rol en **cada** acción (la interfaz solo oculta botones).
 El rol se lee de la hoja en cada llamada: un cambio de rol o desactivación aplica al instante.
 
 ## Estados del pedido
-`pendiente` → `confirmado` (admin asigna despachador) → `en_ruta` → `entregado`;
-`cancelado` desde cualquier estado no entregado (motivo obligatorio).
+Clave interna (hoja) → nombre que ve el equipo:
+`pendiente` **En proceso** (enviado, espera aprobación de Administración) →
+`confirmado` **Aprobado · Preparando despacho** (Administración aprueba y asigna despachador) →
+`en_ruta` **En ruta** → `entregado` **Entregado**;
+`cancelado` **Anulado** desde cualquier estado no entregado (motivo obligatorio).
 Admin/Master pueden corregir (reabrir a pendiente, reasignar despachador).
 Cada cambio queda en la hoja `Historial` (fecha, pedido, usuario, acción, detalle).
 
@@ -29,7 +32,10 @@ Cada cambio queda en la hoja `Historial` (fecha, pedido, usuario, acción, detal
 `panel.html`: app instalable (manifest + service worker) con páginas por hash y barra inferior:
 Inicio · Nuevo (lista rápida de productos → datos del cliente → listo) · Pedidos (+ detalle con
 historial y acciones) · Clientes (+ ficha con historial) · Más (Resumen, Usuarios, catálogo, salir).
-Despachador: Inicio · Entregas · Más. El catálogo comparte el carrito (`skala_pedido_v1`) y solo
+Despachador: Inicio · Entregas · Más.
+Clientes: botón **Añadir cliente** (sin pedido, para traspasar la base): teléfono opcional,
+ubicación pegada (coordenadas o enlace largo de Google Maps) o GPS actual; "Guardar y añadir otro".
+Tema claro / oscuro / automático (Más → Tema; en el catálogo, pie de página). `js/tema.js`. El catálogo comparte el carrito (`skala_pedido_v1`) y solo
 lleva al panel.
 
 ## Ingreso
@@ -58,6 +64,7 @@ como rol `vendedor` conservando id y PIN.
 | `login` | público | usuario, clave |
 | `yo` | todos | — |
 | `clientes` | M, A, V | q, limite? |
+| `guardarCliente` | M, A, V | cliente{id?, negocio, contacto, rif_cedula, telefono?, telefono2, direccion, latitud, longitud} — alta/edición sin pedido; no duplica (teléfono, RIF o mismo nombre) |
 | `guardarPedido` | M, A, V | client_ref, cliente{…}, items[], pago, nota |
 | `pedidos` | todos (filtrado por rol) | estados[]?, dias?, cliente_id? |
 | `pedido` | todos (si lo puede ver) | pedido_id → pedido + items + cliente + historial |

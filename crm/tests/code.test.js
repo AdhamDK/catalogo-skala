@@ -394,3 +394,38 @@ test("pedidos de un cliente (ficha) y límite en la lista de clientes", () => {
   assert.equal(g.post({ action: "clientes", token: ta, q: "", limite: 1 }).clientes.length, 1);
   assert.equal(g.post({ action: "clientes", token: ta, q: "", limite: 100 }).clientes.length, 2);
 });
+
+test("añadir cliente sin pedido: teléfono opcional, sin duplicar, editar", () => {
+  const g = preparar();
+  const t = login(g);
+  const a = g.post({ action: "guardarCliente", token: t, cliente: { negocio: "Salón Luz", contacto: "Luz", direccion: "El Vigía", latitud: "8.6", longitud: "-71.6" } });
+  assert.equal(a.ok, true, JSON.stringify(a));
+  assert.equal(a.existia, false);
+  assert.equal(g.tabla("Pedidos").length, 0);
+  // mismo negocio sin teléfono ni RIF -> no duplica
+  const b = g.post({ action: "guardarCliente", token: t, cliente: { negocio: "salón luz", telefono2: "0275-1111111" } });
+  assert.equal(b.existia, true);
+  assert.equal(g.tabla("Clientes").length, 1);
+  assert.equal(g.tabla("Clientes")[0].contacto, "Luz");
+  // con teléfono que ya existe -> es el mismo
+  g.post({ action: "guardarCliente", token: t, cliente: { negocio: "Bella", telefono: "0412-1234567" } });
+  assert.equal(g.post({ action: "guardarCliente", token: t, cliente: { negocio: "Bella SA", telefono: "04121234567" } }).existia, true);
+  assert.equal(g.tabla("Clientes").length, 2);
+  // validaciones
+  assert.equal(g.post({ action: "guardarCliente", token: t, cliente: { contacto: "" } }).code, "cliente");
+  assert.equal(g.post({ action: "guardarCliente", token: t, cliente: { negocio: "X", telefono: "123" } }).code, "cliente");
+  assert.equal(g.post({ action: "guardarCliente", token: t, cliente: { id: "no-existe", negocio: "X" } }).code, "not_found");
+  // editar: puede vaciar campos (tel 2) y mantiene el id
+  const id = a.cliente.id;
+  const e = g.post({ action: "guardarCliente", token: t, cliente: { id, negocio: "Salón Luz", contacto: "Luz M.", telefono2: "", direccion: "Nueva", latitud: 8.6, longitud: -71.6 } });
+  assert.equal(e.cliente.id, id);
+  assert.equal(e.cliente.telefono2, "");
+  assert.equal(e.cliente.contacto, "Luz M.");
+  // despachador no puede
+  assert.equal(g.post({ action: "guardarCliente", token: login(g, "luis", "Luis5555"), cliente: { negocio: "Y" } }).code, "forbidden");
+});
+
+test("un pedido sigue exigiendo teléfono del cliente", () => {
+  const g = preparar();
+  assert.equal(pedir(g, login(g), { cliente: { negocio: "Sin tel" } }).code, "cliente");
+});

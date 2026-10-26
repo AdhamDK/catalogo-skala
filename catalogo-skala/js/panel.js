@@ -244,17 +244,17 @@
     let tiles;
     let destacados = [];
     if (r === "despachador") {
-      tiles = tile(c.confirmado, "por salir", "#/entregas") + tile(c.en_ruta, "en ruta", "#/entregas");
+      tiles = tile(c.confirmado, "preparando despacho", "#/entregas") + tile(c.en_ruta, "en ruta", "#/entregas");
       destacados = abiertos.pedidos;
       $("iListaTit").textContent = destacados.length ? "Para entregar" : "";
     } else {
       const hoy = await api("resumen", { dias: 1 });
       if (!vigente()) return;
       tiles = tile(hoy.total_pedidos, "pedidos hoy", "#/pedidos") + tile(hoy.total_cajas, "cajas hoy", "#/resumen") +
-        tile(c.pendiente, r === "vendedor" ? "pendientes" : "por confirmar", "#/pedidos?tab=pendiente") +
-        tile(c.confirmado + c.en_ruta, "en curso", "#/pedidos?tab=curso");
+        tile(c.pendiente, r === "vendedor" ? "en proceso" : "por aprobar", "#/pedidos?tab=pendiente") +
+        tile(c.confirmado + c.en_ruta, "en despacho", "#/pedidos?tab=curso");
       destacados = abiertos.pedidos.filter((p) => p.estado === "pendiente").slice(0, 5);
-      $("iListaTit").textContent = destacados.length ? (r === "vendedor" ? "Tus pendientes" : "Por confirmar") : "";
+      $("iListaTit").textContent = destacados.length ? (r === "vendedor" ? "Tus pedidos en proceso" : "Por aprobar") : "";
     }
     $("iStats").innerHTML = tiles;
     $("iLista").innerHTML = destacados.map(filaPedido).join("");
@@ -533,7 +533,7 @@
   }
 
   /* ---------- Detalle de pedido ---------- */
-  const ETIQUETAS = { confirmar: "Confirmar", en_ruta: "Salió en ruta", entregado: "Entregado", reasignar: "Cambiar despachador", cancelar: "Cancelar pedido", reabrir: "Reabrir (pendiente)" };
+  const ETIQUETAS = { confirmar: "Aprobar", en_ruta: "Salió en ruta", entregado: "Entregado", reasignar: "Cambiar despachador", cancelar: "Anular pedido", reabrir: "Volver a En proceso" };
   async function vPedido(v, id, _q, vigente) {
     const { pedido: p } = await api("pedido", { pedido_id: id });
     if (!vigente()) return;
@@ -574,7 +574,7 @@
       </section>
       <button type="button" class="btn btn-ghost btn-bloque" id="btnReenviar">Reenviar al grupo de WhatsApp</button>
       ${p.historial && p.historial.length ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3><ol class="historial">${p.historial.map((h) =>
-        `<li><strong>${esc({ creado: "Creado", reasignado: "Despachador cambiado", pendiente: "Reabierto" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
+        `<li><strong>${esc({ creado: "Enviado (en proceso)", reasignado: "Despachador cambiado", pendiente: "Vuelto a En proceso", confirmado: "Aprobado" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
 
     $("btnReenviar").addEventListener("click", () => enviarAlGrupo(mensajeGrupo(p, c)));
     v.querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", () => accionPedido(p, b.dataset.acc)));
@@ -586,11 +586,11 @@
       const { despachadores } = await api("despachadores");
       if (!despachadores.length) return toast("No hay despachadores activos. Crealos en Más → Usuarios.");
       const r = await hoja({
-        titulo: acc === "confirmar" ? `Confirmar ${p.id}` : "Cambiar despachador",
-        cuerpo: `<p class="modal-sub">${esc(p.negocio)} · ${p.total_cajas} caja(s)</p>
-          <label class="field field-full"><span>Despachador</span><select name="despachador_id" id="hDesp"><option value="">Elegí quién lo lleva</option>${despachadores.map((d) =>
+        titulo: acc === "confirmar" ? `Aprobar ${p.id}` : "Cambiar despachador",
+        cuerpo: `<p class="modal-sub">${esc(p.negocio)} · ${p.total_cajas} caja(s)${acc === "confirmar" ? " · pasa a <strong>Aprobado · Preparando despacho</strong>" : ""}</p>
+          <label class="field field-full"><span>¿Quién lo despacha?</span><select name="despachador_id" id="hDesp"><option value="">Elegí quién lo lleva</option>${despachadores.map((d) =>
             `<option value="${esc(d.id)}"${d.id === p.despachador_id ? " selected" : ""}>${esc(d.nombre)}</option>`).join("")}</select></label>`,
-        ok: acc === "confirmar" ? "Confirmar" : "Guardar",
+        ok: acc === "confirmar" ? "Aprobar" : "Guardar",
         validar: (d) => (d.despachador_id ? "" : "Elegí un despachador."),
       });
       if (!r) return;
@@ -598,18 +598,18 @@
       extra.despachador_id = r.despachador_id;
     } else if (acc === "cancelar") {
       const r = await hoja({
-        titulo: `Cancelar ${p.id}`,
-        cuerpo: '<label class="field field-full"><span>Motivo</span><textarea name="motivo" rows="3" maxlength="200" placeholder="Ej. el cliente cerró el local"></textarea></label>',
-        ok: "Cancelar pedido",
+        titulo: `Anular ${p.id}`,
+        cuerpo: '<label class="field field-full"><span>Motivo de la anulación</span><textarea name="motivo" rows="3" maxlength="200" placeholder="Ej. sin stock, cliente no confirmó el pago"></textarea></label>',
+        ok: "Anular pedido",
         validar: (d) => (d.motivo.trim() ? "" : "Escribí el motivo."),
       });
       if (!r) return;
       estado = "cancelado"; extra.motivo = r.motivo.trim();
     } else if (acc === "entregado" || acc === "reabrir") {
       const r = await hoja({
-        titulo: acc === "entregado" ? `¿Marcar ${p.id} como entregado?` : `¿Volver ${p.id} a pendiente?`,
-        cuerpo: `<p class="modal-sub">${acc === "entregado" ? "Confirmá que el cliente recibió el pedido." : "Se quita el despachador y vuelve a Por confirmar."}</p>`,
-        ok: acc === "entregado" ? "Sí, entregado" : "Reabrir",
+        titulo: acc === "entregado" ? `¿Marcar ${p.id} como entregado?` : `¿Volver ${p.id} a En proceso?`,
+        cuerpo: `<p class="modal-sub">${acc === "entregado" ? "Confirmá que el cliente recibió el pedido." : "Se quita el despachador y vuelve a Por aprobar."}</p>`,
+        ok: acc === "entregado" ? "Sí, entregado" : "Volver a En proceso",
       });
       if (!r) return;
       estado = acc === "entregado" ? "entregado" : "pendiente";
@@ -627,13 +627,16 @@
   let cacheClientes = [];
   async function vClientes(v, _p, _q, vigente) {
     v.innerHTML = `
+      <a class="btn btn-primary btn-bloque" href="#/cliente/nuevo" id="btnAnadirCliente">Añadir cliente</a>
       <div class="buscador"><input type="search" id="kBuscar" placeholder="Buscar por nombre, negocio o teléfono" autocomplete="off" enterkeyhint="search" /></div>
+      <p class="modal-sub" id="kInfo"></p>
       <ul class="lista-cli" id="kLista"><li class="cargando">Cargando…</li></ul>`;
     let t = null;
     const cargar = async (q) => {
       const r = await api("clientes", { q, limite: 100 });
       if (!vigente() || q !== $("kBuscar").value.trim()) return;
       cacheClientes = r.clientes;
+      $("kInfo").textContent = r.clientes.length ? (q ? `${r.clientes.length} resultado(s)` : `${r.clientes.length} cliente(s) · los más recientes primero`) : "";
       $("kLista").innerHTML = r.clientes.length ? r.clientes.map((c) => `<li><a href="#/cliente/${encodeURIComponent(c.id)}">
           <strong>${esc(c.nombre)}</strong><span>${esc([c.contacto, c.telefono].filter(Boolean).join(" · "))}</span>
           ${c.direccion ? `<span>${esc(c.direccion)}</span>` : ""}</a></li>`).join("")
@@ -643,11 +646,13 @@
     await cargar("");
   }
 
-  async function vCliente(v, id, _q, vigente) {
+  async function vCliente(v, id, query, vigente) {
+    if (id === "nuevo") return vClienteForm(v, null);
     let c = cacheClientes.find((x) => x.id === id);
     if (!c) { c = (await api("clientes", { q: "", limite: 200 })).clientes.find((x) => x.id === id); }
     if (!vigente()) return;
     if (!c) { v.innerHTML = '<p class="vacio-panel">Cliente no encontrado.</p>'; return; }
+    if (query.get("editar")) return vClienteForm(v, c);
     $("appTitulo").textContent = c.nombre;
     const tel = telLink(c.telefono), tel2 = telLink(c.telefono2), wa = telefonoWhatsapp(c.telefono), mapa = linkMapa(c.latitud, c.longitud);
     v.innerHTML = `
@@ -667,6 +672,7 @@
           ${mapa ? `<a class="btn btn-ghost" href="${esc(mapa)}" target="_blank" rel="noopener">Mapa</a>` : ""}
         </div>
         <button type="button" class="btn btn-primary btn-bloque" id="btnPedirCliente">Nuevo pedido para este cliente</button>
+        <a class="btn btn-ghost btn-bloque" href="#/cliente/${encodeURIComponent(c.id)}?editar=1" id="btnEditarCliente">Editar datos</a>
       </section>
       <h3 class="sub-titulo">Pedidos</h3>
       <ul class="lista-ped" id="kPedidos"><li class="cargando">Cargando…</li></ul>`;
@@ -677,6 +683,95 @@
     const r = await api("pedidos", { cliente_id: c.id });
     if (!vigente()) return;
     $("kPedidos").innerHTML = r.pedidos.length ? r.pedidos.map(filaPedido).join("") : '<li class="vacio-panel">Todavía no tiene pedidos.</li>';
+  }
+
+  /* ---------- Añadir / editar cliente (sin pedido: traspaso de la base) ---------- */
+  function vClienteForm(v, c) {
+    const nuevo = !c;
+    $("appTitulo").textContent = nuevo ? "Añadir cliente" : "Editar cliente";
+    $("btnAtras").hidden = false;
+    $("btnAtras").dataset.destino = nuevo ? "#/clientes" : `#/cliente/${encodeURIComponent(c.id)}`;
+    const val = (k) => esc(c ? (k === "negocio" ? c.nombre : c[k]) ?? "" : "");
+    v.innerHTML = `<form class="tarjeta" id="fNuevoCli" novalidate>
+      ${nuevo ? '<p class="modal-sub">Para pasar tu base de clientes: no hace falta que tenga pedidos. Solo el nombre es obligatorio.</p>' : ""}
+      <div class="form-grid">
+        <label class="field"><span>Nombre del negocio</span><input id="fnNegocio" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Peluquería / tienda" value="${val("negocio")}" /></label>
+        <label class="field"><span>Nombre del cliente</span><input id="fnContacto" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Persona de contacto" value="${val("contacto")}" /></label>
+        <label class="field"><span>RIF / Cédula</span><input id="fnRif" type="text" autocomplete="off" autocapitalize="characters" enterkeyhint="next" placeholder="J-12345678-9" value="${val("rif_cedula")}" /></label>
+        <label class="field"><span>Teléfono 1</span><input id="fnTel1" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="0412-1234567" value="${val("telefono")}" /></label>
+        <label class="field"><span>Teléfono 2</span><input id="fnTel2" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="Opcional" value="${val("telefono2")}" /></label>
+        <label class="field field-full"><span>Dirección</span><input id="fnDireccion" type="text" autocomplete="off" enterkeyhint="next" placeholder="Dirección" value="${val("direccion")}" /></label>
+      </div>
+      <fieldset class="pay ubicacion"><legend>Ubicación</legend>
+        <label class="field field-full"><span>Pegar enlace de Google Maps o coordenadas</span>
+          <input id="fnPegar" type="text" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="ej. 8.6123, -71.6543 o https://www.google.com/maps/…" /></label>
+        <button type="button" class="btn btn-ghost btn-bloque" id="fnGps">Usar mi ubicación actual (estoy con el cliente)</button>
+        <p class="gps-estado" id="fnGpsEstado"></p>
+        <input type="hidden" id="fnLat" value="${val("latitud")}" /><input type="hidden" id="fnLng" value="${val("longitud")}" />
+      </fieldset>
+      <p class="form-warn" id="fnError" hidden></p>
+      <div class="fila-botones">
+        ${nuevo ? '<button type="button" class="btn btn-ghost" id="fnOtro">Guardar y añadir otro</button>' : `<a class="btn btn-ghost" href="#/cliente/${encodeURIComponent(c.id)}">Cancelar</a>`}
+        <button type="submit" class="btn btn-primary" id="fnGuardar">Guardar cliente</button>
+      </div>
+    </form>`;
+    const pintarUbic = (msg) => {
+      const lat = $("fnLat").value, lng = $("fnLng").value;
+      $("fnGpsEstado").innerHTML = msg ? esc(msg) : lat && lng
+        ? `Ubicación lista (${esc(lat)}, ${esc(lng)}) · <a href="${esc(linkMapa(lat, lng))}" target="_blank" rel="noopener">ver mapa</a> · <button type="button" class="link-btn" id="fnQuitar">Quitar</button>`
+        : "Sin ubicación (se puede agregar después).";
+    };
+    pintarUbic();
+    $("fnPegar").addEventListener("input", () => {
+      const t = $("fnPegar").value.trim();
+      if (!t) return pintarUbic();
+      const co = coordsDeTexto(t);
+      if (co) { $("fnLat").value = co.lat; $("fnLng").value = co.lng; pintarUbic(); }
+      else pintarUbic(/goo\.gl|maps\.app/.test(t)
+        ? "Ese enlace corto no trae las coordenadas: abrilo, mantené presionado el punto en el mapa y copiá los números (ej. 8.6123, -71.6543)."
+        : "No reconozco esa ubicación. Pegá coordenadas (8.6123, -71.6543) o un enlace largo de Google Maps.");
+    });
+    $("fnGpsEstado").addEventListener("click", (e) => {
+      if (e.target.id === "fnQuitar") { $("fnLat").value = ""; $("fnLng").value = ""; $("fnPegar").value = ""; pintarUbic(); }
+    });
+    $("fnGps").addEventListener("click", () => {
+      if (!navigator.geolocation) return toast("Este teléfono no permite GPS en el navegador.");
+      const b = $("fnGps");
+      b.disabled = true; b.textContent = "Buscando GPS…";
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { $("fnLat").value = pos.coords.latitude.toFixed(6); $("fnLng").value = pos.coords.longitude.toFixed(6); b.disabled = false; b.textContent = "Usar mi ubicación actual (estoy con el cliente)"; pintarUbic(); },
+        (err) => { b.disabled = false; b.textContent = "Usar mi ubicación actual (estoy con el cliente)"; toast(err.code === 1 ? "Permiso de ubicación negado." : "No se pudo obtener el GPS."); },
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
+    });
+    const guardar = async (otro) => {
+      const cliente = {
+        id: c ? c.id : undefined, negocio: $("fnNegocio").value.trim(), contacto: $("fnContacto").value.trim(),
+        rif_cedula: $("fnRif").value.trim(), telefono: $("fnTel1").value.trim(), telefono2: $("fnTel2").value.trim(),
+        direccion: $("fnDireccion").value.trim(), latitud: $("fnLat").value, longitud: $("fnLng").value,
+      };
+      const faltan = validarCliente(cliente, { telefonoOpcional: true });
+      const err = $("fnError");
+      if (faltan.length) { err.textContent = "Falta: " + faltan.join(" · "); err.hidden = false; return; }
+      err.hidden = true;
+      const btns = v.querySelectorAll("#fnGuardar, #fnOtro");
+      btns.forEach((b) => (b.disabled = true));
+      try {
+        const r = await api("guardarCliente", { cliente });
+        cacheClientes = [r.cliente, ...cacheClientes.filter((x) => x.id !== r.cliente.id)];
+        toast(r.existia ? `${r.cliente.nombre} ya existía: se actualizaron sus datos` : `Cliente ${r.cliente.nombre} guardado`);
+        if (otro) { render(); return; }
+        ir(`#/cliente/${encodeURIComponent(r.cliente.id)}`);
+      } catch (e) {
+        if (e.code === "auth") throw e;
+        err.textContent = e instanceof ErrorRed ? "Sin señal: el cliente no se guardó. Probá de nuevo con conexión." : e.message;
+        err.hidden = false;
+        btns.forEach((b) => (b.disabled = false));
+      }
+    };
+    $("fNuevoCli").addEventListener("submit", (e) => { e.preventDefault(); guardar(false); });
+    const otro = $("fnOtro");
+    if (otro) otro.addEventListener("click", () => guardar(true));
+    $("fnNegocio").focus();
   }
 
   /* ---------- Resumen ---------- */
@@ -696,10 +791,10 @@
       : '<p class="modal-sub">Sin datos en este período.</p>';
     v.innerHTML = chips +
       `<div class="stats">${tile(r.total_pedidos, "pedidos")}${tile(r.total_cajas, "cajas")}${tile(pe.entregado, "entregados")}${tile(pe.pendiente + pe.confirmado + pe.en_ruta, "en proceso")}</div>
-      <p class="modal-sub">Pendientes ${pe.pendiente} · Confirmados ${pe.confirmado} · En ruta ${pe.en_ruta} · Cancelados ${pe.cancelado}</p>` +
+      <p class="modal-sub">En proceso ${pe.pendiente} · Aprobados ${pe.confirmado} · En ruta ${pe.en_ruta} · Anulados ${pe.cancelado}</p>` +
       (r.por_vendedor.length ? `<section class="tarjeta"><h3 class="sub-titulo">Por vendedor</h3>${tabla(r.por_vendedor, [["Vendedor", "vendedor"], ["Pedidos", "pedidos"], ["Cajas", "cajas"]])}</section>` : "") +
       `<section class="tarjeta"><h3 class="sub-titulo">Productos más pedidos</h3>${tabla(r.por_producto, [["Producto", "producto"], ["Cajas", "cajas"]])}</section>
-      <p class="nota-chica">Los cancelados no suman cajas.</p>`;
+      <p class="nota-chica">Los anulados no suman cajas.</p>`;
     v.querySelector(".periodos").addEventListener("click", (e) => { const b = e.target.closest("[data-dias]"); if (b) { diasResumen = Number(b.dataset.dias); render(); } });
   }
 
@@ -778,7 +873,17 @@
       ${instalada ? "" : `<section class="tarjeta"><h3 class="sub-titulo">Instalar en el teléfono</h3>
         ${eventoInstalar ? '<button type="button" class="btn btn-primary btn-bloque" id="btnInstalar">Instalar app Skala Equipo</button>'
           : `<p class="modal-sub">${ios ? "En Safari: botón Compartir → <strong>Agregar a inicio</strong>." : "En Chrome: menú ⋮ → <strong>Instalar app</strong> o <strong>Agregar a pantalla principal</strong>."}</p>`}</section>`}
+      <section class="tarjeta"><h3 class="sub-titulo">Tema</h3>
+        <div class="selector-tema" role="group" aria-label="Tema de la app">${[["auto", "Automático"], ["claro", "Claro"], ["oscuro", "Oscuro"]].map(([k, t]) =>
+          `<button type="button" data-tema="${k}" aria-pressed="${SkalaTema.pref() === k}">${t}</button>`).join("")}</div>
+        <p class="nota-chica">Automático sigue el modo del teléfono.</p></section>
       <button type="button" class="btn btn-ghost btn-bloque" id="btnSalir">Cerrar sesión</button>`;
+    v.querySelector(".selector-tema").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-tema]");
+      if (!b) return;
+      SkalaTema.fijar(b.dataset.tema);
+      v.querySelectorAll(".selector-tema button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    });
     $("btnSalir").addEventListener("click", () => { SkalaAPI.cerrarSesion(); toast("Sesión cerrada"); ir("#/ingresar"); });
     const bi = $("btnInstalar");
     if (bi) bi.addEventListener("click", async () => { eventoInstalar.prompt(); await eventoInstalar.userChoice; eventoInstalar = null; render(); });

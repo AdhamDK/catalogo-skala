@@ -74,7 +74,7 @@ test("mensajeGrupo omite líneas vacías (sin RIF, tel2, GPS ni nota)", () => {
 });
 
 test("mensajeGrupo marca el estado si no está pendiente", () => {
-  assert.match(core.mensajeGrupo({ ...PEDIDO, estado: "cancelado", motivo: "Cerrado" }, CLIENTE), /^\*PEDIDO SKL-261025-007 — CANCELADO\*/);
+  assert.match(core.mensajeGrupo({ ...PEDIDO, estado: "cancelado", motivo: "Cerrado" }, CLIENTE), /^\*PEDIDO SKL-261025-007 — ANULADO\*/);
 });
 
 test("validarCliente exige nombre/negocio y teléfono válido", () => {
@@ -126,7 +126,9 @@ test("pestañas del panel por rol", () => {
   assert.deepEqual(ids("admin"), ["pendiente", "curso", "entregado", "cancelado", "resumen"]);
   assert.deepEqual(ids("master"), ["pendiente", "curso", "entregado", "cancelado", "resumen", "usuarios"]);
   assert.deepEqual(ids("despachador"), ["curso", "entregado"]);
-  assert.equal(core.pestanasPanel("admin")[0].nombre, "Por confirmar");
+  assert.equal(core.pestanasPanel("admin")[0].nombre, "Por aprobar");
+  assert.equal(core.pestanasPanel("vendedor")[0].nombre, "En proceso");
+  assert.equal(core.pestanasPanel("admin")[3].nombre, "Anulados");
   assert.equal(core.pestanasPanel("despachador")[0].nombre, "Por entregar");
   assert.deepEqual(core.pestanasPanel("admin")[1].estados, ["confirmado", "en_ruta"]);
 });
@@ -136,5 +138,29 @@ test("puedeTomarPedidos y nombre de estado", () => {
   assert.equal(core.puedeTomarPedidos("master"), true);
   assert.equal(core.puedeTomarPedidos("despachador"), false);
   assert.equal(core.nombreEstado("en_ruta"), "En ruta");
+  assert.equal(core.nombreEstado("pendiente"), "En proceso");
+  assert.equal(core.nombreEstado("confirmado"), "Aprobado · Preparando despacho");
+  assert.equal(core.nombreEstado("cancelado"), "Anulado");
   assert.match(core.mensajeGrupo({ ...PEDIDO, estado: "en_ruta" }, CLIENTE), /^\*PEDIDO SKL-261025-007 — EN RUTA\*/);
+});
+
+/* ---------- Ubicación pegada (traspaso de clientes) ---------- */
+test("coordsDeTexto entiende coordenadas y enlaces de Google Maps", () => {
+  const c = core.coordsDeTexto;
+  assert.deepEqual(c("8.612346, -71.654322"), { lat: 8.612346, lng: -71.654322 });
+  assert.deepEqual(c("8.6123,-71.6543"), { lat: 8.6123, lng: -71.6543 });
+  assert.deepEqual(c("https://maps.google.com/?q=8.61,-71.65"), { lat: 8.61, lng: -71.65 });
+  assert.deepEqual(c("https://www.google.com/maps/place/Bella/@8.6123456,-71.6543219,17z/data=x"), { lat: 8.612346, lng: -71.654322 });
+  assert.deepEqual(c("https://www.google.com/maps/place/x/data=!3d8.61!4d-71.65"), { lat: 8.61, lng: -71.65 });
+  assert.deepEqual(c("https://www.google.com/maps/search/?api=1&query=8.5,-71.2"), { lat: 8.5, lng: -71.2 });
+  assert.equal(c("https://maps.app.goo.gl/abc123"), null);   // enlace corto: no trae coordenadas
+  assert.equal(c("Av. Bolívar"), null);
+  assert.equal(c("200, 300"), null);                          // fuera de rango
+  assert.equal(c(""), null);
+});
+
+test("validarCliente para alta manual: teléfono opcional", () => {
+  assert.deepEqual(core.validarCliente({ negocio: "X" }, { telefonoOpcional: true }), []);
+  assert.deepEqual(core.validarCliente({ negocio: "X", telefono: "12" }, { telefonoOpcional: true }), ["Teléfono 1 (mínimo 7 números)"]);
+  assert.deepEqual(core.validarCliente({}, { telefonoOpcional: true }), ["Nombre del cliente o del negocio"]);
 });

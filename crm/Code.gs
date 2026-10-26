@@ -59,6 +59,7 @@ var ACCIONES = {
   login: [accionLogin_, null],
   yo: [accionYo_, ROLES],
   clientes: [accionClientes_, TOMAN_PEDIDOS],
+  guardarCliente: [accionGuardarCliente_, TOMAN_PEDIDOS],
   guardarPedido: [accionGuardarPedido_, TOMAN_PEDIDOS],
   pedidos: [accionPedidos_, ROLES],
   pedido: [accionPedido_, ROLES],
@@ -288,7 +289,10 @@ function numeroGps_(v, min, max) {
 }
 
 /* Crea o actualiza el cliente. Busca por id; si no, por teléfono o RIF. */
-function guardarCliente_(c, ses) {
+/* opciones: exigirTelefono (pedidos: sí; alta manual: no) · reemplazar (editar: también vacía campos) */
+function guardarCliente_(c, ses, opciones) {
+  opciones = opciones || {};
+  var exigirTelefono = opciones.exigirTelefono !== false;
   var datos = {
     nombre: txt_(c.negocio || c.nombre, 120),
     contacto: txt_(c.contacto, 120),
@@ -301,7 +305,8 @@ function guardarCliente_(c, ses) {
   };
   if (!datos.nombre && datos.contacto) datos.nombre = datos.contacto;
   if (!datos.nombre) throw new Error('Falta el nombre del cliente o del negocio.');
-  if (!datos.telefono) throw new Error('Falta el teléfono del cliente.');
+  if (exigirTelefono && !datos.telefono) throw new Error('Falta el teléfono del cliente.');
+  if (datos.telefono && soloDigitos_(datos.telefono).length < 7) throw new Error('El teléfono 1 debe tener al menos 7 números.');
 
   var todos = leer_('Clientes');
   var tel = soloDigitos_(datos.telefono);
@@ -310,22 +315,46 @@ function guardarCliente_(c, ses) {
   if (c.id) existente = todos.filter(function (x) { return String(x.id) === String(c.id); })[0];
   if (!existente && tel.length >= 7) existente = todos.filter(function (x) { return soloDigitos_(x.telefono) === tel; })[0];
   if (!existente && rif.length >= 6) existente = todos.filter(function (x) { return soloDigitos_(x.rif_cedula) === rif; })[0];
+  // Sin teléfono ni RIF: mismo nombre de negocio = mismo cliente (evita duplicar al traspasar)
+  if (!existente && tel.length < 7 && rif.length < 6) {
+    var n = datos.nombre.toLowerCase();
+    existente = todos.filter(function (x) { return String(x.nombre).trim().toLowerCase() === n && String(x.deleted) !== '1'; })[0];
+  }
 
   var t = ahora_();
   if (existente) {
     var actualizado = {};
     HOJAS.Clientes.forEach(function (k) { actualizado[k] = existente[k]; });
-    // Solo se pisan los campos que vienen con dato (no se borra lo que ya estaba)
-    Object.keys(datos).forEach(function (k) { if (datos[k] !== '') actualizado[k] = datos[k]; });
+    // Al editar se guarda todo lo del formulario; si no, solo se pisan los campos con dato
+    Object.keys(datos).forEach(function (k) { if (opciones.reemplazar || datos[k] !== '') actualizado[k] = datos[k]; });
     actualizado.updated_at = t;
     actualizado.sync_status = 1;
     actualizar_('Clientes', existente._fila, actualizado);
+    actualizado._existia = true;
     return actualizado;
   }
   var nuevo = { id: uuid_(), updated_at: t, created_at: t, sync_status: 1, deleted: 0, vendedor_id: ses.id };
   Object.keys(datos).forEach(function (k) { nuevo[k] = datos[k]; });
   agregar_('Clientes', nuevo);
   return nuevo;
+}
+
+/* Alta o edición de un cliente sin pedido (traspaso de la base de clientes) */
+function accionGuardarCliente_(p, ses) {
+  var c = p.cliente || {};
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    if (c.id && !leer_('Clientes').some(function (x) { return String(x.id) === String(c.id); })) {
+      return { ok: false, error: 'Cliente no encontrado.', code: 'not_found' };
+    }
+    var r;
+    try { r = guardarCliente_(c, ses, { exigirTelefono: false, reemplazar: !!c.id }); }
+    catch (err) { return { ok: false, error: err.message, code: 'cliente' }; }
+    return { ok: true, cliente: clientePublico_(r), existia: !!r._existia && !c.id };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /* -------------------- Acciones: pedidos -------------------- */
@@ -474,13 +503,13 @@ function reglaEstado_(ses, ped, nuevo) {
   var actual = String(ped.estado);
   if (actual === nuevo) return 'El pedido ya está en ese estado.';
   if (esGestion_(ses)) {
-    if (nuevo === 'confirmado' && actual !== 'pendiente' && actual !== 'en_ruta') return 'Solo se confirma un pedido pendiente.';
+    if (nuevo === 'confirmado' && actual !== 'pendiente' && actual !== 'en_ruta') return 'Solo se aprueba un pedido en proceso.';
     return '';
   }
   if (ses.rol === 'vendedor') {
     if (String(ped.vendedor_id) !== ses.id) return 'Este pedido es de otro vendedor.';
     if (nuevo === 'cancelado' && actual === 'pendiente') return '';
-    return 'Como vendedor solo podés cancelar tus pedidos pendientes.';
+    return 'Como vendedor solo podés anular tus pedidos en proceso.';
   }
   if (ses.rol === 'despachador') {
     if (String(ped.despachador_id) !== ses.id) return 'Este pedido no está asignado a vos.';
@@ -495,7 +524,7 @@ function accionEstado_(p, ses) {
   var nuevo = String(p.estado || '');
   if (ESTADOS.indexOf(nuevo) === -1) return { ok: false, error: 'Estado inválido.', code: 'estado' };
   var motivo = txt_(p.motivo, 200);
-  if (nuevo === 'cancelado' && !motivo) return { ok: false, error: 'Indicá el motivo de la cancelación.', code: 'motivo' };
+  if (nuevo === 'cancelado' && !motivo) return { ok: false, error: 'Indicá el motivo de la anulación.', code: 'motivo' };
 
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);

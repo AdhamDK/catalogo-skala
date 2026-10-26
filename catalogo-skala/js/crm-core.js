@@ -73,7 +73,8 @@ function mensajeGrupo(ped, c) {
 
 /* -------------------- Roles (v2) --------------------
    La interfaz usa esto para mostrar botones; el servidor (crm/Code.gs) vuelve a validar todo. */
-const NOMBRES_ESTADO = { pendiente: "Pendiente", confirmado: "Confirmado", en_ruta: "En ruta", entregado: "Entregado", cancelado: "Cancelado" };
+/* Nombres que ve el equipo (las claves internas no cambian: la hoja sigue compatible) */
+const NOMBRES_ESTADO = { pendiente: "En proceso", confirmado: "Aprobado · Preparando despacho", en_ruta: "En ruta", entregado: "Entregado", cancelado: "Anulado" };
 function nombreEstado(e) { return NOMBRES_ESTADO[e] || String(e || ""); }
 
 function puedeTomarPedidos(rol) { return rol === "master" || rol === "admin" || rol === "vendedor"; }
@@ -102,21 +103,44 @@ function pestanasPanel(rol) {
     ];
   }
   const tabs = [
-    { id: "pendiente", nombre: rol === "vendedor" ? "Pendientes" : "Por confirmar", estados: ["pendiente"] },
-    { id: "curso", nombre: "En curso", estados: ["confirmado", "en_ruta"] },
+    { id: "pendiente", nombre: rol === "vendedor" ? "En proceso" : "Por aprobar", estados: ["pendiente"] },
+    { id: "curso", nombre: "En despacho", estados: ["confirmado", "en_ruta"] },
     { id: "entregado", nombre: "Entregados", estados: ["entregado"] },
-    { id: "cancelado", nombre: "Cancelados", estados: ["cancelado"] },
+    { id: "cancelado", nombre: "Anulados", estados: ["cancelado"] },
     { id: "resumen", nombre: "Resumen" },
   ];
   if (rol === "master") tabs.push({ id: "usuarios", nombre: "Usuarios" });
   return tabs;
 }
 
-function validarCliente(c) {
+/* opciones.telefonoOpcional: alta manual de clientes (traspaso), el teléfono puede faltar */
+function validarCliente(c, opciones = {}) {
   const faltan = [];
   if (!String(c.negocio || c.nombre || c.contacto || "").trim()) faltan.push("Nombre del cliente o del negocio");
-  if (String(c.telefono || "").replace(/\D/g, "").length < 7) faltan.push("Teléfono 1 (mínimo 7 números)");
+  const digitos = String(c.telefono || "").replace(/\D/g, "").length;
+  if ((!opciones.telefonoOpcional || digitos > 0) && digitos < 7) faltan.push("Teléfono 1 (mínimo 7 números)");
   return faltan;
+}
+
+/* Ubicación pegada: "8.61, -71.65" o un enlace de Google Maps (@lat,lng · q=lat,lng · !3dlat!4dlng).
+   Los enlaces cortos (maps.app.goo.gl) no traen coordenadas: devuelve null. */
+function coordsDeTexto(texto) {
+  const t = String(texto || "").trim();
+  if (!t) return null;
+  const num = "(-?\\d{1,3}(?:\\.\\d+)?)";
+  const patrones = [
+    new RegExp("@" + num + "," + num),
+    new RegExp("!3d" + num + "!4d" + num),
+    new RegExp("[?&](?:q|query|ll|center)=" + num + ",\\s*" + num),
+    new RegExp("^" + num + "\\s*,\\s*" + num + "$"),
+  ];
+  for (const re of patrones) {
+    const m = t.match(re);
+    if (!m) continue;
+    const lat = Number(m[1]), lng = Number(m[2]);
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6 };
+  }
+  return null;
 }
 
 function expiracionToken(token) {
@@ -134,5 +158,5 @@ function nuevoRef() {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { itemsDePedido, telefonoWhatsapp, linkMapa, fechaLegible, mensajeGrupo, validarCliente, expiracionToken, nuevoRef,
-    nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel };
+    nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, coordsDeTexto };
 }

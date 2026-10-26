@@ -179,8 +179,9 @@ function servidor() {
   await page.click("#pLista .fila-ped");
   await esperarRuta("#/pedido/");
   assert.match(await titulo(), /^SKL-\d{6}-001$/);
-  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Cancelar pedido"]);
-  assert.match(await page.innerText(".historial"), /Creado · Óscar \(Vendedor\)/);
+  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Anular pedido"]);
+  assert.equal(await page.innerText(".chip-estado"), "En proceso");
+  assert.match(await page.innerText(".historial"), /Enviado \(en proceso\) · Óscar \(Vendedor\)/);
   await revisarDiseno("detalle");
   await page.click("#btnAtras");
   await esperarRuta("#/pedidos");
@@ -206,6 +207,46 @@ function servidor() {
   assert.match(await page.innerText("#cSel"), /Cliente existente/);
   ok("clientes: lista, ficha con historial y nuevo pedido con el cliente ya cargado");
 
+  /* ---------- Añadir cliente (traspaso de la base, sin pedido) ---------- */
+  await page.goto(BASE + "/panel.html#/clientes");
+  await esperarRuta("#/clientes");
+  await page.click("#btnAnadirCliente");
+  await esperarRuta("#/cliente/nuevo");
+  assert.equal(await titulo(), "Añadir cliente");
+  await page.click("#fnGuardar");
+  assert.match(await page.innerText("#fnError"), /Nombre del cliente o del negocio/);
+  await page.fill("#fnNegocio", "Salón Luz");
+  await page.fill("#fnContacto", "Luz Marina");
+  await page.fill("#fnPegar", "https://maps.app.goo.gl/xyz");
+  assert.match(await page.innerText("#fnGpsEstado"), /enlace corto/);
+  await page.fill("#fnPegar", "https://www.google.com/maps/place/Luz/@8.6201,-71.6502,17z");
+  assert.match(await page.innerText("#fnGpsEstado"), /Ubicación lista \(8\.6201, -71\.6502\)/);
+  await foto("06b-anadir-cliente");
+  await revisarDiseno("añadir cliente");
+  await page.click("#fnOtro");
+  await page.waitForFunction(() => document.getElementById("fnNegocio") && document.getElementById("fnNegocio").value === "");
+  await page.fill("#fnNegocio", "Barbería Max");
+  await page.fill("#fnTel1", "0416-5550000");
+  await page.click("#fnGuardar");
+  await esperarTitulo("Barbería Max");
+  await page.waitForSelector("#kPedidos .vacio-panel");
+  assert.match(await page.innerText("#kPedidos"), /Todavía no tiene pedidos/);
+  const luz = gas.tabla("Clientes").find((c) => c.nombre === "Salón Luz");
+  assert.equal(luz.latitud, 8.6201);
+  assert.equal(luz.telefono, "");
+  // editar: corregir dirección
+  await page.click("#btnEditarCliente");
+  await esperarTitulo("Editar cliente");
+  await page.fill("#fnDireccion", "Calle 5, El Vigía");
+  await page.click("#fnGuardar");
+  await page.waitForFunction(() => /Calle 5/.test(document.querySelector(".datos")?.textContent || ""));
+  assert.equal(gas.tabla("Clientes").length, 3);
+  ok("añadir cliente sin pedido (ubicación pegada, guardar y añadir otro) y editar");
+  // volver al pedido que quedó a medio armar (el carrito y el cliente siguen guardados)
+  await page.goto(BASE + "/panel.html#/nuevo/cliente");
+  await esperarRuta("#/nuevo/cliente");
+  assert.equal(await page.inputValue("#cNegocio"), "Peluquería Bella");
+
   /* ---------- Sin señal ---------- */
   sinSenal = true;
   await tocar("#btnGuardar");
@@ -227,7 +268,7 @@ function servidor() {
   assert.equal(await page.locator("#iLista .fila-ped").count(), 2);
   await page.locator("#iLista .fila-ped").last().click();
   await esperarRuta("#/pedido/");
-  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Confirmar", "Cancelar pedido"]);
+  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Aprobar", "Anular pedido"]);
   await page.click('[data-acc="confirmar"]');
   await page.waitForSelector("#hoja:not([hidden])");
   await page.click("#hojaOk");
@@ -235,10 +276,10 @@ function servidor() {
   await page.selectOption("#hDesp", { label: "Luis" });
   await foto("07-confirmar");
   await page.click("#hojaOk");
-  await page.waitForFunction(() => /Confirmado/.test(document.querySelector(".chip-estado")?.textContent || ""));
+  await page.waitForFunction(() => /Aprobado · Preparando despacho/.test(document.querySelector(".chip-estado")?.textContent || ""));
   assert.match(await page.innerText(".datos"), /Despachador\s+Luis/);
   assert.equal(gas.tabla("Pedidos")[0].estado, "confirmado");
-  ok("administración confirma y asigna despachador desde el detalle");
+  ok("administración aprueba (Aprobado · Preparando despacho) y asigna despachador");
   await salir();
 
   /* ---------- Despachador ---------- */
@@ -303,15 +344,62 @@ function servidor() {
   await esperarRuta("#/pedido/");
   await page.click('[data-acc="reabrir"]');
   await page.click("#hojaOk");
-  await page.waitForFunction(() => /Pendiente/.test(document.querySelector(".chip-estado")?.textContent || ""));
+  await page.waitForFunction(() => /En proceso/.test(document.querySelector(".chip-estado")?.textContent || ""));
   await page.click('[data-acc="cancelar"]');
   await page.click("#hojaOk");
   assert.match(await page.innerText("#hojaError"), /motivo/);
   await page.fill('#hoja textarea[name="motivo"]', "Cliente cerró el local");
   await page.click("#hojaOk");
-  await page.waitForFunction(() => /Cancelado/.test(document.querySelector(".chip-estado")?.textContent || ""));
-  assert.match(await page.innerText(".historial"), /Reabierto[\s\S]*Cancelado/);
-  ok("master: reabre y cancela con motivo; queda en el historial");
+  await page.waitForFunction(() => /Anulado/.test(document.querySelector(".chip-estado")?.textContent || ""));
+  assert.match(await page.innerText(".historial"), /Vuelto a En proceso[\s\S]*Anulado/);
+  ok("master: vuelve a En proceso y anula con motivo; queda en el historial");
+
+  /* ---------- Tema oscuro ---------- */
+  const contraste = () => page.evaluate(() => {
+    const rgb = (c) => (c.match(/[\d.]+/g) || []).map(Number);
+    const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+    const fondo = (el) => { for (let e = el; e; e = e.parentElement) { const c = rgb(getComputedStyle(e).backgroundColor); if (c.length === 3 || (c[3] ?? 1) > 0.5) return c.slice(0, 3); } return [255, 255, 255]; };
+    const malos = [];
+    document.querySelectorAll("#vista *, .app-bar *, .app-nav *").forEach((el) => {
+      if (!el.offsetParent || ![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) return;
+      const L1 = lum(rgb(getComputedStyle(el).color).slice(0, 3)), L2 = lum(fondo(el));
+      const r = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+      if (r < 4.5) malos.push(el.textContent.trim().slice(0, 25) + " " + r.toFixed(1));
+    });
+    return malos;
+  });
+  await page.goto(BASE + "/panel.html#/mas");
+  await esperarRuta("#/mas");
+  await page.click('.selector-tema [data-tema="oscuro"]');
+  assert.equal(await page.getAttribute("html", "data-tema"), "oscuro");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(23, 22, 20)");
+  assert.equal(await page.getAttribute('meta[name="theme-color"]', "content"), "#171614");
+  for (const [h, n] of [["#/inicio", "11-oscuro-inicio"], ["#/nuevo", "12-oscuro-nuevo"], ["#/pedidos?tab=cancelado", "13-oscuro-pedidos"], ["#/mas", "14-oscuro-mas"]]) {
+    await page.goto(BASE + "/panel.html" + h);
+    await esperarRuta(h.split("?")[0]);
+    await foto(n);
+    assert.deepEqual(await contraste(), [], `${h}: poco contraste en tema oscuro`);
+  }
+  await page.goto(BASE + "/panel.html#/pedidos?tab=cancelado");
+  await esperarRuta("#/pedidos");
+  await page.click("#pLista .fila-ped");
+  await esperarRuta("#/pedido/");
+  await foto("15-oscuro-detalle");
+  assert.deepEqual(await contraste(), [], "detalle: poco contraste en tema oscuro");
+  // se recuerda al volver a abrir; el catálogo también lo usa
+  await page.goto(BASE + "/index.html");
+  await page.waitForSelector(".card");
+  assert.equal(await page.getAttribute("html", "data-tema"), "oscuro");
+  assert.equal(await page.innerText("#btnTema"), "Tema claro");
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await foto("16-oscuro-catalogo");
+  await page.click("#btnTema");
+  assert.equal(await page.getAttribute("html", "data-tema"), "claro");
+  // en claro también se revisa el contraste de una página del panel
+  await page.goto(BASE + "/panel.html#/inicio");
+  await esperarRuta("#/inicio");
+  assert.deepEqual(await contraste(), [], "inicio: poco contraste en tema claro");
+  ok("tema oscuro: se elige en Más, se recuerda, aplica al catálogo y el texto se lee bien");
 
   /* ---------- Instalable ---------- */
   const pwa = await page.evaluate(async () => {

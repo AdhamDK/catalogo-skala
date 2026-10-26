@@ -49,10 +49,15 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
 ## Uso diario
 - **Vendedor**: **Nuevo** → elige productos con + / − → **Continuar** → datos del cliente
   (o buscarlo) + GPS → **Guardar pedido** → **Enviar al grupo**.
-- **Administración**: **Inicio / Pedidos → Por confirmar** → abrir el pedido → **Confirmar** (elige despachador).
+- **Administración**: **Inicio / Pedidos → Por aprobar** → abrir el pedido → **Aprobar** (elige despachador) o **Anular** (con motivo).
 - **Despachador**: **Entregas** → abrir el pedido → *Salió en ruta* → *Entregado* (con Llamar, WhatsApp y Mapa).
 - **Master**: todo lo anterior + **Más → Resumen** y **Más → Usuarios** (crear, clave, rol, activar).
 - **Clientes**: ficha con datos, mapa e historial de pedidos; "Nuevo pedido para este cliente".
+- **Añadir cliente** (Clientes → Añadir cliente): para pasar la base de clientes sin pedidos.
+  Ubicación: pegá coordenadas (`8.6123, -71.6543`) o un enlace largo de Google Maps; "Usar mi
+  ubicación actual" solo si estás en el local del cliente. "Guardar y añadir otro" para ir rápido.
+- **Estados**: En proceso → Aprobado · Preparando despacho → En ruta → Entregado (o Anulado con motivo).
+- **Tema oscuro**: Más → Tema (Automático / Claro / Oscuro).
 - Claves: mínimo 6 caracteres con letras y números (Master: 8); pueden llevar símbolos.
 - Si alguien olvida la clave: el Master le pone una nueva (Usuarios → Editar).
 - **La hoja NO debe compartirse con "Cualquier persona con el enlace"**: dejala en
