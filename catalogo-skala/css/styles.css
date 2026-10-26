@@ -39,6 +39,8 @@ html {
 section[id] { scroll-margin-top: 112px; }
 
 img { max-width: 100%; height: auto; }
+/* "hidden" siempre oculta, aunque la clase tenga display (botones, links del menú) */
+[hidden] { display: none !important; }
 
 /* Tacto: sin destello gris al tocar y sin retraso de doble toque en botones */
 a, button, input, label, .filter { -webkit-tap-highlight-color: transparent; }
@@ -757,6 +759,102 @@ fieldset.pay legend {
 @media print {
   .hair-icon { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* ============================================================
+   MODO VENDEDOR (mini CRM)
+   ============================================================ */
+.modal-mini { max-width: 440px; }
+.modo-opciones { display: grid; gap: 10px; margin: 14px 0 4px; }
+.modo-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; min-height: 64px; padding: 14px 16px;
+  border: 2px solid rgba(38, 36, 31, 0.12); border-radius: 16px;
+  background: var(--crema-2); color: var(--tinta);
+  font-family: inherit; text-align: left; cursor: pointer;
+}
+.modo-btn strong { font-family: "Baloo 2", sans-serif; font-size: 1.2rem; }
+.modo-btn span { font-size: 0.88rem; color: var(--tinta-suave); }
+.modo-btn:active { border-color: var(--rosa); }
+#btnModoVendedor { border-color: var(--verde); }
+
+.field select {
+  width: 100%; min-height: 46px; padding: 10px 12px;
+  border: 1px solid rgba(38, 36, 31, 0.15); border-radius: 10px;
+  font-family: inherit; font-size: 16px; color: var(--tinta); background: #fff;
+}
+.field textarea {
+  width: 100%; border: 1px solid rgba(38, 36, 31, 0.15); border-radius: 10px;
+  padding: 10px 12px; font-family: inherit; font-size: 16px; color: var(--tinta); resize: vertical;
+}
+.vend-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.vend-quien { font-size: 0.85rem; color: var(--tinta-suave); }
+.link-btn {
+  display: inline-flex; align-items: center; min-height: 44px;
+  border: none; background: none; padding: 0 4px; margin: -12px 0;
+  font: inherit; color: var(--rosa-osc); font-weight: 600; text-decoration: underline; cursor: pointer;
+}
+.vend-resultados {
+  list-style: none; margin: -6px 0 12px; padding: 0;
+  border: 1px solid rgba(38, 36, 31, 0.12); border-radius: 12px; overflow: hidden;
+}
+.vend-resultados li + li { border-top: 1px solid rgba(38, 36, 31, 0.08); }
+.vend-resultados button {
+  display: flex; flex-direction: column; align-items: flex-start; width: 100%;
+  min-height: 52px; padding: 10px 12px; border: none; background: #fff;
+  font-family: inherit; text-align: left; cursor: pointer; color: var(--tinta);
+}
+.vend-resultados button span { font-size: 0.82rem; color: var(--tinta-suave); }
+.vend-resultados .vacio { padding: 12px; font-size: 0.88rem; color: var(--tinta-suave); }
+.vend-cliente-sel, .vend-ok {
+  margin: 0 0 12px; padding: 10px 12px; border-radius: 12px;
+  background: #eef6e4; color: var(--verde-osc); font-size: 0.9rem; font-weight: 500;
+}
+.gps-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 14px; }
+.btn-gps { min-height: 44px; padding: 8px 16px; font-size: 0.95rem; }
+.gps-estado { font-size: 0.88rem; color: var(--tinta-suave); }
+.gps-estado a { color: var(--rosa-osc); text-decoration: underline; }
+
+.tabs { display: flex; gap: 6px; margin: 12px 0 6px; }
+.tab {
+  flex: 1 1 0; min-width: 0; min-height: 44px; padding: 0 6px; border-radius: 999px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border: 1px solid rgba(38, 36, 31, 0.15); background: #fff; color: var(--tinta-suave);
+  font-family: inherit; font-size: 0.86rem; cursor: pointer;
+}
+.tab.active { background: var(--tinta); border-color: var(--tinta); color: #fff; }
+.pedidos-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.ped {
+  border: 1px solid rgba(38, 36, 31, 0.1); border-left: 5px solid var(--naranja);
+  border-radius: 14px; padding: 12px; background: #fff;
+}
+.ped-entregado { border-left-color: var(--verde); }
+.ped-cancelado { border-left-color: #b9b2a6; opacity: 0.85; }
+.ped-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ped-estado { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; color: var(--tinta-suave); }
+.ped-cli { font-weight: 600; margin-top: 2px; }
+.ped-det { font-size: 0.86rem; color: var(--tinta-suave); }
+.ped-links { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; font-size: 0.9rem; }
+.ped-links a { display: inline-flex; align-items: center; min-height: 44px; color: var(--rosa-osc); font-weight: 600; text-decoration: underline; }
+.ped-links .link-btn { margin: 0; min-height: 44px; }
+.ped-acciones { display: flex; gap: 8px; margin-top: 4px; }
+.ped-acciones .btn { flex: 1; min-height: 44px; padding: 8px 12px; font-size: 0.92rem; }
+.pend-subir {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: #fff3e6; color: #8a4a0f; font-size: 0.9rem;
+}
+.pend-subir .btn { min-height: 44px; padding: 8px 14px; font-size: 0.9rem; }
+
+.toast {
+  position: fixed; z-index: 120; left: 50%; transform: translateX(-50%);
+  top: calc(12px + env(safe-area-inset-top)); /* arriba: no tapa los botones del pulgar */
+  max-width: calc(100% - 32px); padding: 12px 18px; border-radius: 14px;
+  background: var(--tinta); color: #fff; font-size: 0.92rem; box-shadow: var(--sombra);
+}
+.toast[hidden] { display: none; }
+.nav .nav-vendedor { color: var(--verde-osc); font-weight: 700; }
+.foot-link { display: inline-flex; align-items: center; min-height: 44px; text-decoration: underline; }
+.btn[disabled] { opacity: 0.6; cursor: progress; }
+@media print { .toast, .foot-link { display: none !important; } }
 
 /* ============================================================
    PANTALLAS MÁS GRANDES (mobile first: se agregan encima de la base)

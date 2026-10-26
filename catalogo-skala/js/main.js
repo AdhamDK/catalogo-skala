@@ -274,6 +274,14 @@ function closeModal() {
   if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
 }
 
+/* Vacía la selección (también lo usa el modo vendedor al guardar). */
+function vaciarPedido() {
+  pedido = {};
+  savePedido();
+  applyQty();
+  updateBar();
+}
+
 /* -------------------- INICIALIZACIÓN -------------------- */
 document.addEventListener("DOMContentLoaded", () => {
   render("gridBanos", BANOS, "Baño de crema 1kg");
@@ -313,7 +321,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   /* Botones del pedido / modal */
-  document.getElementById("btnArmarPedido").addEventListener("click", openModal);
+  /* "Armar pedido": primero se elige Cliente o Vendedor (js/vendedor.js) */
+  document.getElementById("btnArmarPedido").addEventListener("click", () => {
+    if (window.SkalaVendedor) window.SkalaVendedor.elegirModo();
+    else openModal();
+  });
   document.getElementById("btnClose").addEventListener("click", closeModal);
   document.getElementById("orderModal").addEventListener("click", (e) => {
     if (e.target.id === "orderModal") closeModal();
@@ -352,12 +364,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   /* Papelera: borrar toda la selección */
-  document.getElementById("btnClear").addEventListener("click", () => {
-    pedido = {};
-    savePedido();
-    applyQty();
-    updateBar();
-  });
+  document.getElementById("btnClear").addEventListener("click", vaciarPedido);
 
   /* Link de WhatsApp de la sección contacto */
   const cw = document.getElementById("contactWhatsapp");

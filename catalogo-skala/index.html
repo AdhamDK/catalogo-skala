@@ -38,6 +38,7 @@
       <a href="#kits">Kits</a>
       <a href="#como-comprar">Cómo comprar</a>
       <a href="#contacto">Contacto</a>
+      <a href="#" id="navMisPedidos" class="nav-vendedor" hidden>Mis pedidos</a>
     </nav>
   </header>
 
@@ -217,6 +218,7 @@
     <div class="container">
       <p>Skala Venezuela · Catálogo 2026 · Producto importado de Brasil</p>
       <p class="foot-note">Marca Skala Brasil. Este catálogo es de uso comercial del distribuidor.</p>
+      <p class="foot-note"><a href="#" id="footVendedores" class="foot-link">Acceso vendedores</a></p>
     </div>
   </footer>
 
@@ -273,7 +275,148 @@
     </div>
   </div>
 
+  <!-- ==================== MODO VENDEDOR ==================== -->
+
+  <!-- 1. ¿Quién arma el pedido? -->
+  <div class="modal" id="modoModal" hidden>
+    <div class="modal-box modal-mini" role="dialog" aria-modal="true" aria-labelledby="modoTitulo" tabindex="-1">
+      <h3 id="modoTitulo">¿Quién arma el pedido?</h3>
+      <div class="modo-opciones">
+        <button type="button" class="modo-btn" id="btnModoCliente">
+          <strong>Cliente</strong><span>Enviar mi pedido a Skala por WhatsApp</span>
+        </button>
+        <button type="button" class="modo-btn" id="btnModoVendedor">
+          <strong>Vendedor</strong><span id="modoVendedorSub">Registrar el pedido y enviarlo al grupo</span>
+        </button>
+      </div>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost" data-cerrar>Cancelar</button></div>
+    </div>
+  </div>
+
+  <!-- 2. Ingreso del vendedor -->
+  <div class="modal" id="loginModal" hidden>
+    <form class="modal-box modal-mini" id="loginForm" role="dialog" aria-modal="true" aria-labelledby="loginTitulo" tabindex="-1" novalidate>
+      <h3 id="loginTitulo">Ingreso de vendedor</h3>
+      <p class="modal-sub" id="loginSub">Elegí tu nombre e ingresá tu PIN.</p>
+      <label class="field field-full"><span>Vendedor</span>
+        <select id="loginVendedor" required><option value="">Cargando…</option></select>
+      </label>
+      <label class="field field-full"><span>PIN</span>
+        <input id="loginPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="current-password" enterkeyhint="go" placeholder="••••" required />
+      </label>
+      <p class="form-warn" id="loginError" hidden></p>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary" id="btnLogin">Entrar</button>
+        <button type="button" class="btn btn-ghost" data-cerrar>Cancelar</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 3. Pedido del vendedor -->
+  <div class="modal" id="vendModal" hidden>
+    <form class="modal-box" id="vendForm" role="dialog" aria-modal="true" aria-labelledby="vendTitulo" tabindex="-1" novalidate>
+      <div class="vend-head">
+        <h3 id="vendTitulo">Nuevo pedido</h3>
+        <span class="vend-quien"><span id="vendNombre"></span> · <button type="button" class="link-btn" id="btnSalir">Salir</button></span>
+      </div>
+      <p class="modal-sub" id="vendResumen"></p>
+
+      <div id="vendPaso1">
+        <label class="field field-full"><span>Buscar cliente (nombre, negocio o teléfono)</span>
+          <input id="vBuscar" type="search" placeholder="Ej. Bella o 0412…" autocomplete="off" enterkeyhint="search" />
+        </label>
+        <ul class="vend-resultados" id="vResultados" hidden></ul>
+        <input type="hidden" id="vClienteId" />
+        <p class="vend-cliente-sel" id="vClienteSel" hidden></p>
+
+        <div class="form-grid">
+          <label class="field"><span>Nombre del cliente</span>
+            <input id="vContacto" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Persona de contacto" />
+          </label>
+          <label class="field"><span>Nombre del negocio</span>
+            <input id="vNegocio" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Peluquería / tienda" />
+          </label>
+          <label class="field"><span>RIF / Cédula</span>
+            <input id="vRif" type="text" autocomplete="off" autocapitalize="characters" enterkeyhint="next" placeholder="J-12345678-9" />
+          </label>
+          <label class="field"><span>Teléfono 1 *</span>
+            <input id="vTel1" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="0412-1234567" />
+          </label>
+          <label class="field"><span>Teléfono 2</span>
+            <input id="vTel2" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="Opcional" />
+          </label>
+          <label class="field field-full"><span>Dirección</span>
+            <input id="vDireccion" type="text" autocomplete="off" enterkeyhint="next" placeholder="Dirección de entrega" />
+          </label>
+        </div>
+
+        <div class="gps-box">
+          <button type="button" class="btn btn-ghost btn-gps" id="btnGps">Tomar ubicación GPS del cliente</button>
+          <span class="gps-estado" id="gpsEstado">Sin ubicación</span>
+          <input type="hidden" id="vLat" /><input type="hidden" id="vLng" />
+        </div>
+
+        <fieldset class="pay">
+          <legend>Método de pago</legend>
+          <label class="pay-opt"><input type="radio" name="vPago" value="Bolívares · Contado" /> Bolívares · Contado</label>
+          <label class="pay-opt"><input type="radio" name="vPago" value="Bolívares · Crédito" /> Bolívares · Crédito</label>
+          <label class="pay-opt"><input type="radio" name="vPago" value="Divisas · Contado" /> Divisas · Contado</label>
+          <label class="pay-opt"><input type="radio" name="vPago" value="Divisas · Crédito" /> Divisas · Crédito</label>
+        </fieldset>
+
+        <label class="field field-full"><span>Nota (entrega, descuento, etc.)</span>
+          <textarea id="vNota" rows="2" maxlength="300" placeholder="Opcional"></textarea>
+        </label>
+        <p class="form-warn" id="vError" hidden></p>
+      </div>
+
+      <div id="vendPaso2" hidden>
+        <p class="vend-ok" id="vendOk"></p>
+        <label class="field field-full"><span>Mensaje para el grupo</span>
+          <textarea id="vMensaje" readonly rows="10"></textarea>
+        </label>
+      </div>
+
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary" id="btnGuardar">Guardar pedido</button>
+        <button type="button" class="btn btn-primary" id="btnGrupo" hidden>Enviar al grupo de WhatsApp</button>
+        <a class="btn btn-ghost" id="btnCopiaCliente" target="_blank" rel="noopener" hidden>Copia al cliente</a>
+        <button type="button" class="btn btn-ghost" id="btnVendMisPedidos" hidden>Mis pedidos</button>
+        <button type="button" class="btn btn-ghost" data-cerrar>Cerrar</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 4. Mis pedidos -->
+  <div class="modal" id="pedidosModal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="pedidosTitulo" tabindex="-1">
+      <div class="vend-head">
+        <h3 id="pedidosTitulo">Mis pedidos</h3>
+        <span class="vend-quien"><span class="js-vend-nombre"></span> · <button type="button" class="link-btn js-salir">Salir</button></span>
+      </div>
+      <div class="pend-subir" id="pendSubir" hidden>
+        <span id="pendSubirTxt"></span>
+        <button type="button" class="btn btn-ghost" id="btnSubirPend">Subir ahora</button>
+      </div>
+      <div class="tabs" role="tablist" id="pedidosTabs">
+        <button type="button" role="tab" class="tab active" data-estado="pendiente" aria-selected="true">Pendientes</button>
+        <button type="button" role="tab" class="tab" data-estado="entregado" aria-selected="false">Entregados</button>
+        <button type="button" role="tab" class="tab" data-estado="cancelado" aria-selected="false">Cancelados</button>
+      </div>
+      <p class="modal-sub" id="pedidosInfo"></p>
+      <ul class="pedidos-lista" id="pedidosLista"></ul>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="btnRecargar">Actualizar</button>
+        <button type="button" class="btn btn-ghost" data-cerrar>Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
   <script src="js/producto.js"></script>
+  <script src="js/crm-core.js"></script>
   <script src="js/main.js"></script>
+  <script src="js/vendedor.js"></script>
 </body>
 </html>

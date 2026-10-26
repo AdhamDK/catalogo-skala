@@ -125,6 +125,11 @@ async function probar(browser, cfg) {
   ok("barra de pedido visible y dentro de la pantalla");
 
   await tocar("#btnArmarPedido");
+  // Primero se elige quién arma el pedido
+  assert.equal(await page.locator("#modoModal").isVisible(), true);
+  assert.equal(await page.locator("#modoModal .modo-btn").count(), 2);
+  await page.locator("#btnModoCliente").click();
+  assert.equal(await page.locator("#modoModal").isHidden(), true);
   assert.equal(await page.evaluate(() => document.body.classList.contains("modal-open")), true);
   const msg = await page.inputValue("#orderText");
   assert.match(msg, /Babosa \(BC-01\) — 2 cajas \(12 unidades\)/);
@@ -134,10 +139,10 @@ async function probar(browser, cfg) {
 
   // Modal: campos dentro del ancho, inputs >= 16px, botón WhatsApp siempre visible
   const modal = await page.evaluate(() => {
-    const box = document.querySelector(".modal-box").getBoundingClientRect();
-    const fuera = [...document.querySelectorAll(".modal-box input, .modal-box textarea")]
+    const box = document.querySelector("#orderModal .modal-box").getBoundingClientRect();
+    const fuera = [...document.querySelectorAll("#orderModal input, #orderModal textarea")]
       .filter((e) => e.type !== "radio" && e.getBoundingClientRect().right > box.right + 1).map((e) => e.id);
-    const fuentes = [...document.querySelectorAll(".modal-box input:not([type=radio]), .modal-box textarea")]
+    const fuentes = [...document.querySelectorAll("#orderModal input:not([type=radio]), #orderModal textarea")]
       .filter((e) => parseFloat(getComputedStyle(e).fontSize) < 16).map((e) => e.id);
     const wa = document.getElementById("btnWhatsapp").getBoundingClientRect();
     return { fuera, fuentes, waBottom: wa.bottom, waTop: wa.top, vh: innerHeight };
