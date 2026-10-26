@@ -54,9 +54,11 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
 - **Despachador**: en Inicio ve "Hoy tenés por entregar N cajas". En **Entregas** elige pedidos →
   **Ver total de carga** (cajas por producto para cargar). Abre cada pedido → *Salió en ruta* →
   *Entregado* (con Llamar, WhatsApp y Mapa).
-- **Cobro**: el vendedor, con el pedido entregado y pagado, toca **Marcar cancelado (pagado)**.
-  Administración lo ve en **Por conciliar**, verifica el dinero y toca **Conciliar pago**, o
-  **Pago no recibido** (vuelve a Por cobrar).
+- **Cobro**: el vendedor, con el pedido entregado y pagado, toca **Marcar cancelado (pagado)** y
+  escribe el **monto y la moneda** (USD o Bs). Administración lo ve en **Por conciliar**, verifica el
+  dinero y toca **Conciliar pago** (puede corregir el monto), o **Pago no recibido** (vuelve a Por cobrar).
+- **Conciliados** (Pedidos → Conciliados): total conciliado en USD y Bs de Hoy / 7 / 30 / 90 días,
+  con pedidos, cajas, por vendedor y por método de pago.
 - **Crédito**: al enviar un pedido a crédito se eligen los días; cuentan desde la entrega.
   Banderas: verde al día · amarilla por vencer (≤ 3 días) · roja vencido · morada vencido hace más de 15 días.
 - **Master**: todo lo anterior + **Más → Resumen** y **Más → Usuarios** (crear, clave, rol, activar).

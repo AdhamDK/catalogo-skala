@@ -122,9 +122,9 @@ test("despachador: en ruta / entregado solo en los asignados", () => {
 
 test("pestañas del panel por rol", () => {
   const ids = (rol) => core.pestanasPanel(rol).map((t) => t.id);
-  assert.deepEqual(ids("vendedor"), ["pendiente", "curso", "entregado", "cobrar", "cancelado", "resumen"]);
-  assert.deepEqual(ids("admin"), ["pendiente", "curso", "entregado", "cobrar", "conciliar", "cancelado", "resumen"]);
-  assert.deepEqual(ids("master"), ["pendiente", "curso", "entregado", "cobrar", "conciliar", "cancelado", "resumen", "usuarios"]);
+  assert.deepEqual(ids("vendedor"), ["pendiente", "curso", "entregado", "cobrar", "conciliados", "cancelado", "resumen"]);
+  assert.deepEqual(ids("admin"), ["pendiente", "curso", "entregado", "cobrar", "conciliar", "conciliados", "cancelado", "resumen"]);
+  assert.deepEqual(ids("master"), ["pendiente", "curso", "entregado", "cobrar", "conciliar", "conciliados", "cancelado", "resumen", "usuarios"]);
   assert.deepEqual(ids("despachador"), ["curso", "entregado"]);
   assert.equal(core.pestanasPanel("admin")[0].nombre, "Por aprobar");
   assert.equal(core.pestanasPanel("vendedor")[0].nombre, "En proceso");
@@ -232,4 +232,32 @@ test("pestañas Por cobrar (todos los que venden) y Por conciliar (solo Administ
 
 test("mensajeGrupo muestra los días de crédito", () => {
   assert.match(core.mensajeGrupo({ ...PEDIDO, pago: "Divisas · Crédito", dias_credito: 15 }, CLIENTE), /Pago: Divisas · Crédito \(15 días\)/);
+});
+
+/* ---------- Conciliados: totales ---------- */
+test("monedaDePago y formatoMonto", () => {
+  assert.equal(core.monedaDePago("Bolívares · Contado"), "Bs");
+  assert.equal(core.monedaDePago("Divisas · Crédito"), "USD");
+  assert.equal(core.formatoMonto(1234.5, "USD"), "USD 1.234,50");
+  assert.equal(core.formatoMonto(3600, "Bs"), "Bs 3.600,00");
+});
+
+test("resumenConciliados suma dinero por moneda, por vendedor y por método de pago", () => {
+  const peds = [
+    { id: "A", vendedor: "Óscar", pago: "Divisas · Contado", monto: 100, moneda: "USD", total_cajas: 3, items: [{ code: "BC-01", producto: "Babosa", cajas: 3, total_unidades: 18, unidad: "unidades" }] },
+    { id: "B", vendedor: "Kevin", pago: "Bolívares · Contado", monto: 3600, moneda: "Bs", total_cajas: 2, items: [{ code: "BC-01", producto: "Babosa", cajas: 2, total_unidades: 12, unidad: "unidades" }] },
+    { id: "C", vendedor: "Óscar", pago: "Divisas · Crédito", monto: 50.5, moneda: "USD", total_cajas: 1, items: [{ code: "KT-01", producto: "Kit 12 em 1", cajas: 1, total_unidades: 6, unidad: "dúos" }] },
+  ];
+  const r = core.resumenConciliados(peds);
+  assert.equal(r.pedidos, 3);
+  assert.equal(r.cajas, 6);
+  assert.deepEqual(r.montos, { USD: 150.5, Bs: 3600 });
+  assert.deepEqual(r.por_vendedor, [
+    { nombre: "Óscar", pedidos: 2, cajas: 4, USD: 150.5, Bs: 0 },
+    { nombre: "Kevin", pedidos: 1, cajas: 2, USD: 0, Bs: 3600 },
+  ]);
+  assert.deepEqual(r.por_pago.map((x) => [x.nombre, x.pedidos]), [["Divisas · Contado", 1], ["Divisas · Crédito", 1], ["Bolívares · Contado", 1]]);
+  assert.equal(r.productos[0].code, "BC-01");
+  assert.equal(r.productos[0].cajas, 5);
+  assert.deepEqual(core.resumenConciliados([]).montos, { USD: 0, Bs: 0 });
 });

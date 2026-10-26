@@ -431,10 +431,19 @@ function servidor() {
   await esperarRuta("#/pedido/");
   assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Marcar cancelado (pagado)"]);
   await page.click('[data-acc="cobrar"]');
+  await page.waitForSelector("#hMonto");
+  assert.equal(await page.locator('#hoja input[name="moneda"][value="USD"]').isChecked(), true); // pago en divisas
+  await page.click("#hojaOk");
+  assert.match(await page.innerText("#hojaError"), /monto/);
+  await page.fill("#hMonto", "1.120,50");
+  await foto("09b-monto");
   await page.click("#hojaOk");
   await page.waitForFunction(() => /Cancelado · por conciliar/.test(document.querySelector(".bandera")?.textContent || ""));
   assert.equal(await page.locator(".acciones-ped .btn").count(), 0);
   assert.equal(gas.tabla("Pedidos")[0].cobro, "cancelado");
+  assert.equal(Number(gas.tabla("Pedidos")[0].monto), 1120.5);
+  assert.equal(gas.tabla("Pedidos")[0].moneda, "USD");
+  assert.match(await page.innerText(".datos"), /USD 1\.120,50/);
   await foto("09b-cancelado");
   await salir();
   ok("crédito: bandera verde → amarilla → roja → morada; el vendedor marca Cancelado (pagado)");
@@ -447,12 +456,32 @@ function servidor() {
   await esperarRuta("#/pedido/");
   assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Conciliar pago (recibido)", "Pago no recibido"]);
   await page.click('[data-acc="conciliar"]');
+  await page.waitForSelector("#hMonto");
+  assert.equal(await page.inputValue("#hMonto"), "1120,5"); // trae lo que reportó el vendedor
+  assert.match(await page.innerText("#hojaCuerpo"), /Reportado: USD 1\.120,50 por Óscar/);
+  await page.fill("#hMonto", "1100");
   await page.click("#hojaOk");
   await page.waitForFunction(() => /Conciliado/.test(document.querySelector(".bandera")?.textContent || ""));
   assert.equal(gas.tabla("Pedidos")[0].cobro, "conciliado");
+  assert.equal(Number(gas.tabla("Pedidos")[0].monto), 1100);
   assert.match(await page.innerText(".historial"), /Cancelado \(pago reportado\) · Óscar[\s\S]*Pago conciliado · Ana/);
   await foto("09c-conciliado");
   await revisarDiseno("detalle conciliado");
+  // Conciliados: totales del período
+  await page.goto(BASE + "/panel.html#/pedidos?tab=conciliados");
+  await esperarRuta("#/pedidos");
+  await page.waitForSelector("#concTotal");
+  assert.equal(await page.innerText("#concUSD"), "USD 1.100,00");
+  assert.equal(await page.innerText("#concBs"), "Bs 0,00");
+  assert.match(await page.innerText("#concCuenta"), /1 pedido · \d+ cajas?/);
+  assert.match(await page.innerText("#vista"), /Por vendedor[\s\S]*Óscar[\s\S]*Por método de pago/);
+  assert.equal(await page.locator("#pLista .fila-ped").count(), 1);
+  assert.equal(await page.locator(".periodos-chicos .tab.active").innerText(), "30 días");
+  await foto("09d-conciliados");
+  await revisarDiseno("conciliados");
+  await page.click('.periodos-chicos a[href$="dias=1"]');
+  await page.waitForFunction(() => document.querySelector(".periodos-chicos .tab.active")?.textContent === "Hoy" && document.body.dataset.lista);
+  assert.equal(await page.innerText("#concUSD"), "USD 1.100,00"); // se concilió hoy
   await salir();
   ok("administración verifica el pago y lo marca Conciliado");
 

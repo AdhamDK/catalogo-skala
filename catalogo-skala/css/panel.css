@@ -302,3 +302,17 @@ html[data-tema="oscuro"] .stat-alerta strong { color: #ff8a8e; }
 .resumen-items a { color: var(--enlace); font-weight: 600; }
 
 .fila-top .chip-estado { max-width: 55%; white-space: normal; text-align: center; line-height: 1.25; }
+
+/* ---------- Conciliados: totales del período ---------- */
+.periodos-chicos { margin-top: -2px; }
+.periodos-chicos .tab { font-size: 0.85rem; padding-block: 6px; }
+.conciliados-total .sub-titulo { margin: 0 0 6px; }
+.conciliados-total .montos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.conciliados-total .monto { background: var(--verde-suave); border: 1px solid var(--borde-suave); border-radius: 14px; padding: 10px 12px; min-width: 0; }
+.conciliados-total .monto strong { display: block; font-family: "Baloo 2", sans-serif; font-size: 1.35rem; line-height: 1.15; overflow-wrap: anywhere; }
+.conciliados-total .monto span { font-size: 0.8rem; color: var(--tinta-suave); }
+.conciliados-total .ped-det { margin: 8px 0 0; }
+.tabla .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+details.tarjeta > summary { cursor: pointer; margin: 0; }
+details.tarjeta[open] > summary { margin-bottom: 6px; }
+.moneda { margin-bottom: 4px; }

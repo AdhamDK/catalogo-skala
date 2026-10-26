@@ -8,6 +8,13 @@
   const { api, sesion, ErrorRed, leerLS, guardarLS, borrarLS } = SkalaAPI;
   const $ = (id) => document.getElementById(id);
   const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  /* "1.234,56" · "1234.56" · "120,5" → número con 2 decimales (0 si no es válido) */
+  const montoNum = (t) => {
+    let x = String(t ?? "").trim().replace(/\s|USD|Bs\.?|\$/gi, "");
+    if (x.includes(",")) x = x.replace(/\./g, "").replace(",", ".");
+    const n = Number(x);
+    return isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
+  };
   const K_CARRITO = "skala_pedido_v1";   // compartido con el catálogo
   const K_CLIENTE = "skala_vcliente_v1"; // borrador del cliente del pedido
   const K_LISTO = "skala_ultimo_pedido";
@@ -687,7 +694,7 @@
       <a class="fila-ped est-borde-${esc(p.estado)}" href="#/pedido/${encodeURIComponent(p.id)}">
       <div class="fila-top"><strong>${esc(p.negocio)}</strong>${chipEstado(p.estado)}</div>
       <div class="ped-det">${esc(p.id)} · ${esc(fechaLegible(p.fecha))}</div>
-      <div class="ped-det">${esc(p.total_cajas)} caja(s)${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}</div>
+      <div class="ped-det">${esc(p.total_cajas)} caja(s)${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}${p.monto && p.cobro ? ` · <strong>${esc(formatoMonto(p.monto, p.moneda))}</strong>` : ""}</div>
       ${extra ? `<div class="ped-det">${esc(extra)}</div>` : ""}
       ${chipBandera(p)}
     </a></li>`;
@@ -698,16 +705,24 @@
     const tab = tabs.find((t) => t.id === query.get("tab")) || tabs[0];
     const base = rol() === "despachador" ? "#/entregas" : "#/pedidos";
     const conCarga = tab.id === "curso" && ["despachador", "admin", "master"].includes(rol());
+    const PERIODOS = [[1, "Hoy"], [7, "7 días"], [30, "30 días"], [90, "90 días"]];
+    const dias = tab.periodo ? (PERIODOS.find(([d]) => d === Number(query.get("dias"))) || [30])[0] : 60;
     v.innerHTML = `
       <div class="periodos" role="tablist">${tabs.map((t) => `<a role="tab" class="tab${t.id === tab.id ? " active" : ""}" aria-selected="${t.id === tab.id}" href="${base}?tab=${t.id}">${esc(t.nombre)}</a>`).join("")}</div>
+      ${tab.periodo ? `<div class="periodos periodos-chicos" aria-label="Período">${PERIODOS.map(([d, t]) => `<a class="tab${d === dias ? " active" : ""}"${d === dias ? ' aria-current="true"' : ""} href="${base}?tab=${tab.id}&dias=${d}">${t}</a>`).join("")}</div>
+      <div id="pResumen"></div>` : ""}
       <p class="modal-sub" id="pInfo">Cargando…</p>
       ${conCarga ? '<div class="fila-elegir" id="pElegir" hidden><label class="check"><input type="checkbox" id="pTodos" /> Elegir todos</label></div>' : ""}
       <ul class="lista-ped" id="pLista"></ul>
       ${conCarga ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}`;
     const filtro = tab.filtro ? { [tab.filtro]: true } : { estados: tab.estados };
-    const r = await api("pedidos", { ...filtro, dias: 60 });
+    const r = await api("pedidos", { ...filtro, dias });
     if (!vigente()) return;
     let lista = r.pedidos;
+    if (tab.filtro === "conciliados") {
+      lista = lista.slice().sort((a, b) => String(b.conciliado_at).localeCompare(String(a.conciliado_at)));
+      $("pResumen").innerHTML = resumenConciliadosHtml(resumenConciliados(lista), dias);
+    }
     if (tab.filtro === "por_cobrar") {
       // primero lo más atrasado
       const peso = (p) => { const ec = estadoCredito(p); return ec && ec.vence ? (ec.nivel === "al_dia" || ec.nivel === "proximo" ? ec.dias : -ec.dias) : 9999; };
@@ -730,6 +745,30 @@
     $("pLista").addEventListener("change", pintarSel);
     $("pTodos").addEventListener("change", () => { v.querySelectorAll(".check-ped input").forEach((c) => (c.checked = $("pTodos").checked)); pintarSel(); });
     $("btnVerCarga").addEventListener("click", () => { sessionStorage.setItem(K_CARGA, JSON.stringify(elegidos())); ir("#/carga"); });
+  }
+
+  /* Totales de lo conciliado en el período (dinero por moneda, pedidos, cajas, por vendedor y por pago) */
+  function resumenConciliadosHtml(t, dias) {
+    const periodo = dias === 1 ? "hoy" : `últimos ${dias} días`;
+    const dinero = (g) => [g.USD ? formatoMonto(g.USD, "USD") : "", g.Bs ? formatoMonto(g.Bs, "Bs") : ""].filter(Boolean).join("<br>") || "—";
+    const tabla = (filas, titulo) => `<table class="tabla"><thead><tr><th>${titulo}</th><th>Ped.</th><th>Cajas</th><th class="num">Monto</th></tr></thead><tbody>${filas.map((g) =>
+      `<tr><td>${esc(g.nombre)}</td><td>${g.pedidos}</td><td>${g.cajas}</td><td class="num">${dinero(g)}</td></tr>`).join("")}</tbody></table>`;
+    if (!t.pedidos) return `<section class="tarjeta conciliados-total vacio"><p class="modal-sub">Nada conciliado ${periodo}.</p></section>`;
+    const verVendedor = rol() !== "vendedor";
+    return `<section class="tarjeta conciliados-total" id="concTotal">
+        <p class="sub-titulo">Total conciliado · ${periodo}</p>
+        <div class="montos">
+          <div class="monto"><strong id="concUSD">${esc(formatoMonto(t.montos.USD, "USD"))}</strong><span>Dólares</span></div>
+          <div class="monto"><strong id="concBs">${esc(formatoMonto(t.montos.Bs, "Bs"))}</strong><span>Bolívares</span></div>
+        </div>
+        <p class="ped-det" id="concCuenta">${t.pedidos} pedido${t.pedidos === 1 ? "" : "s"} · ${t.cajas} caja${t.cajas === 1 ? "" : "s"}</p>
+      </section>
+      ${verVendedor ? `<section class="tarjeta"><h3 class="sub-titulo">Por vendedor</h3>${tabla(t.por_vendedor, "Vendedor")}</section>` : ""}
+      <section class="tarjeta"><h3 class="sub-titulo">Por método de pago</h3>${tabla(t.por_pago, "Pago")}</section>
+      <details class="tarjeta"><summary class="sub-titulo">Productos conciliados (${t.cajas} cajas)</summary>
+        <ul class="resumen-items">${t.productos.map((x) => `<li><span>${esc(x.producto)} <span class="ped-det">${esc(x.code)}</span></span><em>${x.cajas} caja(s)</em></li>`).join("")}</ul>
+      </details>
+      <h3 class="sub-titulo">Pedidos conciliados</h3>`;
   }
 
   /* ---------- Total de carga (despachador) ---------- */
@@ -803,7 +842,7 @@
           ${p.documento ? `<dt>Documento</dt><dd>${esc(p.documento)}</dd>` : ""}
           ${p.pago ? `<dt>Pago</dt><dd>${esc(p.pago)}${p.dias_credito ? ` · ${p.dias_credito} días` : ""}</dd>` : ""}
           ${ec && ec.vence ? `<dt>Vence</dt><dd>${esc(ec.vence.split("-").reverse().join("/"))}</dd>` : ""}
-          ${p.cobro ? `<dt>Cobro</dt><dd>${p.cobro === "conciliado" ? `Conciliado por ${esc(p.conciliado_por)}` : `Cancelado (reportó ${esc(p.cobrado_por)}) · por conciliar`}</dd>` : ""}
+          ${p.cobro ? `<dt>Cobro</dt><dd>${p.monto ? `<strong>${esc(formatoMonto(p.monto, p.moneda))}</strong> · ` : ""}${p.cobro === "conciliado" ? `Conciliado por ${esc(p.conciliado_por)}` : `Cancelado (reportó ${esc(p.cobrado_por)}) · por conciliar`}</dd>` : ""}
           ${p.nota ? `<dt>Nota</dt><dd>${esc(p.nota)}</dd>` : ""}
           ${p.motivo ? `<dt>Motivo</dt><dd>${esc(p.motivo)}</dd>` : ""}
         </dl>
@@ -863,12 +902,30 @@
 
   async function accionCobro(p, acc) {
     const textos = {
-      cobrar: [`¿El cliente pagó ${p.id}?`, "Queda como <strong>Cancelado</strong> hasta que Administración verifique el pago y lo concilie.", "Sí, cancelado"],
-      conciliar: [`¿Recibiste el pago de ${p.id}?`, "Queda como <strong>Conciliado</strong> (pago verificado).", "Sí, conciliar"],
+      cobrar: [`¿El cliente pagó ${p.id}?`, "Indicá cuánto cobraste. Queda como <strong>Cancelado</strong> hasta que Administración verifique el pago y lo concilie.", "Sí, cancelado"],
+      conciliar: [`¿Recibiste el pago de ${p.id}?`, "Queda como <strong>Conciliado</strong> (pago verificado) y suma en Conciliados.", "Sí, conciliar"],
       desconciliar: [`¿Deshacer la conciliación de ${p.id}?`, "Vuelve a Cancelado · por conciliar.", "Deshacer"],
     };
     let extra = {};
-    if (acc === "rechazar") {
+    if (acc === "cobrar" || acc === "conciliar") {
+      const [titulo, cuerpo, ok] = textos[acc];
+      const mon = p.moneda || monedaDePago(p.pago);
+      const previo = p.monto ? String(p.monto).replace(".", ",") : "";
+      const r = await hoja({
+        titulo,
+        cuerpo: `<p class="modal-sub">${cuerpo}</p>
+          ${acc === "conciliar" && p.monto ? `<p class="modal-sub">Reportado: <strong>${esc(formatoMonto(p.monto, p.moneda))}</strong>${p.cobrado_por ? ` por ${esc(p.cobrado_por)}` : ""}. Corregilo si recibiste otro monto.</p>` : ""}
+          <fieldset class="pay moneda"><legend>Moneda</legend>
+            ${["USD", "Bs"].map((m) => `<label class="pay-opt"><input type="radio" name="moneda" value="${m}"${m === mon ? " checked" : ""} /> ${m === "USD" ? "Dólares (USD)" : "Bolívares (Bs)"}</label>`).join("")}
+          </fieldset>
+          <label class="field field-full"><span>${acc === "cobrar" ? "Monto cobrado *" : "Monto recibido *"}</span>
+            <input name="monto" id="hMonto" inputmode="decimal" autocomplete="off" placeholder="Ej. 120,50" value="${esc(previo)}" /></label>`,
+        ok,
+        validar: (d) => (montoNum(d.monto) > 0 ? "" : "Escribí el monto (mayor que 0)."),
+      });
+      if (!r) return;
+      extra = { monto: montoNum(r.monto), moneda: r.moneda === "Bs" ? "Bs" : "USD" };
+    } else if (acc === "rechazar") {
       const r = await hoja({
         titulo: `Pago no recibido · ${p.id}`,
         cuerpo: '<p class="modal-sub">El pedido vuelve a <strong>Por cobrar</strong>.</p><label class="field field-full"><span>¿Qué pasó?</span><textarea name="motivo" rows="3" maxlength="200" placeholder="Ej. no llegó la transferencia"></textarea></label>',

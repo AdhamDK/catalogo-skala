@@ -470,19 +470,25 @@ test("cobro: vendedor marca cancelado; administración concilia o rechaza", () =
   g.post({ action: "estado", token: tl, pedido_id: id, estado: "entregado" });
   assert.equal(cobro(tl, "cancelar").code, "forbidden");   // despachador no
   assert.equal(cobro(tk, "cancelar").code, "not_found");   // otro vendedor no
-  const c = cobro(tv, "cancelar");
+  assert.equal(cobro(tv, "cancelar").code, "monto");
+  assert.equal(cobro(tv, "cancelar", { monto: "120", moneda: "EUR" }).code, "monto");
+  const c = cobro(tv, "cancelar", { monto: "120,50", moneda: "USD" });
   assert.equal(c.pedido.cobro, "cancelado");
+  assert.equal(c.pedido.monto, 120.5);
   assert.equal(c.pedido.cobrado_por, "Óscar");
-  assert.equal(cobro(tv, "cancelar").code, "repetido");
+  assert.equal(cobro(tv, "cancelar", { monto: 1, moneda: "USD" }).code, "repetido");
   assert.equal(cobro(tv, "conciliar").code, "forbidden");  // el vendedor no concilia
   // por conciliar (Administración)
   assert.deepEqual(g.post({ action: "pedidos", token: ta, por_conciliar: true }).pedidos.map((p) => p.id), [id]);
   assert.equal(cobro(ta, "rechazar").code, "motivo");
-  assert.equal(cobro(ta, "rechazar", { motivo: "No llegó la transferencia" }).pedido.cobro, "");
-  cobro(tv, "cancelar");
-  const k = cobro(ta, "conciliar");
+  const rr = cobro(ta, "rechazar", { motivo: "No llegó la transferencia" });
+  assert.equal(rr.pedido.cobro, "");
+  assert.equal(rr.pedido.monto, "");
+  cobro(tv, "cancelar", { monto: 100, moneda: "USD" });
+  const k = cobro(ta, "conciliar", { monto: 98, moneda: "USD" }); // Administración corrige lo recibido
   assert.equal(k.pedido.cobro, "conciliado");
   assert.equal(k.pedido.conciliado_por, "Ana");
+  assert.equal(k.pedido.monto, 98);
   assert.equal(g.post({ action: "pedidos", token: ta, por_conciliar: true }).pedidos.length, 0);
   assert.equal(cobro(ta, "desconciliar").pedido.cobro, "cancelado");
   assert.deepEqual(g.tabla("Historial").map((h) => h.accion).slice(-5), ["cobrado", "pago_rechazado", "cobrado", "conciliado", "conciliacion_deshecha"]);
@@ -495,8 +501,10 @@ test("administración puede conciliar directo un pago que recibió", () => {
   const id = pedir(g, tv).pedido.id;
   g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: idDe(g, "luis") });
   g.post({ action: "estado", token: tl, pedido_id: id, estado: "entregado" });
-  const r = g.post({ action: "cobro", token: ta, pedido_id: id, accion: "conciliar" });
+  assert.equal(g.post({ action: "cobro", token: ta, pedido_id: id, accion: "conciliar" }).code, "monto");
+  const r = g.post({ action: "cobro", token: ta, pedido_id: id, accion: "conciliar", monto: 5000, moneda: "Bs" });
   assert.equal(r.pedido.cobro, "conciliado");
+  assert.equal(r.pedido.moneda, "Bs");
   assert.equal(r.pedido.cobrado_por, "Ana");
 });
 
@@ -512,6 +520,27 @@ test("por cobrar: crédito sin pagar (cualquier estado) y contado entregado sin 
   g.post({ action: "estado", token: ta, pedido_id: cont, estado: "confirmado", despachador_id: idDe(g, "luis") });
   g.post({ action: "estado", token: tl, pedido_id: cont, estado: "entregado" });
   assert.deepEqual(ids(), [cred, cont].sort());
-  g.post({ action: "cobro", token: tv, pedido_id: cont, accion: "cancelar" });
+  g.post({ action: "cobro", token: tv, pedido_id: cont, accion: "cancelar", monto: 50, moneda: "USD" });
   assert.deepEqual(ids(), [cred]); // cancelado: ya no está por cobrar (queda por conciliar)
+});
+
+test("conciliados del período: solo cobros conciliados, cada rol ve lo suyo", () => {
+  const g = preparar();
+  const tv = login(g), tk = login(g, "kevin", "Kevin9876"), ta = login(g, "ana", "Ana*2222"), tl = login(g, "luis", "Luis5555");
+  const entregar = (token, pago = "Divisas · Contado") => {
+    const id = pedir(g, token, { pago }).pedido.id;
+    g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: idDe(g, "luis") });
+    g.post({ action: "estado", token: tl, pedido_id: id, estado: "entregado" });
+    return id;
+  };
+  const a = entregar(tv), b = entregar(tk, "Bolívares · Contado"), c = entregar(tv);
+  g.post({ action: "cobro", token: tv, pedido_id: a, accion: "cancelar", monto: 100, moneda: "USD" });
+  g.post({ action: "cobro", token: ta, pedido_id: a, accion: "conciliar" });
+  g.post({ action: "cobro", token: ta, pedido_id: b, accion: "conciliar", monto: 3600, moneda: "Bs" });
+  g.post({ action: "cobro", token: tv, pedido_id: c, accion: "cancelar", monto: 40, moneda: "USD" }); // sin conciliar
+  const ids = (t, dias) => g.post({ action: "pedidos", token: t, conciliados: true, dias }).pedidos.map((p) => p.id).sort();
+  assert.deepEqual(ids(ta, 30), [a, b].sort());
+  assert.deepEqual(ids(tv, 30), [a]);
+  g.setAhora("2026-12-20T12:00:00Z");
+  assert.deepEqual(ids(login(g, "ana", "Ana*2222"), 7), []); // fuera del período
 });

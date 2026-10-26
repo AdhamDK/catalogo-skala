@@ -120,6 +120,7 @@ function pestanasPanel(rol) {
     { id: "entregado", nombre: "Entregados", estados: ["entregado"] },
     { id: "cobrar", nombre: "Por cobrar", filtro: "por_cobrar" },
     ...(rol === "vendedor" ? [] : [{ id: "conciliar", nombre: "Por conciliar", filtro: "por_conciliar" }]),
+    { id: "conciliados", nombre: "Conciliados", filtro: "conciliados", periodo: true },
     { id: "cancelado", nombre: "Anulados", estados: ["cancelado"] },
     { id: "resumen", nombre: "Resumen" },
   ];
@@ -169,6 +170,27 @@ function totalCarga(pedidos) {
   return { pedidos: (pedidos || []).length, cajas, productos, unidades: Object.entries(porUnidad).map(([u, n]) => `${n} ${u}`).join(" + ") };
 }
 
+/* -------------------- Conciliados: dinero recibido -------------------- */
+function monedaDePago(pago) { return /bol[ií]var/i.test(String(pago || "")) ? "Bs" : "USD"; }
+function formatoMonto(n, moneda) {
+  const [ent, dec] = (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).split(".");
+  return `${moneda} ${ent.replace(/\B(?=(\d{3})+(?!\d))/g, ".")},${dec}`;
+}
+function resumenConciliados(pedidos) {
+  const montos = { USD: 0, Bs: 0 };
+  const grupo = (mapa, nombre) => mapa[nombre] || (mapa[nombre] = { nombre, pedidos: 0, cajas: 0, USD: 0, Bs: 0 });
+  const vend = {}, pago = {};
+  const r2 = (n) => Math.round(n * 100) / 100;
+  (pedidos || []).forEach((p) => {
+    const m = Number(p.monto) || 0, mon = p.moneda === "Bs" ? "Bs" : "USD", cajas = Number(p.total_cajas) || 0;
+    montos[mon] = r2(montos[mon] + m);
+    [grupo(vend, p.vendedor || "—"), grupo(pago, p.pago || "Sin indicar")].forEach((g) => { g.pedidos++; g.cajas += cajas; g[mon] = r2(g[mon] + m); });
+  });
+  const orden = (a, b) => b.USD - a.USD || b.Bs - a.Bs || b.pedidos - a.pedidos;
+  const carga = totalCarga(pedidos);
+  return { pedidos: carga.pedidos, cajas: carga.cajas, montos, por_vendedor: Object.values(vend).sort(orden), por_pago: Object.values(pago).sort(orden), productos: carga.productos };
+}
+
 function validarCliente(c, opciones = {}) {
   const faltan = [];
   if (!String(c.negocio || c.nombre || c.contacto || "").trim()) faltan.push("Nombre del cliente o del negocio");
@@ -213,5 +235,6 @@ function nuevoRef() {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { itemsDePedido, telefonoWhatsapp, linkMapa, fechaLegible, mensajeGrupo, validarCliente, expiracionToken, nuevoRef,
-    nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, coordsDeTexto, estadoCredito, totalCarga };
+    nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, coordsDeTexto, estadoCredito, totalCarga,
+    monedaDePago, formatoMonto, resumenConciliados };
 }

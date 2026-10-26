@@ -32,8 +32,17 @@ Cada cambio queda en la hoja `Historial` (fecha, pedido, usuario, acción, detal
 `cobro`: '' **Por cobrar** → `cancelado` **Cancelado · por conciliar** (el vendedor reporta que el
 cliente pagó) → `conciliado` **Conciliado** (Administración verificó que recibió el dinero).
 Administración puede conciliar directo, **rechazar** un pago reportado (motivo; vuelve a Por cobrar)
-o **deshacer** una conciliación. Pestañas: *Por cobrar* (vendedor/admin/master) y *Por conciliar*
-(admin/master).
+o **deshacer** una conciliación. Pestañas: *Por cobrar* (vendedor/admin/master), *Por conciliar*
+(admin/master) y *Conciliados*.
+Al marcar Cancelado el vendedor indica **monto y moneda** (USD / Bs; por defecto según el método de
+pago). Al conciliar, Administración ve lo reportado y puede corregir el monto recibido. Rechazar borra
+el monto.
+
+## Conciliados
+Pestaña *Conciliados* con período (Hoy / 7 / 30 / 90 días, por fecha de conciliación): total en USD
+y en Bs, pedidos y cajas; tablas **por vendedor** (no se muestra al vendedor, que solo ve lo suyo) y
+**por método de pago**; productos conciliados; y la lista de pedidos (`resumenConciliados` en
+`js/crm-core.js`).
 
 ## Crédito
 Si el pago es a crédito, los **días de crédito** son obligatorios (7/15/21/30 u otro, 1–180) y se
@@ -70,7 +79,7 @@ va directo al formulario del pedido.
 |---|---|
 | `Usuarios` | id, usuario, nombre, rol, pin_hash, activo, created_at |
 | `Clientes` | (10 de GPS_CLIENTES) id, nombre, rif_cedula, direccion, latitud, longitud, telefono, updated_at, sync_status, deleted + contacto, telefono2, vendedor_id, created_at |
-| `Pedidos` | id, fecha, vendedor_id, vendedor, cliente_id, cliente, negocio, total_cajas, detalle_unidades, pago, nota, estado, estado_at, estado_por, motivo, client_ref, created_at, updated_at, despachador_id, despachador, confirmado_por, confirmado_at, entregado_por, entregado_at, documento, dias_credito, cobro, cobrado_at, cobrado_por, conciliado_at, conciliado_por |
+| `Pedidos` | id, fecha, vendedor_id, vendedor, cliente_id, cliente, negocio, total_cajas, detalle_unidades, pago, nota, estado, estado_at, estado_por, motivo, client_ref, created_at, updated_at, despachador_id, despachador, confirmado_por, confirmado_at, entregado_por, entregado_at, documento, dias_credito, cobro, cobrado_at, cobrado_por, conciliado_at, conciliado_por, monto, moneda |
 | `PedidoItems` | pedido_id, code, producto, cajas, unidades_caja, unidad, total_unidades |
 | `Historial` | fecha, pedido_id, usuario, accion, detalle |
 
@@ -85,13 +94,13 @@ como rol `vendedor` conservando id y PIN.
 | `clientes` | M, A, V | q, limite? |
 | `guardarCliente` | M, A, V | cliente{id?, negocio, contacto, rif_cedula, telefono?, telefono2, direccion, latitud, longitud} — alta/edición sin pedido; no duplica (teléfono, RIF o mismo nombre) |
 | `guardarPedido` | M, A, V | client_ref, cliente{…}, items[], documento ("Nota de entrega" / "Factura", obligatorio; factura exige RIF), pago, dias_credito (obligatorio si es crédito), nota |
-| `pedidos` | todos (filtrado por rol) | estados[]?, dias?, cliente_id?, por_cobrar?, por_conciliar? |
+| `pedidos` | todos (filtrado por rol) | estados[]?, dias?, cliente_id?, por_cobrar?, por_conciliar?, conciliados? (con dias) |
 | `pedido` | todos (si lo puede ver) | pedido_id → pedido + items + cliente + historial |
 | `estado` | según tabla | pedido_id, estado, motivo?, despachador_id? |
-| `cobro` | V (cancelar sus pedidos), A, M | pedido_id, accion: cancelar · conciliar · rechazar (motivo) · desconciliar |
+| `cobro` | V (cancelar sus pedidos), A, M | pedido_id, accion: cancelar (monto, moneda) · conciliar (monto?, moneda?) · rechazar (motivo) · desconciliar |
 | `despachadores` | M, A | — |
 | `resumen` | M, A, V | dias |
 | `usuarios` / `guardarUsuario` | M | id?, usuario, nombre, rol, activo, clave? |
 
 ## Fuera de alcance
-Precios, inventario, envío automático a grupos de WhatsApp (se usa el menú compartir).
+Lista de precios (el monto lo escribe quien cobra), inventario, envío automático a grupos de WhatsApp (se usa el menú compartir).

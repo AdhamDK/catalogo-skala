@@ -19,6 +19,12 @@ var NOMBRE_ROL = { master: 'Master', admin: 'Administración', vendedor: 'Vended
 var ESTADOS = ['pendiente', 'confirmado', 'en_ruta', 'entregado', 'cancelado'];
 var DOCUMENTOS = ['Nota de entrega', 'Factura'];
 var MAX_DIAS_CREDITO = 180;
+var MONEDAS = ['USD', 'Bs'];
+/* Monto cobrado: número > 0 con hasta 2 decimales (acepta coma decimal) */
+function montoValido_(v) {
+  var n = Number(String(v === undefined || v === null ? '' : v).replace(/\s/g, '').replace(',', '.'));
+  return isFinite(n) && n > 0 && n < 1e9 ? Math.round(n * 100) / 100 : 0;
+}
 var esCredito_ = function (pago) { return /cr[eé]dito/i.test(String(pago || '')); };
 var GESTION = ['master', 'admin'];          // ven y corrigen todo
 var TOMAN_PEDIDOS = ['master', 'admin', 'vendedor'];
@@ -34,7 +40,8 @@ var HOJAS = {
             'estado_por', 'motivo', 'client_ref', 'created_at', 'updated_at',
             'despachador_id', 'despachador', 'confirmado_por', 'confirmado_at',
             'entregado_por', 'entregado_at', 'documento',
-            'dias_credito', 'cobro', 'cobrado_at', 'cobrado_por', 'conciliado_at', 'conciliado_por'],
+            'dias_credito', 'cobro', 'cobrado_at', 'cobrado_por', 'conciliado_at', 'conciliado_por',
+            'monto', 'moneda'],
   PedidoItems: ['pedido_id', 'code', 'producto', 'cajas', 'unidades_caja', 'unidad', 'total_unidades'],
   Historial: ['fecha', 'pedido_id', 'usuario', 'accion', 'detalle']
 };
@@ -405,6 +412,7 @@ function pedidoConItems_(ped, items) {
   HOJAS.Pedidos.forEach(function (k) { o[k] = ped[k]; });
   o.total_cajas = Number(o.total_cajas);
   o.dias_credito = Number(o.dias_credito) || 0;
+  o.monto = o.monto === '' || o.monto === undefined ? '' : Number(o.monto);
   o.items = items.filter(function (it) { return String(it.pedido_id) === String(ped.id); }).map(function (it) {
     return { code: it.code, producto: it.producto, cajas: Number(it.cajas), unidades_caja: it.unidades_caja === '' ? '' : Number(it.unidades_caja), unidad: it.unidad, total_unidades: it.total_unidades === '' ? '' : Number(it.total_unidades) };
   });
@@ -501,6 +509,8 @@ function accionPedidos_(p, ses) {
     }
     // Por conciliar: el vendedor lo marcó cancelado y Administración debe verificarlo
     if (p.por_conciliar) return String(x.cobro) === 'cancelado';
+    // Conciliados en el período (por fecha de conciliación)
+    if (p.conciliados) return String(x.cobro) === 'conciliado' && String(x.conciliado_at) >= desde;
     if (estados.length && estados.indexOf(String(x.estado)) === -1) return false;
     // Lo que sigue abierto se muestra aunque sea viejo
     var abierto = ['pendiente', 'confirmado', 'en_ruta'].indexOf(String(x.estado)) !== -1;
@@ -537,20 +547,28 @@ function accionCobro_(p, ses) {
     if (String(ped.estado) !== 'entregado') return { ok: false, error: 'El cobro se registra cuando el pedido ya fue entregado.', code: 'estado' };
     var cobro = String(ped.cobro || '');
     var t = ahora_(), detalle = '';
+    var monto = montoValido_(p.monto);
+    var moneda = MONEDAS.indexOf(String(p.moneda)) !== -1 ? String(p.moneda) : '';
     if (accion === 'cancelar') {
       if (cobro) return { ok: false, error: 'Ese pedido ya figura como ' + (cobro === 'conciliado' ? 'conciliado' : 'cancelado') + '.', code: 'repetido' };
+      if (!monto || !moneda) return { ok: false, error: 'Indicá cuánto cobraste y en qué moneda.', code: 'monto' };
       ped.cobro = 'cancelado'; ped.cobrado_at = t; ped.cobrado_por = ses.nombre;
+      ped.monto = monto; ped.moneda = moneda; detalle = monto + ' ' + moneda;
     } else if (!gestion) {
       return { ok: false, error: 'Solo Administración verifica y concilia los pagos.', code: 'forbidden' };
     } else if (accion === 'conciliar') {
       if (cobro === 'conciliado') return { ok: false, error: 'Ese pago ya está conciliado.', code: 'repetido' };
+      // Administración confirma (o corrige) el monto recibido
+      if (monto && moneda) { ped.monto = monto; ped.moneda = moneda; }
+      if (!montoValido_(ped.monto) || MONEDAS.indexOf(String(ped.moneda)) === -1) return { ok: false, error: 'Indicá el monto recibido y la moneda.', code: 'monto' };
       if (!cobro) { ped.cobrado_at = t; ped.cobrado_por = ses.nombre; } // Administración recibió el pago directo
       ped.cobro = 'conciliado'; ped.conciliado_at = t; ped.conciliado_por = ses.nombre;
+      detalle = Number(ped.monto) + ' ' + ped.moneda;
     } else if (accion === 'rechazar') {
       if (cobro !== 'cancelado') return { ok: false, error: 'Solo se rechaza un pago reportado como cancelado.', code: 'estado' };
       detalle = txt_(p.motivo, 200);
       if (!detalle) return { ok: false, error: 'Indicá por qué no se recibió el pago.', code: 'motivo' };
-      ped.cobro = ''; ped.cobrado_at = ''; ped.cobrado_por = '';
+      ped.cobro = ''; ped.cobrado_at = ''; ped.cobrado_por = ''; ped.monto = ''; ped.moneda = '';
     } else if (accion === 'desconciliar') {
       if (cobro !== 'conciliado') return { ok: false, error: 'Ese pago no está conciliado.', code: 'estado' };
       ped.cobro = 'cancelado'; ped.conciliado_at = ''; ped.conciliado_por = '';
