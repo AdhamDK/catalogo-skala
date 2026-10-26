@@ -51,7 +51,14 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
   para corregir datos) → 2) productos con + / − → 3) **¿Nota de entrega o factura?** (factura pide
   RIF), pago y nota → **Enviar pedido** → **Enviar al grupo**.
 - **Administración**: **Inicio / Pedidos → Por aprobar** → abrir el pedido → **Aprobar** (elige despachador) o **Anular** (con motivo).
-- **Despachador**: **Entregas** → abrir el pedido → *Salió en ruta* → *Entregado* (con Llamar, WhatsApp y Mapa).
+- **Despachador**: en Inicio ve "Hoy tenés por entregar N cajas". En **Entregas** elige pedidos →
+  **Ver total de carga** (cajas por producto para cargar). Abre cada pedido → *Salió en ruta* →
+  *Entregado* (con Llamar, WhatsApp y Mapa).
+- **Cobro**: el vendedor, con el pedido entregado y pagado, toca **Marcar cancelado (pagado)**.
+  Administración lo ve en **Por conciliar**, verifica el dinero y toca **Conciliar pago**, o
+  **Pago no recibido** (vuelve a Por cobrar).
+- **Crédito**: al enviar un pedido a crédito se eligen los días; cuentan desde la entrega.
+  Banderas: verde al día · amarilla por vencer (≤ 3 días) · roja vencido · morada vencido hace más de 15 días.
 - **Master**: todo lo anterior + **Más → Resumen** y **Más → Usuarios** (crear, clave, rol, activar).
 - **Clientes**: ficha con datos, mapa e historial de pedidos; "Nuevo pedido para este cliente".
 - **Añadir cliente** (Clientes → Añadir cliente): para pasar la base de clientes sin pedidos.

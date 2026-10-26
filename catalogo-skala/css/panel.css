@@ -255,3 +255,50 @@ html[data-tema="oscuro"] .tarjeta { box-shadow: none; }
 .resumen-items em { font-style: normal; color: var(--tinta-suave); font-size: 0.85rem; white-space: nowrap; }
 .pay.documento { border-width: 2px; }
 .pay.falta { border-color: #e0245e; box-shadow: 0 0 0 3px rgba(224, 36, 94, 0.15); }
+
+/* ---------- Banderas de cobro / crédito ---------- */
+.bandera {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 3px 10px 3px 8px;
+  border-radius: 999px; font-size: 0.78rem; font-weight: 700; background: var(--crema-2); color: var(--tinta);
+}
+.bandera i { flex: 0 0 auto; width: 10px; height: 13px; background: currentColor; clip-path: polygon(0 0, 100% 28%, 18% 56%, 18% 100%, 0 100%); }
+.b-al_dia { background: #e3f3d6; color: #2f6b12; }
+.b-proximo { background: #fff1c2; color: #7a5300; }
+.b-vencido { background: #fde0e0; color: #a3161b; }
+.b-muy_vencido { background: #efe0fa; color: #5e2390; }
+.b-por_conciliar { background: #e2eefb; color: #1f5b9a; }
+.b-pagado { background: #e3f3d6; color: #2f6b12; }
+.b-por_cobrar, .b-sin_entregar { background: var(--crema-2); color: var(--tinta-suave); }
+html[data-tema="oscuro"] .b-al_dia, html[data-tema="oscuro"] .b-pagado { background: rgba(122, 182, 72, 0.18); color: #b9e08e; }
+html[data-tema="oscuro"] .b-proximo { background: rgba(245, 196, 42, 0.18); color: #f5d77a; }
+html[data-tema="oscuro"] .b-vencido { background: rgba(229, 72, 77, 0.2); color: #ff9da0; }
+html[data-tema="oscuro"] .b-muy_vencido { background: rgba(160, 91, 208, 0.25); color: #dcbcf5; }
+html[data-tema="oscuro"] .b-por_conciliar { background: rgba(74, 144, 217, 0.2); color: #9cc6f2; }
+.stat-alerta { border-color: #e5484d !important; }
+.stat-alerta strong { color: #c41d22; }
+html[data-tema="oscuro"] .stat-alerta strong { color: #ff8a8e; }
+
+/* ---------- Días de crédito ---------- */
+.dias-credito { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--borde); }
+.dias-tit { margin: 0 0 6px; font-weight: 600; font-size: 0.9rem; }
+.dias-credito .selector-tema { grid-template-columns: repeat(4, 1fr); }
+.dias-credito .field { margin-top: 8px; }
+
+/* ---------- Selección y total de carga ---------- */
+.fila-elegir { margin: 0 0 6px; }
+.lista-ped li.con-check { display: grid; grid-template-columns: 44px 1fr; align-items: stretch; gap: 6px; }
+.check-ped {
+  display: grid; place-items: center; border-radius: 14px; background: var(--superficie);
+  border: 1px solid var(--borde-suave); cursor: pointer;
+}
+.check-ped input, .lista-carga input, .fila-elegir input { width: 22px; height: 22px; accent-color: var(--verde); }
+.carga-total, .carga-hoy { text-align: center; }
+.carga-hoy p { margin: 0; }
+.carga-grande { margin: 4px 0 0; font-size: 1.1rem; }
+.carga-grande strong { font-family: "Baloo 2", sans-serif; font-size: 2.6rem; line-height: 1; }
+.lista-carga { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.lista-carga .check { padding: 6px 0; border-bottom: 1px solid var(--borde-suave); }
+.lista-carga input:checked + span { text-decoration: line-through; opacity: 0.6; }
+.resumen-items a { color: var(--enlace); font-weight: 600; }
+
+.fila-top .chip-estado { max-width: 55%; white-space: normal; text-align: center; line-height: 1.25; }

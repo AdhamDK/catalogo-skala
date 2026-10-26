@@ -188,7 +188,12 @@ function servidor() {
   await tocar("#btnEnviar");
   assert.match(await page.innerText("#eError"), /RIF o la cédula/);
   await page.fill("#eRif", "J-12345678-9");
-  await tocar('input[name="ePago"][value="Divisas · Contado"]');
+  await tocar('input[name="ePago"][value="Divisas · Crédito"]');
+  assert.ok(await page.locator("#eCredito").isVisible());
+  await tocar("#btnEnviar");
+  assert.match(await page.innerText("#eError"), /días de crédito/);
+  await tocar('#eCredito [data-dias="15"]');
+  assert.equal(await page.inputValue("#eDias"), "15");
   await foto("03-enviar");
   await revisarDiseno("enviar");
   await tocar("#btnEnviar");
@@ -197,7 +202,7 @@ function servidor() {
   const msg = await page.inputValue("#lMensaje");
   assert.match(msg, /• 2 × Babosa \(BC-01\) = 12 unidades/);
   assert.match(msg, /• 5 × Kit Aguacate \(KT-02\) = 30 dúos/);
-  assert.match(msg, /Pago: Divisas · Contado\nDocumento: Factura/);
+  assert.match(msg, /Pago: Divisas · Crédito \(15 días\)\nDocumento: Factura/);
   assert.match(msg, /RIF: J-12345678-9/);
   await page.click("#btnGrupo");
   assert.deepEqual(await page.evaluate(() => window.__compartido), [msg]);
@@ -207,14 +212,16 @@ function servidor() {
   assert.ok(await page.locator(".app-nav .badge").count() === 0);
   await foto("04-listo");
   assert.equal(gas.tabla("Pedidos")[0].documento, "Factura");
+  assert.equal(gas.tabla("Pedidos")[0].dias_credito, 15);
   assert.equal(gas.tabla("Clientes")[0].rif_cedula, "J-12345678-9");
-  ok("paso 3: nota o factura obligatorio (factura pide RIF) → guardado en Sheets → enviar al grupo");
+  ok("paso 3: nota o factura (factura pide RIF) y días de crédito obligatorios → Sheets → grupo");
 
   /* ---------- Inicio, pedidos, detalle ---------- */
   await page.click('.app-nav a[href="#/inicio"]');
   await esperarRuta("#/inicio");
   await page.waitForSelector("#iLista .fila-ped");
-  assert.deepEqual(await page.locator("#iStats .stat strong").allInnerTexts(), ["1", "9", "1", "0"]);
+  // pedidos hoy · cajas hoy · en proceso · en despacho · crédito vencido · por cobrar
+  assert.deepEqual(await page.locator("#iStats .stat strong").allInnerTexts(), ["1", "9", "1", "0", "0", "1"]);
   await foto("05-inicio");
   await revisarDiseno("inicio");
   await page.click('.app-nav a[href="#/pedidos"]');
@@ -354,7 +361,27 @@ function servidor() {
   assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Entregas", "Más"]);
   await page.waitForSelector("#iLista .fila-ped");
   assert.match(await page.innerText("#iLista"), /Av\. Bolívar/);
+  assert.match(await page.innerText(".carga-hoy"), /Hoy tenés por entregar\s+9 cajas/);
+  await foto("07b-inicio-despachador");
   await page.click('.app-nav a[href="#/entregas"]');
+  await esperarRuta("#/entregas");
+  assert.ok(await page.locator("#pBarra").isHidden());
+  await page.check("#pTodos");
+  assert.match(await page.innerText("#pBarra"), /1 pedido · 9 cajas/);
+  await foto("07c-elegir-carga");
+  await revisarDiseno("entregas con selección");
+  await page.click("#btnVerCarga");
+  await esperarRuta("#/carga");
+  assert.match(await page.innerText(".carga-total"), /9\s+cajas/);
+  assert.deepEqual((await page.locator(".lista-carga li").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim().split(" · ")[0]),
+    ["5 × Kit Aguacate KT-02", "2 × Babosa BC-01", "1 × Mais Cachos BC-06", "1 × Kit 12 em 1 KT-01"]);
+  await page.locator(".lista-carga input").first().check();
+  await page.click("#btnCompartirCarga");
+  assert.match((await page.evaluate(() => window.__compartido)).at(-1), /\*CARGA LUIS\* · 1 pedido\(s\) · 9 cajas[\s\S]*• 5 × Kit Aguacate/);
+  await foto("07d-carga");
+  await revisarDiseno("total de carga");
+  ok("despachador: hoy tenés N cajas, elegir pedidos → total de carga por producto y compartir");
+  await page.click("#btnAtras");
   await esperarRuta("#/entregas");
   await page.click("#pLista .fila-ped");
   await esperarRuta("#/pedido/");
@@ -372,6 +399,62 @@ function servidor() {
   await esperarRuta("#/inicio");
   ok("despachador: entregas con mapa, en ruta → entregado; Nuevo pedido bloqueado");
   await salir();
+
+  /* ---------- Crédito y cobro: banderas, cancelado (vendedor) → conciliado (Administración) ---------- */
+  const fijarEntrega = (diasAtras) => {
+    const h = gas.hojas.Pedidos, cab = h.filas[0].map((c) => String(c).replace(/^'/, ""));
+    h.filas[1][cab.indexOf("entregado_at")] = "'" + new Date(Date.now() - diasAtras * 86400000).toISOString();
+  };
+  await ingresar("oscar", "Oscar.1234");
+  await esperarRuta("#/inicio");
+  await page.goto(BASE + "/panel.html#/pedidos?tab=cobrar");
+  await esperarRuta("#/pedidos");
+  assert.match(await page.innerText("#pLista .bandera"), /Vence en 15 días/);
+  assert.ok(await page.locator("#pLista .b-al_dia").count());
+  fijarEntrega(13); await page.reload(); await esperarRuta("#/pedidos");
+  assert.match(await page.innerText("#pLista .bandera"), /Vence en 2 días/);
+  assert.ok(await page.locator("#pLista .b-proximo").count());
+  fijarEntrega(20); await page.reload(); await esperarRuta("#/pedidos");
+  assert.match(await page.innerText("#pLista .bandera"), /Vencido hace 5 días/);
+  assert.ok(await page.locator("#pLista .b-vencido").count());
+  fijarEntrega(40); await page.reload(); await esperarRuta("#/pedidos");
+  assert.match(await page.innerText("#pLista .bandera"), /Vencido hace 25 días/);
+  assert.ok(await page.locator("#pLista .b-muy_vencido").count());
+  assert.match(await page.innerText("#pInfo"), /1 vencido/);
+  await foto("09a-por-cobrar");
+  await page.goto(BASE + "/panel.html#/inicio");
+  await esperarRuta("#/inicio");
+  assert.ok(await page.locator(".stat-alerta").count());
+  await page.goto(BASE + "/panel.html#/pedidos?tab=cobrar");
+  await esperarRuta("#/pedidos");
+  await page.click("#pLista .fila-ped");
+  await esperarRuta("#/pedido/");
+  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Marcar cancelado (pagado)"]);
+  await page.click('[data-acc="cobrar"]');
+  await page.click("#hojaOk");
+  await page.waitForFunction(() => /Cancelado · por conciliar/.test(document.querySelector(".bandera")?.textContent || ""));
+  assert.equal(await page.locator(".acciones-ped .btn").count(), 0);
+  assert.equal(gas.tabla("Pedidos")[0].cobro, "cancelado");
+  await foto("09b-cancelado");
+  await salir();
+  ok("crédito: bandera verde → amarilla → roja → morada; el vendedor marca Cancelado (pagado)");
+
+  await ingresar("ana", "Ana*2222");
+  await esperarRuta("#/inicio");
+  await page.goto(BASE + "/panel.html#/pedidos?tab=conciliar");
+  await esperarRuta("#/pedidos");
+  await page.click("#pLista .fila-ped");
+  await esperarRuta("#/pedido/");
+  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Conciliar pago (recibido)", "Pago no recibido"]);
+  await page.click('[data-acc="conciliar"]');
+  await page.click("#hojaOk");
+  await page.waitForFunction(() => /Conciliado/.test(document.querySelector(".bandera")?.textContent || ""));
+  assert.equal(gas.tabla("Pedidos")[0].cobro, "conciliado");
+  assert.match(await page.innerText(".historial"), /Cancelado \(pago reportado\) · Óscar[\s\S]*Pago conciliado · Ana/);
+  await foto("09c-conciliado");
+  await revisarDiseno("detalle conciliado");
+  await salir();
+  ok("administración verifica el pago y lo marca Conciliado");
 
   /* ---------- Master ---------- */
   await ingresar("jose", "Skala#2026");
@@ -408,6 +491,17 @@ function servidor() {
   await esperarRuta("#/pedidos");
   await page.click("#pLista .fila-ped");
   await esperarRuta("#/pedido/");
+  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Deshacer conciliación"]);
+  await page.click('[data-acc="desconciliar"]');
+  await page.click("#hojaOk");
+  await page.waitForSelector('[data-acc="rechazar"]');
+  await page.click('[data-acc="rechazar"]');
+  await page.click("#hojaOk");
+  assert.match(await page.innerText("#hojaError"), /motivo/);
+  await page.fill('#hoja textarea[name="motivo"]', "No llegó la transferencia");
+  await page.click("#hojaOk");
+  await page.waitForSelector('[data-acc="reabrir"]');
+  assert.equal(gas.tabla("Pedidos")[0].cobro, "");
   await page.click('[data-acc="reabrir"]');
   await page.click("#hojaOk");
   await page.waitForFunction(() => /En proceso/.test(document.querySelector(".chip-estado")?.textContent || ""));

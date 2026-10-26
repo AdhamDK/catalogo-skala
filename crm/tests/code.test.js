@@ -448,3 +448,70 @@ test("documento: nota de entrega o factura es obligatorio; factura exige RIF", (
   assert.equal(g.tabla("Pedidos").at(-1).documento, "Factura");
   assert.equal(g.post({ action: "pedido", token: t, pedido_id: r.pedido.id }).pedido.documento, "Factura");
 });
+
+test("crédito: días obligatorios si el pago es a crédito", () => {
+  const g = preparar();
+  const t = login(g);
+  assert.equal(pedir(g, t, { pago: "Divisas · Crédito" }).code, "credito");
+  assert.equal(pedir(g, t, { pago: "Divisas · Crédito", dias_credito: 0 }).code, "credito");
+  assert.equal(pedir(g, t, { pago: "Divisas · Crédito", dias_credito: 500 }).code, "credito");
+  const r = pedir(g, t, { pago: "Bolívares · Crédito", dias_credito: 15 });
+  assert.equal(r.pedido.dias_credito, 15);
+  assert.equal(pedir(g, t, { pago: "Divisas · Contado", dias_credito: 15 }).pedido.dias_credito, 0);
+});
+
+test("cobro: vendedor marca cancelado; administración concilia o rechaza", () => {
+  const g = preparar();
+  const tv = login(g), ta = login(g, "ana", "Ana*2222"), tl = login(g, "luis", "Luis5555"), tk = login(g, "kevin", "Kevin9876");
+  const id = pedir(g, tv, { pago: "Divisas · Crédito", dias_credito: 15 }).pedido.id;
+  const cobro = (token, accion, extra = {}) => g.post({ action: "cobro", token, pedido_id: id, accion, ...extra });
+  assert.equal(cobro(tv, "cancelar").code, "estado"); // aún no entregado
+  g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: idDe(g, "luis") });
+  g.post({ action: "estado", token: tl, pedido_id: id, estado: "entregado" });
+  assert.equal(cobro(tl, "cancelar").code, "forbidden");   // despachador no
+  assert.equal(cobro(tk, "cancelar").code, "not_found");   // otro vendedor no
+  const c = cobro(tv, "cancelar");
+  assert.equal(c.pedido.cobro, "cancelado");
+  assert.equal(c.pedido.cobrado_por, "Óscar");
+  assert.equal(cobro(tv, "cancelar").code, "repetido");
+  assert.equal(cobro(tv, "conciliar").code, "forbidden");  // el vendedor no concilia
+  // por conciliar (Administración)
+  assert.deepEqual(g.post({ action: "pedidos", token: ta, por_conciliar: true }).pedidos.map((p) => p.id), [id]);
+  assert.equal(cobro(ta, "rechazar").code, "motivo");
+  assert.equal(cobro(ta, "rechazar", { motivo: "No llegó la transferencia" }).pedido.cobro, "");
+  cobro(tv, "cancelar");
+  const k = cobro(ta, "conciliar");
+  assert.equal(k.pedido.cobro, "conciliado");
+  assert.equal(k.pedido.conciliado_por, "Ana");
+  assert.equal(g.post({ action: "pedidos", token: ta, por_conciliar: true }).pedidos.length, 0);
+  assert.equal(cobro(ta, "desconciliar").pedido.cobro, "cancelado");
+  assert.deepEqual(g.tabla("Historial").map((h) => h.accion).slice(-5), ["cobrado", "pago_rechazado", "cobrado", "conciliado", "conciliacion_deshecha"]);
+  assert.equal(g.tabla("Historial").find((h) => h.accion === "pago_rechazado").detalle, "No llegó la transferencia");
+});
+
+test("administración puede conciliar directo un pago que recibió", () => {
+  const g = preparar();
+  const tv = login(g), ta = login(g, "ana", "Ana*2222"), tl = login(g, "luis", "Luis5555");
+  const id = pedir(g, tv).pedido.id;
+  g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: idDe(g, "luis") });
+  g.post({ action: "estado", token: tl, pedido_id: id, estado: "entregado" });
+  const r = g.post({ action: "cobro", token: ta, pedido_id: id, accion: "conciliar" });
+  assert.equal(r.pedido.cobro, "conciliado");
+  assert.equal(r.pedido.cobrado_por, "Ana");
+});
+
+test("por cobrar: crédito sin pagar (cualquier estado) y contado entregado sin pagar", () => {
+  const g = preparar();
+  const tv = login(g), ta = login(g, "ana", "Ana*2222"), tl = login(g, "luis", "Luis5555");
+  const cred = pedir(g, tv, { pago: "Divisas · Crédito", dias_credito: 7 }).pedido.id;
+  const cont = pedir(g, tv, { pago: "Divisas · Contado" }).pedido.id;
+  const anul = pedir(g, tv, { pago: "Divisas · Crédito", dias_credito: 7 }).pedido.id;
+  g.post({ action: "estado", token: ta, pedido_id: anul, estado: "cancelado", motivo: "x" });
+  const ids = () => g.post({ action: "pedidos", token: tv, por_cobrar: true }).pedidos.map((p) => p.id).sort();
+  assert.deepEqual(ids(), [cred]);
+  g.post({ action: "estado", token: ta, pedido_id: cont, estado: "confirmado", despachador_id: idDe(g, "luis") });
+  g.post({ action: "estado", token: tl, pedido_id: cont, estado: "entregado" });
+  assert.deepEqual(ids(), [cred, cont].sort());
+  g.post({ action: "cobro", token: tv, pedido_id: cont, accion: "cancelar" });
+  assert.deepEqual(ids(), [cred]); // cancelado: ya no está por cobrar (queda por conciliar)
+});

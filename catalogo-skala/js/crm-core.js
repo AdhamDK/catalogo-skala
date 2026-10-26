@@ -64,7 +64,7 @@ function mensajeGrupo(ped, c) {
       `• ${it.cajas} × ${it.producto} (${it.code})${it.total_unidades ? ` = ${it.total_unidades} ${it.unidad}` : ""}`),
     "",
     `*Total: ${ped.total_cajas} caja${Number(ped.total_cajas) === 1 ? "" : "s"}*${ped.detalle_unidades ? ` · ${ped.detalle_unidades}` : ""}`,
-    ped.pago ? `Pago: ${ped.pago}` : null,
+    ped.pago ? `Pago: ${ped.pago}${Number(ped.dias_credito) > 0 ? ` (${ped.dias_credito} días)` : ""}` : null,
     ped.documento ? `Documento: ${ped.documento}` : null,
     ped.nota ? `Nota: ${ped.nota}` : null,
     ped.estado === "cancelado" && ped.motivo ? `Motivo: ${ped.motivo}` : null,
@@ -82,13 +82,24 @@ function puedeTomarPedidos(rol) { return rol === "master" || rol === "admin" || 
 
 function accionesPedido(rol, uid, p) {
   const e = p.estado;
+  const cobro = p.cobro || "";
   if (rol === "master" || rol === "admin") {
     if (e === "pendiente") return ["confirmar", "cancelar"];
     if (e === "confirmado") return ["en_ruta", "reasignar", "cancelar"];
     if (e === "en_ruta") return ["entregado", "reasignar", "cancelar"];
+    if (e === "entregado") {
+      if (cobro === "cancelado") return ["conciliar", "rechazar"];
+      if (cobro === "conciliado") return ["desconciliar"];
+      return ["conciliar", "reabrir"];
+    }
     return ["reabrir"];
   }
-  if (rol === "vendedor") return e === "pendiente" && String(p.vendedor_id) === String(uid) ? ["cancelar"] : [];
+  if (rol === "vendedor") {
+    if (String(p.vendedor_id) !== String(uid)) return [];
+    if (e === "pendiente") return ["cancelar"];
+    if (e === "entregado" && !cobro) return ["cobrar"];
+    return [];
+  }
   if (rol === "despachador" && String(p.despachador_id) === String(uid)) {
     if (e === "confirmado") return ["en_ruta", "entregado"];
     if (e === "en_ruta") return ["entregado"];
@@ -107,6 +118,8 @@ function pestanasPanel(rol) {
     { id: "pendiente", nombre: rol === "vendedor" ? "En proceso" : "Por aprobar", estados: ["pendiente"] },
     { id: "curso", nombre: "En despacho", estados: ["confirmado", "en_ruta"] },
     { id: "entregado", nombre: "Entregados", estados: ["entregado"] },
+    { id: "cobrar", nombre: "Por cobrar", filtro: "por_cobrar" },
+    ...(rol === "vendedor" ? [] : [{ id: "conciliar", nombre: "Por conciliar", filtro: "por_conciliar" }]),
     { id: "cancelado", nombre: "Anulados", estados: ["cancelado"] },
     { id: "resumen", nombre: "Resumen" },
   ];
@@ -115,6 +128,47 @@ function pestanasPanel(rol) {
 }
 
 /* opciones.telefonoOpcional: alta manual de clientes (traspaso), el teléfono puede faltar */
+/* -------------------- Crédito: banderas por vencimiento --------------------
+   Los días se cuentan desde la entrega. Niveles: al_dia (verde) · proximo (amarilla, ≤ 3 días)
+   · vencido (roja, hasta 15 días) · muy_vencido (morada, más de 15) · por_conciliar · pagado. */
+const CREDITO_PROXIMO = 3, CREDITO_MUY_VENCIDO = 15;
+const DIA = 86400000;
+const soloFecha = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const isoDia = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function estadoCredito(p, hoy = new Date()) {
+  const dias = Number(p.dias_credito) || 0;
+  if (!dias || p.estado === "cancelado") return null;
+  if (p.estado !== "entregado" || !p.entregado_at) return { nivel: "sin_entregar", vence: "", dias, texto: `Crédito ${dias} días · cuenta desde la entrega` };
+  const vence = soloFecha(new Date(new Date(p.entregado_at).getTime() + dias * DIA));
+  if (p.cobro === "cancelado") return { nivel: "por_conciliar", vence: isoDia(vence), dias: 0, texto: "Cancelado · por conciliar" };
+  if (p.cobro === "conciliado") return { nivel: "pagado", vence: isoDia(vence), dias: 0, texto: "Conciliado" };
+  const faltan = Math.round((vence - soloFecha(hoy)) / DIA);
+  const s = (n) => `${n} día${n === 1 ? "" : "s"}`;
+  if (faltan > CREDITO_PROXIMO) return { nivel: "al_dia", vence: isoDia(vence), dias: faltan, texto: `Vence en ${s(faltan)}` };
+  if (faltan >= 0) return { nivel: "proximo", vence: isoDia(vence), dias: faltan, texto: faltan === 0 ? "Vence hoy" : `Vence en ${s(faltan)}` };
+  const atraso = -faltan;
+  return { nivel: atraso > CREDITO_MUY_VENCIDO ? "muy_vencido" : "vencido", vence: isoDia(vence), dias: atraso, texto: `Vencido hace ${s(atraso)}` };
+}
+
+/* -------------------- Total de carga (despachador) -------------------- */
+function totalCarga(pedidos) {
+  const prod = {};
+  let cajas = 0;
+  (pedidos || []).forEach((p) => {
+    (p.items || []).forEach((it) => {
+      const k = it.code;
+      const x = prod[k] || (prod[k] = { code: k, producto: it.producto, cajas: 0, total_unidades: 0, unidad: it.unidad || "unidades" });
+      x.cajas += Number(it.cajas) || 0;
+      x.total_unidades += Number(it.total_unidades) || 0;
+      cajas += Number(it.cajas) || 0;
+    });
+  });
+  const productos = Object.values(prod).sort((a, b) => b.cajas - a.cajas || a.code.localeCompare(b.code));
+  const porUnidad = {};
+  productos.forEach((x) => { if (x.total_unidades) porUnidad[x.unidad] = (porUnidad[x.unidad] || 0) + x.total_unidades; });
+  return { pedidos: (pedidos || []).length, cajas, productos, unidades: Object.entries(porUnidad).map(([u, n]) => `${n} ${u}`).join(" + ") };
+}
+
 function validarCliente(c, opciones = {}) {
   const faltan = [];
   if (!String(c.negocio || c.nombre || c.contacto || "").trim()) faltan.push("Nombre del cliente o del negocio");
@@ -159,5 +213,5 @@ function nuevoRef() {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { itemsDePedido, telefonoWhatsapp, linkMapa, fechaLegible, mensajeGrupo, validarCliente, expiracionToken, nuevoRef,
-    nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, coordsDeTexto };
+    nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, coordsDeTexto, estadoCredito, totalCarga };
 }

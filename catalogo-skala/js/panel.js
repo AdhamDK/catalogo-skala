@@ -13,6 +13,7 @@
   const K_LISTO = "skala_ultimo_pedido";
   const K_DESTINO = "skala_destino";
   const K_ULTIMO_USUARIO = "skala_ultimo_usuario";
+  const K_CARGA = "skala_carga";          // pedidos elegidos para ver el total de carga
   const TODOS = ["master", "admin", "vendedor", "despachador"];
   const TOMAN = ["master", "admin", "vendedor"];
   const rol = () => (sesion() || { usuario: {} }).usuario.rol;
@@ -41,6 +42,7 @@
     pedidos: { titulo: "Pedidos", roles: TOMAN, nav: "pedidos", render: vPedidos },
     entregas: { titulo: "Mis entregas", roles: ["despachador"], nav: "entregas", render: vPedidos },
     pedido: { titulo: "Pedido", roles: TODOS, atras: true, render: vPedido },
+    carga: { titulo: "Total de carga", roles: ["despachador", "master", "admin"], atras: true, render: vCarga },
     clientes: { titulo: "Clientes", roles: TOMAN, nav: "clientes", render: vClientes },
     cliente: { titulo: "Cliente", roles: TOMAN, nav: "clientes", atras: "#/clientes", render: vCliente },
     resumen: { titulo: "Resumen", roles: TOMAN, nav: "mas", atras: "#/mas", render: vResumen },
@@ -235,6 +237,7 @@
     v.innerHTML = `
       <section class="saludo"><h2>${saludo}, ${esc(u.nombre.split(" ")[0])}</h2><p>${esc(u.rol_nombre)}</p></section>
       <div class="stats" id="iStats"><div class="stat"><strong>…</strong><span>cargando</span></div></div>
+      <div id="iDestacado"></div>
       <div class="accesos">${accesos.map(([h, t, k]) => `<a class="acceso" href="${h}">${icono(k)}<span>${t}</span></a>`).join("")}</div>
       <h3 class="sub-titulo" id="iListaTit"></h3>
       <ul class="lista-ped" id="iLista"></ul>`;
@@ -249,17 +252,33 @@
       tiles = tile(c.confirmado, "preparando despacho", "#/entregas") + tile(c.en_ruta, "en ruta", "#/entregas");
       destacados = abiertos.pedidos;
       $("iListaTit").textContent = destacados.length ? "Para entregar" : "";
+      const carga = totalCarga(abiertos.pedidos);
+      if (carga.cajas) {
+        $("iDestacado").innerHTML = `<section class="tarjeta carga-hoy"><p>Hoy tenés por entregar</p>
+          <p class="carga-grande"><strong>${carga.cajas}</strong> cajas</p><p class="ped-det">${carga.pedidos} pedido(s)${carga.unidades ? " · " + esc(carga.unidades) : ""}</p>
+          <button type="button" class="btn btn-primary btn-bloque" id="btnCargaTodo">Ver total de carga</button></section>`;
+        $("btnCargaTodo").addEventListener("click", () => { sessionStorage.removeItem(K_CARGA); ir("#/carga"); });
+      }
     } else {
-      const hoy = await api("resumen", { dias: 1 });
+      const gestion = r !== "vendedor";
+      const [hoy, porCobrar, porConciliar] = await Promise.all([
+        api("resumen", { dias: 1 }),
+        api("pedidos", { por_cobrar: true }),
+        gestion ? api("pedidos", { por_conciliar: true }) : Promise.resolve({ pedidos: [] }),
+      ]);
       if (!vigente()) return;
+      const vencidos = porCobrar.pedidos.filter((p) => { const ec = estadoCredito(p); return ec && (ec.nivel === "vencido" || ec.nivel === "muy_vencido"); }).length;
+      const proximos = porCobrar.pedidos.filter((p) => { const ec = estadoCredito(p); return ec && ec.nivel === "proximo"; }).length;
       tiles = tile(hoy.total_pedidos, "pedidos hoy", "#/pedidos") + tile(hoy.total_cajas, "cajas hoy", "#/resumen") +
         tile(c.pendiente, r === "vendedor" ? "en proceso" : "por aprobar", "#/pedidos?tab=pendiente") +
-        tile(c.confirmado + c.en_ruta, "en despacho", "#/pedidos?tab=curso");
+        tile(c.confirmado + c.en_ruta, "en despacho", "#/pedidos?tab=curso") +
+        `<a class="stat${vencidos ? " stat-alerta" : ""}" href="#/pedidos?tab=cobrar"><strong>${vencidos}</strong><span>crédito vencido${proximos ? ` · ${proximos} por vencer` : ""}</span></a>` +
+        (gestion ? tile(porConciliar.pedidos.length, "por conciliar", "#/pedidos?tab=conciliar") : tile(porCobrar.pedidos.length, "por cobrar", "#/pedidos?tab=cobrar"));
       destacados = abiertos.pedidos.filter((p) => p.estado === "pendiente").slice(0, 5);
       $("iListaTit").textContent = destacados.length ? (r === "vendedor" ? "Tus pedidos en proceso" : "Por aprobar") : "";
     }
     $("iStats").innerHTML = tiles;
-    $("iLista").innerHTML = destacados.map(filaPedido).join("");
+    $("iLista").innerHTML = destacados.map((p) => filaPedido(p)).join("");
   }
 
   /* ---------- Nuevo pedido: 2) productos ---------- */
@@ -549,9 +568,14 @@
           <label class="field field-full" id="eRifWrap" hidden><span>RIF o cédula para la factura *</span>
             <input id="eRif" type="text" autocomplete="off" autocapitalize="characters" placeholder="J-12345678-9" value="${esc(cli.rif_cedula || "")}" /></label>
         </fieldset>
-        <fieldset class="pay"><legend>Método de pago</legend>
+        <fieldset class="pay" id="fsPago"><legend>Método de pago</legend>
           ${["Bolívares · Contado", "Bolívares · Crédito", "Divisas · Contado", "Divisas · Crédito"].map((p) =>
             `<label class="pay-opt"><input type="radio" name="ePago" value="${p}" /> ${p}</label>`).join("")}
+          <div id="eCredito" class="dias-credito" hidden>
+            <p class="dias-tit">Días de crédito *</p>
+            <div class="selector-tema">${[7, 15, 21, 30].map((d) => `<button type="button" data-dias="${d}" aria-pressed="false">${d} días</button>`).join("")}</div>
+            <label class="field field-full"><span>Otro (días)</span><input id="eDias" type="number" inputmode="numeric" min="1" max="180" placeholder="ej. 45" /></label>
+          </div>
         </fieldset>
         <label class="field field-full"><span>Nota (entrega, descuento, etc.)</span><textarea id="eNota" rows="2" maxlength="300" placeholder="Opcional"></textarea></label>
         <p class="form-warn" id="eError" hidden></p>
@@ -561,6 +585,16 @@
         </div>
       </form>`;
     const doc = () => (document.querySelector('input[name="eDoc"]:checked') || {}).value || "";
+    const pagoSel = () => (document.querySelector('input[name="ePago"]:checked') || {}).value || "";
+    const esCredito = () => /crédito/i.test(pagoSel());
+    $("fsPago").addEventListener("change", (e) => { if (e.target.name === "ePago") $("eCredito").hidden = !esCredito(); });
+    $("eCredito").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-dias]");
+      if (!b) return;
+      $("eDias").value = b.dataset.dias;
+      $("eCredito").querySelectorAll("[data-dias]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    });
+    $("eDias").addEventListener("input", () => $("eCredito").querySelectorAll("[data-dias]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.dias === $("eDias").value))));
     $("fEnviar").addEventListener("input", () => { $("eError").hidden = true; });
     $("fsDoc").addEventListener("change", () => {
       $("eRifWrap").hidden = doc() !== "Factura";
@@ -575,12 +609,14 @@
       const mostrar = (m, el) => { err.textContent = m; err.hidden = false; (el || err).scrollIntoView({ block: "center" }); };
       if (!d) { $("fsDoc").classList.add("falta"); return mostrar("Elegí si el cliente quiere nota de entrega o factura.", $("fsDoc")); }
       if (d === "Factura" && rif.replace(/\D/g, "").length < 6) return mostrar("Para factura hace falta el RIF o la cédula.", $("eRifWrap"));
+      const dias = Math.floor(Number($("eDias").value));
+      if (esCredito() && !(dias >= 1 && dias <= 180)) return mostrar("Indicá los días de crédito (1 a 180).", $("eCredito"));
       err.hidden = true;
       const { _listo, ...cliente } = cli;
       if (d === "Factura") cliente.rif_cedula = rif;
       const its = itemsDePedido(carrito(), allProductsMap());
       const datos = { client_ref: nuevoRef(), cliente, items: its, documento: d,
-        pago: (document.querySelector('input[name="ePago"]:checked') || {}).value || "", nota: $("eNota").value.trim() };
+        pago: pagoSel(), dias_credito: esCredito() ? dias : 0, nota: $("eNota").value.trim() };
       const btn = $("btnEnviar");
       btn.disabled = true; btn.textContent = "Enviando…";
       const terminar = (listo) => {
@@ -628,34 +664,107 @@
   }
 
   /* ---------- Pedidos / Entregas ---------- */
-  function filaPedido(p) {
+  /* Bandera de cobro: crédito por vencimiento, o estado del pago de un pedido entregado */
+  function bandera(p) {
+    const ec = estadoCredito(p);
+    if (ec) return { clase: ec.nivel, texto: ec.texto };
+    if (p.estado !== "entregado") return null;
+    if (p.cobro === "cancelado") return { clase: "por_conciliar", texto: "Cancelado · por conciliar" };
+    if (p.cobro === "conciliado") return { clase: "pagado", texto: "Conciliado" };
+    return { clase: "por_cobrar", texto: "Por cobrar" };
+  }
+  const chipBandera = (p) => {
+    if (rol() === "despachador") return ""; // el cobro no le corresponde al despachador
+    const b = bandera(p);
+    return b ? `<span class="bandera b-${esc(b.clase)}"><i aria-hidden="true"></i>${esc(b.texto)}</span>` : "";
+  };
+
+  function filaPedido(p, elegible) {
     const r = rol();
     const extra = r === "vendedor" ? (p.despachador ? `Despacha: ${p.despachador}` : "")
       : r === "despachador" ? ((p.cliente_datos || {}).direccion || "") : `Vendedor: ${p.vendedor}${p.despachador ? ` · Despacha: ${p.despachador}` : ""}`;
-    return `<li><a class="fila-ped est-borde-${esc(p.estado)}" href="#/pedido/${encodeURIComponent(p.id)}">
+    return `<li class="${elegible ? "con-check" : ""}">${elegible ? `<label class="check-ped"><input type="checkbox" value="${esc(p.id)}" aria-label="Elegir ${esc(p.negocio)} para la carga" /></label>` : ""}
+      <a class="fila-ped est-borde-${esc(p.estado)}" href="#/pedido/${encodeURIComponent(p.id)}">
       <div class="fila-top"><strong>${esc(p.negocio)}</strong>${chipEstado(p.estado)}</div>
       <div class="ped-det">${esc(p.id)} · ${esc(fechaLegible(p.fecha))}</div>
       <div class="ped-det">${esc(p.total_cajas)} caja(s)${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}</div>
       ${extra ? `<div class="ped-det">${esc(extra)}</div>` : ""}
+      ${chipBandera(p)}
     </a></li>`;
   }
 
   async function vPedidos(v, _p, query, vigente) {
-    const tabs = pestanasPanel(rol()).filter((t) => t.estados);
+    const tabs = pestanasPanel(rol()).filter((t) => t.estados || t.filtro);
     const tab = tabs.find((t) => t.id === query.get("tab")) || tabs[0];
     const base = rol() === "despachador" ? "#/entregas" : "#/pedidos";
+    const conCarga = tab.id === "curso" && ["despachador", "admin", "master"].includes(rol());
     v.innerHTML = `
       <div class="periodos" role="tablist">${tabs.map((t) => `<a role="tab" class="tab${t.id === tab.id ? " active" : ""}" aria-selected="${t.id === tab.id}" href="${base}?tab=${t.id}">${esc(t.nombre)}</a>`).join("")}</div>
       <p class="modal-sub" id="pInfo">Cargando…</p>
-      <ul class="lista-ped" id="pLista"></ul>`;
-    const r = await api("pedidos", { estados: tab.estados, dias: 60 });
+      ${conCarga ? '<div class="fila-elegir" id="pElegir" hidden><label class="check"><input type="checkbox" id="pTodos" /> Elegir todos</label></div>' : ""}
+      <ul class="lista-ped" id="pLista"></ul>
+      ${conCarga ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}`;
+    const filtro = tab.filtro ? { [tab.filtro]: true } : { estados: tab.estados };
+    const r = await api("pedidos", { ...filtro, dias: 60 });
     if (!vigente()) return;
-    $("pInfo").textContent = r.pedidos.length ? `${r.pedidos.length} pedido(s)` : "";
-    $("pLista").innerHTML = r.pedidos.length ? r.pedidos.map(filaPedido).join("") : '<li class="vacio-panel">No hay pedidos en esta lista.</li>';
+    let lista = r.pedidos;
+    if (tab.filtro === "por_cobrar") {
+      // primero lo más atrasado
+      const peso = (p) => { const ec = estadoCredito(p); return ec && ec.vence ? (ec.nivel === "al_dia" || ec.nivel === "proximo" ? ec.dias : -ec.dias) : 9999; };
+      lista = lista.slice().sort((a, b) => peso(a) - peso(b));
+    }
+    const vencidos = lista.filter((p) => { const b = bandera(p); return b && (b.clase === "vencido" || b.clase === "muy_vencido"); }).length;
+    $("pInfo").textContent = lista.length ? `${lista.length} pedido(s)${tab.filtro === "por_cobrar" && vencidos ? ` · ${vencidos} vencido(s)` : ""}${conCarga ? " · elegí pedidos para ver el total a cargar" : ""}` : "";
+    $("pLista").innerHTML = lista.length ? lista.map((p) => filaPedido(p, conCarga)).join("") : '<li class="vacio-panel">No hay pedidos en esta lista.</li>';
+    if (!conCarga || !lista.length) return;
+    $("pElegir").hidden = false;
+    const elegidos = () => [...v.querySelectorAll('.check-ped input:checked')].map((c) => c.value);
+    const pintarSel = () => {
+      const ids = elegidos();
+      const t = totalCarga(lista.filter((p) => ids.includes(p.id)));
+      $("pBarra").hidden = !ids.length;
+      $("pSel").textContent = `${ids.length} pedido${ids.length === 1 ? "" : "s"}`;
+      $("pSelCajas").textContent = ` · ${t.cajas} caja${t.cajas === 1 ? "" : "s"}`;
+      $("pTodos").checked = ids.length === lista.length;
+    };
+    $("pLista").addEventListener("change", pintarSel);
+    $("pTodos").addEventListener("change", () => { v.querySelectorAll(".check-ped input").forEach((c) => (c.checked = $("pTodos").checked)); pintarSel(); });
+    $("btnVerCarga").addEventListener("click", () => { sessionStorage.setItem(K_CARGA, JSON.stringify(elegidos())); ir("#/carga"); });
+  }
+
+  /* ---------- Total de carga (despachador) ---------- */
+  async function vCarga(v, _p, _q, vigente) {
+    let ids = null;
+    try { ids = JSON.parse(sessionStorage.getItem(K_CARGA)); } catch (e) {}
+    const r = await api("pedidos", { estados: ["confirmado", "en_ruta"], dias: 60 });
+    if (!vigente()) return;
+    const peds = Array.isArray(ids) && ids.length ? r.pedidos.filter((p) => ids.includes(p.id)) : r.pedidos;
+    const t = totalCarga(peds);
+    if (!peds.length) { v.innerHTML = '<p class="vacio-panel">No hay pedidos por entregar.</p>'; return; }
+    const texto = [`*CARGA ${yo().nombre.toUpperCase()}* · ${t.pedidos} pedido(s) · ${t.cajas} cajas`, "",
+      ...t.productos.map((x) => `• ${x.cajas} × ${x.producto} (${x.code})`), "", "*Pedidos*",
+      ...peds.map((p) => `• ${p.id} · ${p.negocio} · ${p.total_cajas} caja(s)`)].join("\n");
+    v.innerHTML = `
+      <section class="tarjeta carga-total">
+        <p class="carga-grande"><strong>${t.cajas}</strong> cajas</p>
+        <p class="ped-det">${t.pedidos} pedido(s)${t.unidades ? " · " + esc(t.unidades) : ""}</p>
+      </section>
+      <section class="tarjeta">
+        <h3 class="sub-titulo">Cargar en el vehículo</h3>
+        <ul class="lista-carga">${t.productos.map((x) => `<li><label class="check"><input type="checkbox" /> <span><strong>${x.cajas}</strong> × ${esc(x.producto)} <span class="ped-det">${esc(x.code)}${x.total_unidades ? ` · ${x.total_unidades} ${esc(x.unidad)}` : ""}</span></span></label></li>`).join("")}</ul>
+        <p class="nota-chica">Marcá cada producto a medida que lo subís.</p>
+      </section>
+      <section class="tarjeta">
+        <h3 class="sub-titulo">Pedidos incluidos</h3>
+        <ul class="resumen-items">${peds.map((p) => `<li><a href="#/pedido/${encodeURIComponent(p.id)}">${esc(p.negocio)}</a><em>${p.total_cajas} caja(s)</em></li>`).join("")}</ul>
+      </section>
+      <button type="button" class="btn btn-ghost btn-bloque" id="btnCompartirCarga">Compartir lista de carga</button>`;
+    $("btnCompartirCarga").addEventListener("click", () => enviarAlGrupo(texto));
   }
 
   /* ---------- Detalle de pedido ---------- */
-  const ETIQUETAS = { confirmar: "Aprobar", en_ruta: "Salió en ruta", entregado: "Entregado", reasignar: "Cambiar despachador", cancelar: "Anular pedido", reabrir: "Volver a En proceso" };
+  const ETIQUETAS = { confirmar: "Aprobar", en_ruta: "Salió en ruta", entregado: "Entregado", reasignar: "Cambiar despachador", cancelar: "Anular pedido", reabrir: "Volver a En proceso",
+    cobrar: "Marcar cancelado (pagado)", conciliar: "Conciliar pago (recibido)", rechazar: "Pago no recibido", desconciliar: "Deshacer conciliación" };
   async function vPedido(v, id, _q, vigente) {
     const { pedido: p } = await api("pedido", { pedido_id: id });
     if (!vigente()) return;
@@ -665,10 +774,12 @@
     const wa = telefonoWhatsapp(c.telefono);
     const mapa = linkMapa(c.latitud, c.longitud);
     const acciones = accionesPedido(rol(), yo().id, p);
-    const principal = ["confirmar", "en_ruta", "entregado"];
+    const principal = ["confirmar", "en_ruta", "entregado", "cobrar", "conciliar"];
+    const ec = estadoCredito(p);
     v.innerHTML = `
       <section class="tarjeta">
         <div class="fila-top"><h2 class="ped-titulo">${esc(p.negocio)}</h2>${chipEstado(p.estado)}</div>
+        ${chipBandera(p)}
         ${p.cliente && p.cliente !== p.negocio ? `<p class="ped-det">${esc(p.cliente)}</p>` : ""}
         ${c.direccion ? `<p class="ped-det">${esc(c.direccion)}</p>` : ""}
         <div class="botones-contacto">
@@ -690,20 +801,24 @@
           <dt>Vendedor</dt><dd>${esc(p.vendedor)}</dd>
           ${p.despachador ? `<dt>Despachador</dt><dd>${esc(p.despachador)}</dd>` : ""}
           ${p.documento ? `<dt>Documento</dt><dd>${esc(p.documento)}</dd>` : ""}
-          ${p.pago ? `<dt>Pago</dt><dd>${esc(p.pago)}</dd>` : ""}
+          ${p.pago ? `<dt>Pago</dt><dd>${esc(p.pago)}${p.dias_credito ? ` · ${p.dias_credito} días` : ""}</dd>` : ""}
+          ${ec && ec.vence ? `<dt>Vence</dt><dd>${esc(ec.vence.split("-").reverse().join("/"))}</dd>` : ""}
+          ${p.cobro ? `<dt>Cobro</dt><dd>${p.cobro === "conciliado" ? `Conciliado por ${esc(p.conciliado_por)}` : `Cancelado (reportó ${esc(p.cobrado_por)}) · por conciliar`}</dd>` : ""}
           ${p.nota ? `<dt>Nota</dt><dd>${esc(p.nota)}</dd>` : ""}
           ${p.motivo ? `<dt>Motivo</dt><dd>${esc(p.motivo)}</dd>` : ""}
         </dl>
       </section>
       <button type="button" class="btn btn-ghost btn-bloque" id="btnReenviar">Reenviar al grupo de WhatsApp</button>
       ${p.historial && p.historial.length ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3><ol class="historial">${p.historial.map((h) =>
-        `<li><strong>${esc({ creado: "Enviado (en proceso)", reasignado: "Despachador cambiado", pendiente: "Vuelto a En proceso", confirmado: "Aprobado" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
+        `<li><strong>${esc({ creado: "Enviado (en proceso)", reasignado: "Despachador cambiado", pendiente: "Vuelto a En proceso", confirmado: "Aprobado",
+          cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
 
     $("btnReenviar").addEventListener("click", () => enviarAlGrupo(mensajeGrupo(p, c)));
     v.querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", () => accionPedido(p, b.dataset.acc)));
   }
 
   async function accionPedido(p, acc) {
+    if (["cobrar", "conciliar", "rechazar", "desconciliar"].includes(acc)) return accionCobro(p, acc);
     let estado = acc, extra = {};
     if (acc === "confirmar" || acc === "reasignar") {
       const { despachadores } = await api("despachadores");
@@ -740,6 +855,34 @@
     try {
       await api("estado", { pedido_id: p.id, estado, ...extra });
       toast(`${p.id}: ${acc === "reasignar" ? "despachador cambiado" : nombreEstado(estado)}`);
+      render();
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
+  async function accionCobro(p, acc) {
+    const textos = {
+      cobrar: [`¿El cliente pagó ${p.id}?`, "Queda como <strong>Cancelado</strong> hasta que Administración verifique el pago y lo concilie.", "Sí, cancelado"],
+      conciliar: [`¿Recibiste el pago de ${p.id}?`, "Queda como <strong>Conciliado</strong> (pago verificado).", "Sí, conciliar"],
+      desconciliar: [`¿Deshacer la conciliación de ${p.id}?`, "Vuelve a Cancelado · por conciliar.", "Deshacer"],
+    };
+    let extra = {};
+    if (acc === "rechazar") {
+      const r = await hoja({
+        titulo: `Pago no recibido · ${p.id}`,
+        cuerpo: '<p class="modal-sub">El pedido vuelve a <strong>Por cobrar</strong>.</p><label class="field field-full"><span>¿Qué pasó?</span><textarea name="motivo" rows="3" maxlength="200" placeholder="Ej. no llegó la transferencia"></textarea></label>',
+        ok: "Rechazar pago", validar: (d) => (d.motivo.trim() ? "" : "Escribí el motivo."),
+      });
+      if (!r) return;
+      extra.motivo = r.motivo.trim();
+    } else {
+      const [titulo, cuerpo, ok] = textos[acc];
+      if (!(await hoja({ titulo, cuerpo: `<p class="modal-sub">${cuerpo}</p>`, ok }))) return;
+    }
+    try {
+      await api("cobro", { pedido_id: p.id, accion: { cobrar: "cancelar" }[acc] || acc, ...extra });
+      toast({ cobrar: "Marcado como cancelado", conciliar: "Pago conciliado", rechazar: "Pago rechazado: vuelve a Por cobrar", desconciliar: "Conciliación deshecha" }[acc]);
       render();
     } catch (e) {
       toast(e.message);
@@ -805,7 +948,7 @@
     });
     const r = await api("pedidos", { cliente_id: c.id });
     if (!vigente()) return;
-    $("kPedidos").innerHTML = r.pedidos.length ? r.pedidos.map(filaPedido).join("") : '<li class="vacio-panel">Todavía no tiene pedidos.</li>';
+    $("kPedidos").innerHTML = r.pedidos.length ? r.pedidos.map((p) => filaPedido(p)).join("") : '<li class="vacio-panel">Todavía no tiene pedidos.</li>';
   }
 
   /* ---------- Añadir / editar cliente (sin pedido: traspaso de la base) ---------- */

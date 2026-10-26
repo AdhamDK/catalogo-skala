@@ -102,7 +102,7 @@ test("acciones de gestión (master/admin) según estado", () => {
     assert.deepEqual(core.accionesPedido(rol, "U2", P("pendiente")), ["confirmar", "cancelar"]);
     assert.deepEqual(core.accionesPedido(rol, "U2", P("confirmado")), ["en_ruta", "reasignar", "cancelar"]);
     assert.deepEqual(core.accionesPedido(rol, "U2", P("en_ruta")), ["entregado", "reasignar", "cancelar"]);
-    assert.deepEqual(core.accionesPedido(rol, "U2", P("entregado")), ["reabrir"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("entregado")), ["conciliar", "reabrir"]);
     assert.deepEqual(core.accionesPedido(rol, "U2", P("cancelado")), ["reabrir"]);
   }
 });
@@ -122,13 +122,13 @@ test("despachador: en ruta / entregado solo en los asignados", () => {
 
 test("pestañas del panel por rol", () => {
   const ids = (rol) => core.pestanasPanel(rol).map((t) => t.id);
-  assert.deepEqual(ids("vendedor"), ["pendiente", "curso", "entregado", "cancelado", "resumen"]);
-  assert.deepEqual(ids("admin"), ["pendiente", "curso", "entregado", "cancelado", "resumen"]);
-  assert.deepEqual(ids("master"), ["pendiente", "curso", "entregado", "cancelado", "resumen", "usuarios"]);
+  assert.deepEqual(ids("vendedor"), ["pendiente", "curso", "entregado", "cobrar", "cancelado", "resumen"]);
+  assert.deepEqual(ids("admin"), ["pendiente", "curso", "entregado", "cobrar", "conciliar", "cancelado", "resumen"]);
+  assert.deepEqual(ids("master"), ["pendiente", "curso", "entregado", "cobrar", "conciliar", "cancelado", "resumen", "usuarios"]);
   assert.deepEqual(ids("despachador"), ["curso", "entregado"]);
   assert.equal(core.pestanasPanel("admin")[0].nombre, "Por aprobar");
   assert.equal(core.pestanasPanel("vendedor")[0].nombre, "En proceso");
-  assert.equal(core.pestanasPanel("admin")[3].nombre, "Anulados");
+  assert.equal(core.pestanasPanel("admin").find((t) => t.id === "cancelado").nombre, "Anulados");
   assert.equal(core.pestanasPanel("despachador")[0].nombre, "Por entregar");
   assert.deepEqual(core.pestanasPanel("admin")[1].estados, ["confirmado", "en_ruta"]);
 });
@@ -167,4 +167,69 @@ test("validarCliente para alta manual: teléfono opcional", () => {
 
 test("mensajeGrupo incluye si es nota de entrega o factura", () => {
   assert.match(core.mensajeGrupo({ ...PEDIDO, documento: "Factura" }, CLIENTE), /Pago: Divisas · Contado\nDocumento: Factura\nNota:/);
+});
+
+/* ---------- Crédito: banderas por vencimiento ---------- */
+test("estadoCredito: cuenta desde la entrega; verde, amarilla, roja y morada", () => {
+  const ent = { estado: "entregado", dias_credito: 15, entregado_at: "2026-10-01T15:00:00Z", fecha: "2026-09-30 10:00" };
+  const en = (hoy) => core.estadoCredito(ent, new Date(hoy));
+  assert.deepEqual(en("2026-10-05T12:00:00"), { nivel: "al_dia", vence: "2026-10-16", dias: 11, texto: "Vence en 11 días" });
+  assert.equal(en("2026-10-13T12:00:00").nivel, "proximo");              // faltan 3
+  assert.equal(en("2026-10-16T12:00:00").texto, "Vence hoy");
+  assert.equal(en("2026-10-17T12:00:00").nivel, "vencido");
+  assert.equal(en("2026-10-17T12:00:00").texto, "Vencido hace 1 día");
+  assert.equal(en("2026-10-31T12:00:00").nivel, "vencido");              // 15 días
+  assert.equal(en("2026-11-01T12:00:00").nivel, "muy_vencido");          // 16 días
+  assert.equal(en("2026-11-01T12:00:00").texto, "Vencido hace 16 días");
+});
+
+test("estadoCredito: sin entregar todavía, pagado, contado o anulado", () => {
+  const base = { dias_credito: 7, fecha: "2026-10-01 10:00" };
+  assert.deepEqual(core.estadoCredito({ ...base, estado: "confirmado" }, new Date("2026-10-02")), { nivel: "sin_entregar", vence: "", dias: 7, texto: "Crédito 7 días · cuenta desde la entrega" });
+  const pag = { ...base, estado: "entregado", entregado_at: "2026-10-02T10:00:00Z" };
+  assert.deepEqual(core.estadoCredito({ ...pag, cobro: "cancelado" }, new Date("2026-12-01")), { nivel: "por_conciliar", vence: "2026-10-09", dias: 0, texto: "Cancelado · por conciliar" });
+  assert.equal(core.estadoCredito({ ...pag, cobro: "conciliado" }, new Date("2026-12-01")).texto, "Conciliado");
+  assert.equal(core.estadoCredito({ ...base, dias_credito: 0, estado: "entregado" }, new Date()), null);
+  assert.equal(core.estadoCredito({ ...base, estado: "cancelado" }, new Date()), null);
+});
+
+/* ---------- Total de carga del despachador ---------- */
+test("totalCarga suma cajas por producto de los pedidos elegidos", () => {
+  const peds = [
+    { id: "A", total_cajas: 3, items: [{ code: "BC-01", producto: "Babosa", cajas: 2, total_unidades: 12, unidad: "unidades" }, { code: "KT-01", producto: "Kit 12 em 1", cajas: 1, total_unidades: 6, unidad: "dúos" }] },
+    { id: "B", total_cajas: 4, items: [{ code: "BC-01", producto: "Babosa", cajas: 4, total_unidades: 24, unidad: "unidades" }] },
+  ];
+  const t = core.totalCarga(peds);
+  assert.equal(t.pedidos, 2);
+  assert.equal(t.cajas, 7);
+  assert.deepEqual(t.productos, [
+    { code: "BC-01", producto: "Babosa", cajas: 6, total_unidades: 36, unidad: "unidades" },
+    { code: "KT-01", producto: "Kit 12 em 1", cajas: 1, total_unidades: 6, unidad: "dúos" },
+  ]);
+  assert.equal(t.unidades, "36 unidades + 6 dúos");
+  assert.equal(core.totalCarga([]).cajas, 0);
+});
+
+test("cobro: vendedor marca cancelado; administración concilia o rechaza", () => {
+  const ent = { id: "X", estado: "entregado", vendedor_id: "U3", despachador_id: "U5", cobro: "" };
+  assert.deepEqual(core.accionesPedido("vendedor", "U3", ent), ["cobrar"]);
+  assert.deepEqual(core.accionesPedido("vendedor", "U4", ent), []);
+  assert.deepEqual(core.accionesPedido("vendedor", "U3", { ...ent, cobro: "cancelado" }), []);
+  assert.deepEqual(core.accionesPedido("admin", "U2", ent), ["conciliar", "reabrir"]);
+  assert.deepEqual(core.accionesPedido("admin", "U2", { ...ent, cobro: "cancelado" }), ["conciliar", "rechazar"]);
+  assert.deepEqual(core.accionesPedido("master", "U1", { ...ent, cobro: "conciliado" }), ["desconciliar"]);
+  assert.deepEqual(core.accionesPedido("despachador", "U5", ent), []);
+});
+
+test("pestañas Por cobrar (todos los que venden) y Por conciliar (solo Administración y Master)", () => {
+  const ids = (r) => core.pestanasPanel(r).map((t) => t.id);
+  assert.ok(core.pestanasPanel("vendedor").some((t) => t.id === "cobrar" && t.filtro === "por_cobrar"));
+  assert.ok(ids("admin").includes("cobrar") && ids("admin").includes("conciliar"));
+  assert.ok(ids("master").includes("conciliar"));
+  assert.ok(!ids("vendedor").includes("conciliar"));
+  assert.ok(!ids("despachador").includes("cobrar"));
+});
+
+test("mensajeGrupo muestra los días de crédito", () => {
+  assert.match(core.mensajeGrupo({ ...PEDIDO, pago: "Divisas · Crédito", dias_credito: 15 }, CLIENTE), /Pago: Divisas · Crédito \(15 días\)/);
 });

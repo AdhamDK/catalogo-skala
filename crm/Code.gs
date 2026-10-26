@@ -18,6 +18,8 @@ var ROLES = ['master', 'admin', 'vendedor', 'despachador'];
 var NOMBRE_ROL = { master: 'Master', admin: 'Administración', vendedor: 'Vendedor', despachador: 'Despachador' };
 var ESTADOS = ['pendiente', 'confirmado', 'en_ruta', 'entregado', 'cancelado'];
 var DOCUMENTOS = ['Nota de entrega', 'Factura'];
+var MAX_DIAS_CREDITO = 180;
+var esCredito_ = function (pago) { return /cr[eé]dito/i.test(String(pago || '')); };
 var GESTION = ['master', 'admin'];          // ven y corrigen todo
 var TOMAN_PEDIDOS = ['master', 'admin', 'vendedor'];
 
@@ -31,7 +33,8 @@ var HOJAS = {
             'total_cajas', 'detalle_unidades', 'pago', 'nota', 'estado', 'estado_at',
             'estado_por', 'motivo', 'client_ref', 'created_at', 'updated_at',
             'despachador_id', 'despachador', 'confirmado_por', 'confirmado_at',
-            'entregado_por', 'entregado_at', 'documento'],
+            'entregado_por', 'entregado_at', 'documento',
+            'dias_credito', 'cobro', 'cobrado_at', 'cobrado_por', 'conciliado_at', 'conciliado_por'],
   PedidoItems: ['pedido_id', 'code', 'producto', 'cajas', 'unidades_caja', 'unidad', 'total_unidades'],
   Historial: ['fecha', 'pedido_id', 'usuario', 'accion', 'detalle']
 };
@@ -65,6 +68,7 @@ var ACCIONES = {
   pedidos: [accionPedidos_, ROLES],
   pedido: [accionPedido_, ROLES],
   estado: [accionEstado_, ROLES],
+  cobro: [accionCobro_, TOMAN_PEDIDOS],
   despachadores: [accionDespachadores_, GESTION],
   resumen: [accionResumen_, TOMAN_PEDIDOS],
   usuarios: [accionUsuarios_, ['master']],
@@ -400,6 +404,7 @@ function pedidoConItems_(ped, items) {
   var o = {};
   HOJAS.Pedidos.forEach(function (k) { o[k] = ped[k]; });
   o.total_cajas = Number(o.total_cajas);
+  o.dias_credito = Number(o.dias_credito) || 0;
   o.items = items.filter(function (it) { return String(it.pedido_id) === String(ped.id); }).map(function (it) {
     return { code: it.code, producto: it.producto, cajas: Number(it.cajas), unidades_caja: it.unidades_caja === '' ? '' : Number(it.unidades_caja), unidad: it.unidad, total_unidades: it.total_unidades === '' ? '' : Number(it.total_unidades) };
   });
@@ -411,6 +416,14 @@ function accionGuardarPedido_(p, ses) {
   if (!items.length) return { ok: false, error: 'El pedido no tiene productos.', code: 'empty' };
   var documento = txt_(p.documento, 30);
   if (DOCUMENTOS.indexOf(documento) === -1) return { ok: false, error: 'Indicá si el cliente quiere nota de entrega o factura.', code: 'documento' };
+  // Crédito: hay que indicar los días (se cuentan desde la entrega)
+  var diasCredito = 0;
+  if (esCredito_(p.pago)) {
+    diasCredito = Math.floor(Number(p.dias_credito));
+    if (!isFinite(diasCredito) || diasCredito < 1 || diasCredito > MAX_DIAS_CREDITO) {
+      return { ok: false, error: 'Indicá los días de crédito (1 a ' + MAX_DIAS_CREDITO + ').', code: 'credito' };
+    }
+  }
   var ref = txt_(p.client_ref, 60);
 
   var lock = LockService.getScriptLock();
@@ -446,6 +459,7 @@ function accionGuardarPedido_(p, ses) {
       total_cajas: items.reduce(function (a, it) { return a + it.cajas; }, 0),
       detalle_unidades: detalleUnidades_(items),
       pago: txt_(p.pago, 40), nota: txt_(p.nota, 300), documento: documento,
+      dias_credito: diasCredito, cobro: '',
       estado: 'pendiente', estado_at: t, estado_por: ses.nombre, motivo: '',
       client_ref: ref, created_at: t, updated_at: t
     };
@@ -480,6 +494,13 @@ function accionPedidos_(p, ses) {
   var lista = leer_('Pedidos').filter(function (x) {
     if (!puedeVer_(ses, x)) return false;
     if (clienteId) return String(x.cliente_id) === clienteId; // ficha del cliente: todo su historial visible
+    // Por cobrar: no anulados y sin pago; crédito en cualquier estado, contado ya entregado
+    if (p.por_cobrar) {
+      if (String(x.estado) === 'cancelado' || String(x.cobro)) return false;
+      return Number(x.dias_credito) > 0 || String(x.estado) === 'entregado';
+    }
+    // Por conciliar: el vendedor lo marcó cancelado y Administración debe verificarlo
+    if (p.por_conciliar) return String(x.cobro) === 'cancelado';
     if (estados.length && estados.indexOf(String(x.estado)) === -1) return false;
     // Lo que sigue abierto se muestra aunque sea viejo
     var abierto = ['pendiente', 'confirmado', 'en_ruta'].indexOf(String(x.estado)) !== -1;
@@ -497,6 +518,52 @@ function accionPedidos_(p, ses) {
       return o;
     })
   };
+}
+
+/* Cobro de un pedido entregado:
+   ''  (por cobrar) --cancelar--> 'cancelado' (el vendedor reporta que el cliente pagó)
+       --conciliar--> 'conciliado' (Administración verificó que recibió el dinero)
+   rechazar: 'cancelado' -> '' (no se recibió; motivo obligatorio)
+   desconciliar: 'conciliado' -> 'cancelado' (corrección)
+   Vendedor: solo "cancelar" sus pedidos. Administración / Master: todo. */
+function accionCobro_(p, ses) {
+  var accion = String(p.accion || 'cancelar');
+  var gestion = esGestion_(ses);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ped = leer_('Pedidos').filter(function (x) { return String(x.id) === String(p.pedido_id); })[0];
+    if (!ped || !puedeVer_(ses, ped)) return { ok: false, error: 'Pedido no encontrado.', code: 'not_found' };
+    if (String(ped.estado) !== 'entregado') return { ok: false, error: 'El cobro se registra cuando el pedido ya fue entregado.', code: 'estado' };
+    var cobro = String(ped.cobro || '');
+    var t = ahora_(), detalle = '';
+    if (accion === 'cancelar') {
+      if (cobro) return { ok: false, error: 'Ese pedido ya figura como ' + (cobro === 'conciliado' ? 'conciliado' : 'cancelado') + '.', code: 'repetido' };
+      ped.cobro = 'cancelado'; ped.cobrado_at = t; ped.cobrado_por = ses.nombre;
+    } else if (!gestion) {
+      return { ok: false, error: 'Solo Administración verifica y concilia los pagos.', code: 'forbidden' };
+    } else if (accion === 'conciliar') {
+      if (cobro === 'conciliado') return { ok: false, error: 'Ese pago ya está conciliado.', code: 'repetido' };
+      if (!cobro) { ped.cobrado_at = t; ped.cobrado_por = ses.nombre; } // Administración recibió el pago directo
+      ped.cobro = 'conciliado'; ped.conciliado_at = t; ped.conciliado_por = ses.nombre;
+    } else if (accion === 'rechazar') {
+      if (cobro !== 'cancelado') return { ok: false, error: 'Solo se rechaza un pago reportado como cancelado.', code: 'estado' };
+      detalle = txt_(p.motivo, 200);
+      if (!detalle) return { ok: false, error: 'Indicá por qué no se recibió el pago.', code: 'motivo' };
+      ped.cobro = ''; ped.cobrado_at = ''; ped.cobrado_por = '';
+    } else if (accion === 'desconciliar') {
+      if (cobro !== 'conciliado') return { ok: false, error: 'Ese pago no está conciliado.', code: 'estado' };
+      ped.cobro = 'cancelado'; ped.conciliado_at = ''; ped.conciliado_por = '';
+    } else {
+      return { ok: false, error: 'Acción de cobro inválida.', code: 'accion' };
+    }
+    ped.updated_at = t;
+    actualizar_('Pedidos', ped._fila, ped);
+    historial_(ped.id, ses, { cancelar: 'cobrado', conciliar: 'conciliado', rechazar: 'pago_rechazado', desconciliar: 'conciliacion_deshecha' }[accion], detalle);
+    return { ok: true, pedido: pedidoConItems_(ped, leer_('PedidoItems')) };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /* Detalle de un pedido + su historial (respetando lo que el rol puede ver) */

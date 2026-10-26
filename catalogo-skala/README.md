@@ -121,7 +121,9 @@ despachador) · **Vendedor** (toma pedidos en la calle con GPS y los envía al g
 WhatsApp) · **Despachador** (sus entregas: en ruta → entregado, con llamar y mapa).
 Estados: En proceso → Aprobado · Preparando despacho → En ruta → Entregado (o Anulado, con motivo).
 Nuevo pedido en 3 pasos: Cliente (buscar / nuevo, ficha con lápiz) → Productos → Enviar
-(nota de entrega o factura obligatorio). Clientes se pueden añadir sin pedido (traspaso de la base). Tema claro/oscuro (`js/tema.js`).
+(nota de entrega o factura obligatorio; días de crédito si es a crédito).
+Cobro: Cancelado (vendedor) → Conciliado (Administración); banderas de vencimiento del crédito.
+Despachador: total de carga de los pedidos elegidos. Clientes se pueden añadir sin pedido (traspaso de la base). Tema claro/oscuro (`js/tema.js`).
 Sin señal, el pedido queda en el teléfono y se sube solo después.
 
 - **Panel del equipo: `panel.html`** (app instalable en el teléfono). Páginas: Inicio, Nuevo
