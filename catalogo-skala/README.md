@@ -120,7 +120,8 @@ Botón **Ingresar** (usuario + clave con letras, números y símbolos) en la bar
 despachador) · **Vendedor** (toma pedidos en la calle con GPS y los envía al grupo de
 WhatsApp) · **Despachador** (sus entregas: en ruta → entregado, con llamar y mapa).
 Estados: En proceso → Aprobado · Preparando despacho → En ruta → Entregado (o Anulado, con motivo).
-Clientes se pueden añadir sin pedido (traspaso de la base). Tema claro/oscuro (`js/tema.js`).
+Nuevo pedido en 3 pasos: Cliente (buscar / nuevo, ficha con lápiz) → Productos → Enviar
+(nota de entrega o factura obligatorio). Clientes se pueden añadir sin pedido (traspaso de la base). Tema claro/oscuro (`js/tema.js`).
 Sin señal, el pedido queda en el teléfono y se sube solo después.
 
 - **Panel del equipo: `panel.html`** (app instalable en el teléfono). Páginas: Inicio, Nuevo

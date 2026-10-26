@@ -30,7 +30,9 @@ Cada cambio queda en la hoja `Historial` (fecha, pedido, usuario, acción, detal
 
 ## Panel del equipo (v3)
 `panel.html`: app instalable (manifest + service worker) con páginas por hash y barra inferior:
-Inicio · Nuevo (lista rápida de productos → datos del cliente → listo) · Pedidos (+ detalle con
+Inicio · Nuevo en 3 pasos (1 Cliente: buscar o "Cliente nuevo"; si existe, ficha con lápiz ✏️ para
+editar y guardar en la hoja · 2 Productos: lista rápida · 3 Enviar: nota de entrega o factura
+obligatorio — factura exige RIF/cédula —, pago y nota) · Pedidos (+ detalle con
 historial y acciones) · Clientes (+ ficha con historial) · Más (Resumen, Usuarios, catálogo, salir).
 Despachador: Inicio · Entregas · Más.
 Clientes: botón **Añadir cliente** (sin pedido, para traspasar la base): teléfono opcional,
@@ -51,7 +53,7 @@ va directo al formulario del pedido.
 |---|---|
 | `Usuarios` | id, usuario, nombre, rol, pin_hash, activo, created_at |
 | `Clientes` | (10 de GPS_CLIENTES) id, nombre, rif_cedula, direccion, latitud, longitud, telefono, updated_at, sync_status, deleted + contacto, telefono2, vendedor_id, created_at |
-| `Pedidos` | id, fecha, vendedor_id, vendedor, cliente_id, cliente, negocio, total_cajas, detalle_unidades, pago, nota, estado, estado_at, estado_por, motivo, client_ref, created_at, updated_at, despachador_id, despachador, confirmado_por, confirmado_at, entregado_por, entregado_at |
+| `Pedidos` | id, fecha, vendedor_id, vendedor, cliente_id, cliente, negocio, total_cajas, detalle_unidades, pago, nota, estado, estado_at, estado_por, motivo, client_ref, created_at, updated_at, despachador_id, despachador, confirmado_por, confirmado_at, entregado_por, entregado_at, documento |
 | `PedidoItems` | pedido_id, code, producto, cajas, unidades_caja, unidad, total_unidades |
 | `Historial` | fecha, pedido_id, usuario, accion, detalle |
 
@@ -65,7 +67,7 @@ como rol `vendedor` conservando id y PIN.
 | `yo` | todos | — |
 | `clientes` | M, A, V | q, limite? |
 | `guardarCliente` | M, A, V | cliente{id?, negocio, contacto, rif_cedula, telefono?, telefono2, direccion, latitud, longitud} — alta/edición sin pedido; no duplica (teléfono, RIF o mismo nombre) |
-| `guardarPedido` | M, A, V | client_ref, cliente{…}, items[], pago, nota |
+| `guardarPedido` | M, A, V | client_ref, cliente{…}, items[], documento ("Nota de entrega" / "Factura", obligatorio; factura exige RIF), pago, nota |
 | `pedidos` | todos (filtrado por rol) | estados[]?, dias?, cliente_id? |
 | `pedido` | todos (si lo puede ver) | pedido_id → pedido + items + cliente + historial |
 | `estado` | según tabla | pedido_id, estado, motivo?, despachador_id? |

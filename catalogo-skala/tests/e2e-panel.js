@@ -66,7 +66,7 @@ function servidor() {
   };
   const titulo = () => page.innerText("#appTitulo");
   const esperarTitulo = (t) => page.waitForFunction((t) => document.getElementById("appTitulo").textContent === t, t);
-  const esperarRuta = (h) => page.waitForFunction((h) => (document.body.dataset.lista || "").startsWith(h), h);
+  const esperarRuta = (h) => page.waitForFunction((h) => !!document.body && (document.body.dataset.lista || "").startsWith(h), h);
   const ingresar = async (u, c) => {
     await page.waitForSelector("#fLogin");
     await page.fill("#lUsuario", u);
@@ -116,13 +116,52 @@ function servidor() {
   await page.click("#btnLogin");
   await esperarRuta("#/nuevo");
   assert.equal(await titulo(), "Nuevo pedido");
-  assert.equal(await page.locator(".prod.elegido").count(), 2);
-  assert.equal(await page.innerText("#nTotal"), "3 cajas");
+  assert.deepEqual((await page.locator(".pasos li").allInnerTexts()).map((t) => t.replace(/\s+/g, " ")), ["1 Cliente", "2 Productos", "3 Enviar"]);
+  assert.equal(await page.locator(".prod").count(), 0); // paso 1: solo buscar o cliente nuevo
+  assert.ok(await page.locator("#cBuscar").isVisible());
+  assert.ok(await page.locator("#btnClienteNuevo").isVisible());
   assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Nuevo", "Pedidos", "Clientes", "Más"]);
   assert.equal(await page.innerText(".app-nav .badge"), "3");
-  ok("login (error y acierto, ver clave) y vuelve a Nuevo pedido con el carrito del catálogo");
+  await foto("02a-paso1");
+  ok("login (error y acierto, ver clave) → Nuevo empieza con Buscar cliente / Cliente nuevo");
 
-  /* ---------- Nuevo pedido: lista rápida ---------- */
+  /* ---------- Paso 1: cliente nuevo ---------- */
+  await page.fill("#cBuscar", "bella");
+  await page.waitForSelector("#cResultados .vacio-panel");
+  assert.match(await page.innerText("#cResultados"), /No está registrado/);
+  await page.click("#btnClienteNuevo");
+  await page.waitForSelector("#fCli");
+  await tocar("#btnCliUsar");
+  assert.match(await page.innerText("#cError"), /Falta: Nombre del cliente o del negocio · Teléfono 1/);
+  await page.fill("#cContacto", "María Pérez");
+  await page.fill("#cNegocio", "Peluquería Bella");
+  await page.fill("#cTel1", "0412-1234567");
+  await page.fill("#cDireccion", "Av. Bolívar, El Vigía");
+  await tocar("#btnGps");
+  await page.waitForFunction(() => /Ubicación lista/.test(document.getElementById("gpsEstado").textContent));
+  await foto("02b-cliente-nuevo");
+  await revisarDiseno("cliente nuevo");
+  await tocar("#btnCliUsar");
+  await page.waitForSelector("#fichaCli");
+  assert.match(await page.innerText("#fichaCli"), /Peluquería Bella[\s\S]*0412-1234567/);
+  // el lápiz permite corregir antes de seguir
+  await page.click("#btnLapiz");
+  await page.waitForSelector("#fCli");
+  assert.equal(await page.inputValue("#cNegocio"), "Peluquería Bella");
+  await page.fill("#cTel2", "0275-8812345");
+  await tocar("#btnCliUsar");
+  await page.waitForSelector("#fichaCli");
+  assert.match(await page.innerText("#fichaCli"), /0275-8812345/);
+  await foto("02c-ficha");
+  await revisarDiseno("ficha");
+  await tocar("#btnAProductos");
+  await esperarRuta("#/nuevo/productos");
+  ok("paso 1: cliente nuevo → ficha con lápiz para editar → continuar");
+
+  /* ---------- Paso 2: productos ---------- */
+  assert.match(await page.innerText(".cliente-elegido"), /Peluquería Bella/);
+  assert.equal(await page.locator(".prod.elegido").count(), 2);
+  assert.equal(await page.innerText("#nTotal"), "3 cajas");
   assert.equal(await page.locator(".prod").count(), 19);
   await page.click('#nFiltros [data-f="elegidos"]');
   assert.equal(await page.locator(".prod:not([hidden])").count(), 2);
@@ -134,30 +173,32 @@ function servidor() {
   await page.locator('.prod[data-code="KT-02"] .qty-input').fill("5");
   assert.equal(await page.innerText("#nTotal"), "9 cajas");
   await foto("02-nuevo");
-  await revisarDiseno("nuevo");
-  ok("lista rápida: buscar, filtrar, + / − y escribir cantidad");
+  await revisarDiseno("productos");
+  ok("paso 2: lista rápida con el carrito del catálogo, buscar, filtrar, + / −");
 
+  /* ---------- Paso 3: enviar (nota o factura) ---------- */
   await tocar("#nSeguir");
-  await esperarRuta("#/nuevo/cliente");
-  assert.match(await page.innerText(".resumen-carrito"), /9 cajas/);
-  assert.ok(await page.locator("#btnAtras").isVisible());
-  await tocar("#btnGuardar");
-  assert.match(await page.innerText("#cError"), /Falta: Nombre del cliente o del negocio · Teléfono 1/);
-  await page.fill("#cContacto", "María Pérez");
-  await page.fill("#cNegocio", "Peluquería Bella");
-  await page.fill("#cTel1", "0412-1234567");
-  await page.fill("#cDireccion", "Av. Bolívar, El Vigía");
-  await tocar("#btnGps");
-  await page.waitForFunction(() => /Ubicación lista/.test(document.getElementById("gpsEstado").textContent));
-  await tocar('input[name="cPago"][value="Divisas · Contado"]');
-  await foto("03-cliente");
-  await revisarDiseno("cliente");
-  await tocar("#btnGuardar");
+  await esperarRuta("#/nuevo/enviar");
+  assert.match(await page.innerText(".total-ped"), /Total: 9 cajas · 18 unidades \+ 36 dúos/);
+  await tocar("#btnEnviar");
+  assert.match(await page.innerText("#eError"), /nota de entrega o factura/);
+  assert.ok(await page.locator("#fsDoc.falta").count());
+  await tocar('input[name="eDoc"][value="Factura"]');
+  assert.ok(await page.locator("#eRifWrap").isVisible());
+  await tocar("#btnEnviar");
+  assert.match(await page.innerText("#eError"), /RIF o la cédula/);
+  await page.fill("#eRif", "J-12345678-9");
+  await tocar('input[name="ePago"][value="Divisas · Contado"]');
+  await foto("03-enviar");
+  await revisarDiseno("enviar");
+  await tocar("#btnEnviar");
   await esperarRuta("#/nuevo/listo");
   assert.match(await page.innerText(".listo h2"), /^Pedido SKL-\d{6}-001 guardado$/);
   const msg = await page.inputValue("#lMensaje");
   assert.match(msg, /• 2 × Babosa \(BC-01\) = 12 unidades/);
   assert.match(msg, /• 5 × Kit Aguacate \(KT-02\) = 30 dúos/);
+  assert.match(msg, /Pago: Divisas · Contado\nDocumento: Factura/);
+  assert.match(msg, /RIF: J-12345678-9/);
   await page.click("#btnGrupo");
   assert.deepEqual(await page.evaluate(() => window.__compartido), [msg]);
   assert.match(await page.getAttribute("#btnCopia", "href"), /^https:\/\/wa\.me\/584121234567/);
@@ -165,7 +206,9 @@ function servidor() {
   assert.equal(gas.tabla("PedidoItems").length, 4);
   assert.ok(await page.locator(".app-nav .badge").count() === 0);
   await foto("04-listo");
-  ok("datos del cliente + GPS → guardado en Sheets → enviar al grupo; carrito vacío");
+  assert.equal(gas.tabla("Pedidos")[0].documento, "Factura");
+  assert.equal(gas.tabla("Clientes")[0].rif_cedula, "J-12345678-9");
+  ok("paso 3: nota o factura obligatorio (factura pide RIF) → guardado en Sheets → enviar al grupo");
 
   /* ---------- Inicio, pedidos, detalle ---------- */
   await page.click('.app-nav a[href="#/inicio"]');
@@ -195,17 +238,14 @@ function servidor() {
   await esperarRuta("#/cliente/");
   assert.equal(await titulo(), "Peluquería Bella");
   await page.waitForSelector("#kPedidos .fila-ped");
-  assert.equal(await page.locator('.botones-contacto a[href^="tel:"]').count(), 1);
+  assert.equal(await page.locator('.botones-contacto a[href^="tel:"]').count(), 2); // tel. 1 y 2
   await foto("06-cliente");
   await revisarDiseno("ficha cliente");
   await page.click("#btnPedirCliente");
-  await esperarRuta("#/nuevo");
+  await esperarRuta("#/nuevo/productos");
+  assert.match(await page.innerText(".cliente-elegido"), /Peluquería Bella/);
   await tocar('.prod[data-code="BC-03"] [data-act="plus"]');
-  await tocar("#nSeguir");
-  await esperarRuta("#/nuevo/cliente");
-  assert.equal(await page.inputValue("#cNegocio"), "Peluquería Bella");
-  assert.match(await page.innerText("#cSel"), /Cliente existente/);
-  ok("clientes: lista, ficha con historial y nuevo pedido con el cliente ya cargado");
+  ok("clientes: lista, ficha con historial y nuevo pedido con el cliente ya elegido");
 
   /* ---------- Añadir cliente (traspaso de la base, sin pedido) ---------- */
   await page.goto(BASE + "/panel.html#/clientes");
@@ -242,14 +282,40 @@ function servidor() {
   await page.waitForFunction(() => /Calle 5/.test(document.querySelector(".datos")?.textContent || ""));
   assert.equal(gas.tabla("Clientes").length, 3);
   ok("añadir cliente sin pedido (ubicación pegada, guardar y añadir otro) y editar");
-  // volver al pedido que quedó a medio armar (el carrito y el cliente siguen guardados)
-  await page.goto(BASE + "/panel.html#/nuevo/cliente");
-  await esperarRuta("#/nuevo/cliente");
-  assert.equal(await page.inputValue("#cNegocio"), "Peluquería Bella");
+
+  /* ---------- Paso 1: buscar cliente existente y editar con el lápiz ---------- */
+  await page.goto(BASE + "/panel.html#/nuevo");
+  await esperarRuta("#/nuevo");
+  await page.waitForSelector("#fichaCli");                   // el pedido a medio armar recuerda el cliente
+  await page.click("#btnCambiarCli");
+  await page.fill("#cBuscar", "max");
+  await page.waitForSelector("#cResultados .res-cli");
+  await page.click("#cResultados .res-cli");
+  await page.waitForSelector("#fichaCli");
+  assert.match(await page.innerText("#fichaCli"), /Barbería Max/);
+  assert.ok(await page.locator("#btnGpsFicha").isVisible());  // sin ubicación: se puede tomar ahí mismo
+  await page.click("#btnLapiz");
+  await page.fill("#cDireccion", "Av. 15, El Vigía");
+  await tocar("#btnCliUsar");
+  await page.waitForSelector("#fichaCli");
+  assert.equal(gas.tabla("Clientes").find((c) => c.nombre === "Barbería Max").direccion, "Av. 15, El Vigía");
+  await page.click("#btnCambiarCli");
+  await page.fill("#cBuscar", "bella");
+  await page.waitForSelector("#cResultados .res-cli");
+  await page.click("#cResultados .res-cli");
+  await page.waitForSelector("#fichaCli");
+  await tocar("#btnAProductos");
+  await esperarRuta("#/nuevo/productos");
+  assert.equal(await page.innerText("#nTotal"), "1 caja");
+  await tocar("#nSeguir");
+  await esperarRuta("#/nuevo/enviar");
+  await tocar('input[name="eDoc"][value="Nota de entrega"]');
+  assert.ok(await page.locator("#eRifWrap").isHidden());
+  ok("paso 1: buscar cliente existente, lápiz guarda los cambios en la hoja, cambiar cliente");
 
   /* ---------- Sin señal ---------- */
   sinSenal = true;
-  await tocar("#btnGuardar");
+  await tocar("#btnEnviar");
   await esperarRuta("#/nuevo/listo");
   assert.match(await page.innerText(".listo h2"), /Guardado en el teléfono/);
   await page.click('.app-nav a[href="#/inicio"]');

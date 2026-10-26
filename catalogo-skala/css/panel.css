@@ -214,3 +214,44 @@ html[data-tema="oscuro"] .tarjeta { box-shadow: none; }
 }
 .selector-tema button[aria-pressed="true"] { background: var(--tinta); color: var(--crema); border-color: var(--tinta); }
 
+
+/* ---------- Nuevo pedido en 3 pasos ---------- */
+.pasos { display: flex; gap: 6px; list-style: none; margin: 0 0 14px; padding: 0; counter-reset: paso; }
+.pasos li { flex: 1; }
+.pasos li > * {
+  display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px;
+  border-radius: 999px; font-size: 0.85rem; font-weight: 600; color: var(--tinta-suave);
+  background: var(--superficie); border: 1px solid var(--borde-suave);
+}
+.pasos b {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--crema-2); color: var(--tinta); font-size: 0.75rem;
+}
+.pasos .actual > * { color: var(--tinta); border-color: var(--tinta); }
+.pasos .actual b { background: var(--tinta); color: var(--crema); }
+.pasos .hecho b { background: var(--verde); color: #fff; }
+.cliente-elegido {
+  display: flex; align-items: center; gap: 8px; min-height: 48px; margin: 0 0 12px; padding: 8px 14px;
+  background: var(--superficie); border: 1px solid var(--borde-suave); border-radius: 14px; color: var(--tinta);
+}
+.cliente-elegido span { font-size: 0.8rem; color: var(--tinta-suave); }
+.cliente-elegido strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cliente-elegido em, .fila-top .link-btn { font-style: normal; font-weight: 700; color: var(--enlace); }
+.btn-lapiz {
+  flex: 0 0 auto; display: inline-grid; place-items: center; width: 44px; height: 44px; margin: -6px -6px 0 0;
+  border-radius: 50%; border: 1px solid var(--borde); background: var(--superficie); color: var(--tinta); cursor: pointer;
+}
+.btn-lapiz svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.o-separador { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--tinta-suave); font-size: 0.85rem; }
+.o-separador::before, .o-separador::after { content: ""; flex: 1; height: 1px; background: var(--borde-suave); }
+.buscador + .lista-cli:not(:empty), #cResultados:not(:empty) { margin-top: 10px; }
+.res-cli {
+  display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-height: 56px; padding: 12px 14px; text-align: left;
+  background: var(--superficie); border: 1px solid var(--borde-suave); border-radius: 14px; color: var(--tinta); font: inherit; cursor: pointer;
+}
+.res-cli span { font-size: 0.85rem; color: var(--tinta-suave); }
+.resumen-items { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; font-size: 0.95rem; }
+.resumen-items li { display: flex; justify-content: space-between; gap: 8px; }
+.resumen-items em { font-style: normal; color: var(--tinta-suave); font-size: 0.85rem; white-space: nowrap; }
+.pay.documento { border-width: 2px; }
+.pay.falta { border-color: #e0245e; box-shadow: 0 0 0 3px rgba(224, 36, 94, 0.15); }

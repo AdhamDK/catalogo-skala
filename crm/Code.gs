@@ -17,6 +17,7 @@ var BLOQUEO_SEG = 600;
 var ROLES = ['master', 'admin', 'vendedor', 'despachador'];
 var NOMBRE_ROL = { master: 'Master', admin: 'Administración', vendedor: 'Vendedor', despachador: 'Despachador' };
 var ESTADOS = ['pendiente', 'confirmado', 'en_ruta', 'entregado', 'cancelado'];
+var DOCUMENTOS = ['Nota de entrega', 'Factura'];
 var GESTION = ['master', 'admin'];          // ven y corrigen todo
 var TOMAN_PEDIDOS = ['master', 'admin', 'vendedor'];
 
@@ -30,7 +31,7 @@ var HOJAS = {
             'total_cajas', 'detalle_unidades', 'pago', 'nota', 'estado', 'estado_at',
             'estado_por', 'motivo', 'client_ref', 'created_at', 'updated_at',
             'despachador_id', 'despachador', 'confirmado_por', 'confirmado_at',
-            'entregado_por', 'entregado_at'],
+            'entregado_por', 'entregado_at', 'documento'],
   PedidoItems: ['pedido_id', 'code', 'producto', 'cajas', 'unidades_caja', 'unidad', 'total_unidades'],
   Historial: ['fecha', 'pedido_id', 'usuario', 'accion', 'detalle']
 };
@@ -408,6 +409,8 @@ function pedidoConItems_(ped, items) {
 function accionGuardarPedido_(p, ses) {
   var items = limpiarItems_(p.items);
   if (!items.length) return { ok: false, error: 'El pedido no tiene productos.', code: 'empty' };
+  var documento = txt_(p.documento, 30);
+  if (DOCUMENTOS.indexOf(documento) === -1) return { ok: false, error: 'Indicá si el cliente quiere nota de entrega o factura.', code: 'documento' };
   var ref = txt_(p.client_ref, 60);
 
   var lock = LockService.getScriptLock();
@@ -419,6 +422,16 @@ function accionGuardarPedido_(p, ses) {
       if (repetido) {
         return { ok: true, duplicado: true, pedido: pedidoConItems_(repetido, leer_('PedidoItems')), cliente_id: String(repetido.cliente_id) };
       }
+    }
+    // Factura: hace falta RIF o cédula (del formulario o ya guardado en el cliente)
+    if (documento === 'Factura') {
+      var cc = p.cliente || {};
+      var rifCliente = txt_(cc.rif_cedula, 30);
+      if (!rifCliente && cc.id) {
+        var previo = leer_('Clientes').filter(function (x) { return String(x.id) === String(cc.id); })[0];
+        rifCliente = previo ? String(previo.rif_cedula) : '';
+      }
+      if (soloDigitos_(rifCliente).length < 6) return { ok: false, error: 'Para factura hace falta el RIF o la cédula del cliente.', code: 'rif' };
     }
     var cliente;
     try { cliente = guardarCliente_(p.cliente || {}, ses); }
@@ -432,7 +445,7 @@ function accionGuardarPedido_(p, ses) {
       cliente_id: cliente.id, cliente: cliente.contacto || cliente.nombre, negocio: cliente.nombre,
       total_cajas: items.reduce(function (a, it) { return a + it.cajas; }, 0),
       detalle_unidades: detalleUnidades_(items),
-      pago: txt_(p.pago, 40), nota: txt_(p.nota, 300),
+      pago: txt_(p.pago, 40), nota: txt_(p.nota, 300), documento: documento,
       estado: 'pendiente', estado_at: t, estado_por: ses.nombre, motivo: '',
       client_ref: ref, created_at: t, updated_at: t
     };

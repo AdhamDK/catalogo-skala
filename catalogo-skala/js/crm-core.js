@@ -65,6 +65,7 @@ function mensajeGrupo(ped, c) {
     "",
     `*Total: ${ped.total_cajas} caja${Number(ped.total_cajas) === 1 ? "" : "s"}*${ped.detalle_unidades ? ` · ${ped.detalle_unidades}` : ""}`,
     ped.pago ? `Pago: ${ped.pago}` : null,
+    ped.documento ? `Documento: ${ped.documento}` : null,
     ped.nota ? `Nota: ${ped.nota}` : null,
     ped.estado === "cancelado" && ped.motivo ? `Motivo: ${ped.motivo}` : null,
   ];

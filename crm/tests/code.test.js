@@ -31,7 +31,7 @@ const CLIENTE = {
 };
 let n = 0;
 const pedir = (g, token, extra = {}) =>
-  g.post({ action: "guardarPedido", token, client_ref: "ref-" + ++n, cliente: CLIENTE, items: ITEMS, ...extra });
+  g.post({ action: "guardarPedido", token, client_ref: "ref-" + ++n, cliente: CLIENTE, items: ITEMS, documento: "Nota de entrega", ...extra });
 const idDe = (g, usuario) => g.tabla("Usuarios").find((u) => u.usuario === usuario).id;
 
 /* ---------- Hojas, usuarios, login ---------- */
@@ -140,7 +140,7 @@ test("correlativo diario y reintento sin duplicar", () => {
   const g = preparar();
   const t = login(g);
   assert.equal(pedir(g, t).pedido.id, "SKL-261025-001");
-  const body = { action: "guardarPedido", token: t, client_ref: "mismo", cliente: CLIENTE, items: ITEMS };
+  const body = { action: "guardarPedido", token: t, client_ref: "mismo", cliente: CLIENTE, items: ITEMS, documento: "Factura" };
   assert.equal(g.post(body).pedido.id, "SKL-261025-002");
   assert.equal(g.post(body).duplicado, true);
   assert.equal(g.tabla("Pedidos").length, 2);
@@ -428,4 +428,23 @@ test("añadir cliente sin pedido: teléfono opcional, sin duplicar, editar", () 
 test("un pedido sigue exigiendo teléfono del cliente", () => {
   const g = preparar();
   assert.equal(pedir(g, login(g), { cliente: { negocio: "Sin tel" } }).code, "cliente");
+});
+
+test("documento: nota de entrega o factura es obligatorio; factura exige RIF", () => {
+  const g = preparar();
+  const t = login(g);
+  assert.equal(pedir(g, t, { documento: "" }).code, "documento");
+  assert.equal(pedir(g, t, { documento: "Boleta" }).code, "documento");
+  const sinRif = { negocio: "Sin RIF", telefono: "0414-2223344" };
+  assert.equal(pedir(g, t, { documento: "Factura", cliente: sinRif }).code, "rif");
+  const n1 = pedir(g, t, { documento: "Nota de entrega", cliente: sinRif });
+  assert.equal(n1.ok, true);
+  assert.equal(n1.pedido.documento, "Nota de entrega");
+  // cliente ya guardado con RIF: basta con su id
+  const conRif = pedir(g, t, { documento: "Factura" });
+  assert.equal(conRif.pedido.documento, "Factura");
+  const r = pedir(g, t, { documento: "Factura", cliente: { id: conRif.cliente_id, negocio: "Peluquería Bella", telefono: "0412-1234567" } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(g.tabla("Pedidos").at(-1).documento, "Factura");
+  assert.equal(g.post({ action: "pedido", token: t, pedido_id: r.pedido.id }).pedido.documento, "Factura");
 });

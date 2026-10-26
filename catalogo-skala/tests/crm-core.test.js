@@ -164,3 +164,7 @@ test("validarCliente para alta manual: teléfono opcional", () => {
   assert.deepEqual(core.validarCliente({ negocio: "X", telefono: "12" }, { telefonoOpcional: true }), ["Teléfono 1 (mínimo 7 números)"]);
   assert.deepEqual(core.validarCliente({}, { telefonoOpcional: true }), ["Nombre del cliente o del negocio"]);
 });
+
+test("mensajeGrupo incluye si es nota de entrega o factura", () => {
+  assert.match(core.mensajeGrupo({ ...PEDIDO, documento: "Factura" }, CLIENTE), /Pago: Divisas · Contado\nDocumento: Factura\nNota:/);
+});

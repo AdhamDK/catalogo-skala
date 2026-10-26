@@ -47,8 +47,9 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
 **Agregar a inicio**). Abre a pantalla completa con el ícono de Skala.
 
 ## Uso diario
-- **Vendedor**: **Nuevo** → elige productos con + / − → **Continuar** → datos del cliente
-  (o buscarlo) + GPS → **Guardar pedido** → **Enviar al grupo**.
+- **Vendedor**: **Nuevo** → 1) **Buscar cliente** o **Cliente nuevo** (si existe, ficha con ✏️
+  para corregir datos) → 2) productos con + / − → 3) **¿Nota de entrega o factura?** (factura pide
+  RIF), pago y nota → **Enviar pedido** → **Enviar al grupo**.
 - **Administración**: **Inicio / Pedidos → Por aprobar** → abrir el pedido → **Aprobar** (elige despachador) o **Anular** (con motivo).
 - **Despachador**: **Entregas** → abrir el pedido → *Salió en ruta* → *Entregado* (con Llamar, WhatsApp y Mapa).
 - **Master**: todo lo anterior + **Más → Resumen** y **Más → Usuarios** (crear, clave, rol, activar).

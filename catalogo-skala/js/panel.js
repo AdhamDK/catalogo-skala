@@ -1,6 +1,6 @@
 /* ============================================================
    Skala — Panel del equipo (app con páginas)
-   Rutas (#/...): ingresar · inicio · nuevo · nuevo/cliente · nuevo/listo · pedidos ·
+   Rutas (#/...): ingresar · inicio · nuevo (1 cliente) · nuevo/productos (2) · nuevo/enviar (3) · nuevo/listo · pedidos ·
    pedido/ID · entregas · clientes · cliente/ID · resumen · usuarios · usuario/ID · mas
    Datos: Google Sheets vía js/crm-api.js. Permisos: el servidor valida cada acción.
    ============================================================ */
@@ -33,8 +33,10 @@
   const RUTAS = {
     ingresar: { titulo: "Ingresar", publica: true, render: vIngresar },
     inicio: { titulo: "Inicio", roles: TODOS, nav: "inicio", render: vInicio },
-    nuevo: { titulo: "Nuevo pedido", roles: TOMAN, nav: "nuevo", render: vNuevo },
-    "nuevo/cliente": { titulo: "Datos del cliente", roles: TOMAN, nav: "nuevo", atras: "#/nuevo", render: vNuevoCliente },
+    nuevo: { titulo: "Nuevo pedido", roles: TOMAN, nav: "nuevo", render: vNuevoCliente },
+    "nuevo/productos": { titulo: "Nuevo pedido", roles: TOMAN, nav: "nuevo", atras: "#/nuevo", render: vNuevoProductos },
+    "nuevo/enviar": { titulo: "Nuevo pedido", roles: TOMAN, nav: "nuevo", atras: "#/nuevo/productos", render: vNuevoEnviar },
+    "nuevo/cliente": { titulo: "Nuevo pedido", roles: TOMAN, nav: "nuevo", render: () => ir("#/nuevo") }, // enlace viejo
     "nuevo/listo": { titulo: "Pedido guardado", roles: TOMAN, nav: "nuevo", render: vNuevoListo },
     pedidos: { titulo: "Pedidos", roles: TOMAN, nav: "pedidos", render: vPedidos },
     entregas: { titulo: "Mis entregas", roles: ["despachador"], nav: "entregas", render: vPedidos },
@@ -260,11 +262,14 @@
     $("iLista").innerHTML = destacados.map(filaPedido).join("");
   }
 
-  /* ---------- Nuevo pedido: 1) productos ---------- */
+  /* ---------- Nuevo pedido: 2) productos ---------- */
   let filtroNuevo = "todos", busquedaNuevo = "";
-  function vNuevo(v) {
+  function vNuevoProductos(v) {
+    const cli = clienteElegido();
+    if (!cli) return ir("#/nuevo");
     const productos = [...BANOS.map((p) => ({ ...p, tipo: "banos" })), ...KITS.map((p) => ({ ...p, tipo: "kits" }))];
-    v.innerHTML = `
+    v.innerHTML = `${pasos(2)}
+      <a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>
       <div class="buscador"><input type="search" id="nBuscar" placeholder="Buscar producto o código" autocomplete="off" enterkeyhint="search" value="${esc(busquedaNuevo)}" /></div>
       <div class="periodos" id="nFiltros">${[["todos", "Todos"], ["banos", "Baños de crema"], ["kits", "Kits"], ["elegidos", "Elegidos"]].map(([k, t]) =>
         `<button type="button" class="tab${k === filtroNuevo ? " active" : ""}" data-f="${k}">${t}</button>`).join("")}</div>
@@ -287,7 +292,7 @@
       <div class="barra-accion" id="nBarra">
         <div><strong id="nTotal">0 cajas</strong><span id="nDetalle"></span></div>
         <button type="button" class="btn btn-ghost" id="nVaciar">Vaciar</button>
-        <a class="btn btn-primary" id="nSeguir" href="#/nuevo/cliente">Continuar</a>
+        <a class="btn btn-primary" id="nSeguir" href="#/nuevo/enviar">Continuar</a>
       </div>`;
     const lista = $("nLista");
     const pintar = () => {
@@ -352,115 +357,232 @@
     pintar();
   }
 
-  /* ---------- Nuevo pedido: 2) cliente ---------- */
-  const CAMPOS = { cId: "id", cContacto: "contacto", cNegocio: "negocio", cRif: "rif_cedula", cTel1: "telefono", cTel2: "telefono2", cDireccion: "direccion", cLat: "latitud", cLng: "longitud" };
+  /* ---------- Nuevo pedido: pasos ---------- */
+  function pasos(n) {
+    const p = [["#/nuevo", "Cliente"], ["#/nuevo/productos", "Productos"], ["#/nuevo/enviar", "Enviar"]];
+    return `<ol class="pasos">${p.map(([h, t], i) => `<li class="${i + 1 === n ? "actual" : i + 1 < n ? "hecho" : ""}">${i + 1 < n
+      ? `<a href="${h}"><b>${i + 1}</b>${t}</a>` : `<span><b>${i + 1}</b>${t}</span>`}</li>`).join("")}</ol>`;
+  }
+  /* Cliente del pedido en curso (guardado en el teléfono). _listo = ya elegido/confirmado */
+  const clienteElegido = () => { const c = leerLS(K_CLIENTE, null); return c && c._listo ? c : null; };
+  const fijarCliente = (c) => guardarLS(K_CLIENTE, { ...c, _listo: true });
+
+  function fichaCliente(c) {
+    const mapa = linkMapa(c.latitud, c.longitud);
+    return `<section class="tarjeta ficha-cli" id="fichaCli">
+      <div class="fila-top">
+        <div><h2 class="ped-titulo">${esc(c.negocio || c.contacto)}</h2>${c.negocio && c.contacto ? `<p class="ped-det">${esc(c.contacto)}</p>` : ""}</div>
+        <button type="button" class="btn-lapiz" id="btnLapiz" aria-label="Editar datos del cliente" title="Editar datos">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4" /></svg></button>
+      </div>
+      <dl class="datos">
+        ${c.rif_cedula ? `<dt>RIF</dt><dd>${esc(c.rif_cedula)}</dd>` : ""}
+        <dt>Teléfono</dt><dd>${esc([c.telefono, c.telefono2].filter(Boolean).join(" / ") || "—")}</dd>
+        ${c.direccion ? `<dt>Dirección</dt><dd>${esc(c.direccion)}</dd>` : ""}
+        <dt>Ubicación</dt><dd>${mapa ? `<a href="${esc(mapa)}" target="_blank" rel="noopener">Ver mapa</a>` : '<button type="button" class="link-btn" id="btnGpsFicha">Tomar ubicación ahora</button>'}</dd>
+      </dl>
+      ${c.id ? "" : '<p class="nota-chica">Cliente nuevo: se guarda junto con el pedido.</p>'}
+    </section>`;
+  }
+
+  /* Formulario de cliente (nuevo o editar con el lápiz) */
+  function formCliente(c) {
+    const val = (k) => esc((c && c[k]) ?? "");
+    return `<form class="tarjeta" id="fCli" novalidate>
+      <h3 class="sub-titulo">${c && c.id ? "Editar datos del cliente" : "Cliente nuevo"}</h3>
+      <div class="form-grid">
+        <label class="field"><span>Nombre del negocio</span><input id="cNegocio" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Peluquería / tienda" value="${val("negocio")}" /></label>
+        <label class="field"><span>Nombre del cliente</span><input id="cContacto" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Persona de contacto" value="${val("contacto")}" /></label>
+        <label class="field"><span>RIF / Cédula</span><input id="cRif" type="text" autocomplete="off" autocapitalize="characters" enterkeyhint="next" placeholder="J-12345678-9" value="${val("rif_cedula")}" /></label>
+        <label class="field"><span>Teléfono 1 *</span><input id="cTel1" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="0412-1234567" value="${val("telefono")}" /></label>
+        <label class="field"><span>Teléfono 2</span><input id="cTel2" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="Opcional" value="${val("telefono2")}" /></label>
+        <label class="field field-full"><span>Dirección</span><input id="cDireccion" type="text" autocomplete="off" enterkeyhint="done" placeholder="Dirección de entrega" value="${val("direccion")}" /></label>
+      </div>
+      <div class="gps-box">
+        <button type="button" class="btn btn-ghost btn-gps" id="btnGps">Tomar ubicación GPS del cliente</button>
+        <span class="gps-estado" id="gpsEstado">Sin ubicación</span>
+        <input type="hidden" id="cLat" value="${val("latitud")}" /><input type="hidden" id="cLng" value="${val("longitud")}" />
+      </div>
+      <p class="form-warn" id="cError" hidden></p>
+      <div class="fila-botones">
+        <button type="button" class="btn btn-ghost" id="btnCliVolver">${c && (c.id || c._listo) ? "Cancelar" : "Volver a buscar"}</button>
+        <button type="submit" class="btn btn-primary" id="btnCliUsar">${c && c.id ? "Guardar cambios" : "Usar este cliente"}</button>
+      </div>
+    </form>`;
+  }
+
+  function tomarGps(boton, alListo) {
+    if (!navigator.geolocation) return toast("Este teléfono no permite GPS en el navegador.");
+    const texto = boton.textContent;
+    boton.disabled = true; boton.textContent = "Buscando GPS…";
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { boton.disabled = false; boton.textContent = texto; alListo(pos.coords.latitude.toFixed(6), pos.coords.longitude.toFixed(6), pos.coords.accuracy); },
+      (err) => { boton.disabled = false; boton.textContent = texto; toast(err.code === 1 ? "Permiso de ubicación negado. Activalo en el navegador." : "No se pudo obtener el GPS. Probá al aire libre."); },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
+  }
+
+  /* ---------- Nuevo pedido: 1) cliente (buscar / nuevo) ---------- */
   function vNuevoCliente(v) {
+    let modo = clienteElegido() ? "ficha" : "buscar"; // buscar · ficha · form
+    let enEdicion = null;
+    const pintar = () => {
+      const cli = clienteElegido();
+      if (modo === "ficha" && !cli) modo = "buscar";
+      if (modo === "buscar") {
+        v.innerHTML = `${pasos(1)}
+          <div class="buscador"><input type="search" id="cBuscar" placeholder="Buscar cliente: nombre, negocio o teléfono" autocomplete="off" enterkeyhint="search" /></div>
+          <ul class="lista-cli" id="cResultados"></ul>
+          <p class="o-separador"><span>o</span></p>
+          <button type="button" class="btn btn-primary btn-bloque" id="btnClienteNuevo">Cliente nuevo</button>`;
+        let t = null, ultimaQ = "";
+        $("cBuscar").addEventListener("input", () => {
+          clearTimeout(t);
+          const q = $("cBuscar").value.trim();
+          if (q.length < 2) { $("cResultados").innerHTML = ""; return; }
+          t = setTimeout(async () => {
+            ultimaQ = q;
+            try {
+              const r = await api("clientes", { q });
+              if (q !== ultimaQ || !$("cResultados")) return;
+              $("cResultados").innerHTML = r.clientes.length
+                ? r.clientes.map((c, i) => `<li><button type="button" class="res-cli" data-i="${i}"><strong>${esc(c.nombre)}</strong><span>${esc([c.contacto, c.telefono].filter(Boolean).join(" · "))}</span>${c.direccion ? `<span>${esc(c.direccion)}</span>` : ""}</button></li>`).join("")
+                : '<li class="vacio-panel">No está registrado. Tocá <strong>Cliente nuevo</strong>.</li>';
+              $("cResultados").onclick = (e) => {
+                const b = e.target.closest("[data-i]");
+                if (!b) return;
+                const c = r.clientes[Number(b.dataset.i)];
+                fijarCliente({ id: c.id, negocio: c.nombre, contacto: c.contacto, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: c.telefono2, direccion: c.direccion, latitud: c.latitud, longitud: c.longitud });
+                modo = "ficha"; pintar();
+              };
+            } catch (e) {
+              if ($("cResultados")) $("cResultados").innerHTML = `<li class="vacio-panel">${esc(e instanceof ErrorRed ? "Sin señal para buscar. Podés cargarlo como Cliente nuevo." : e.message)}</li>`;
+            }
+          }, 350);
+        });
+        $("btnClienteNuevo").addEventListener("click", () => { enEdicion = null; modo = "form"; pintar(); });
+        $("cBuscar").focus();
+        return;
+      }
+      if (modo === "ficha") {
+        v.innerHTML = `${pasos(1)}${fichaCliente(cli)}
+          <div class="barra-accion">
+            <button type="button" class="btn btn-ghost" id="btnCambiarCli">Cambiar cliente</button>
+            <a class="btn btn-primary" href="#/nuevo/productos" id="btnAProductos">Continuar a productos</a>
+          </div>`;
+        $("btnLapiz").addEventListener("click", () => { enEdicion = cli; modo = "form"; pintar(); });
+        $("btnCambiarCli").addEventListener("click", () => { borrarLS(K_CLIENTE); modo = "buscar"; pintar(); });
+        const g = $("btnGpsFicha");
+        if (g) g.addEventListener("click", () => tomarGps(g, (lat, lng) => {
+          fijarCliente({ ...cli, latitud: lat, longitud: lng });
+          if (cli.id) api("guardarCliente", { cliente: { ...cli, id: cli.id, latitud: lat, longitud: lng } }).catch(() => {});
+          toast("Ubicación guardada"); pintar();
+        }));
+        return;
+      }
+      /* modo form: cliente nuevo o edición con el lápiz */
+      v.innerHTML = pasos(1) + formCliente(enEdicion);
+      const pintarGps = (prec) => {
+        const lat = $("cLat").value, lng = $("cLng").value;
+        $("gpsEstado").innerHTML = lat && lng
+          ? `Ubicación lista${prec ? ` (±${Math.round(prec)} m)` : ""} · <a href="${esc(linkMapa(lat, lng))}" target="_blank" rel="noopener">ver mapa</a>`
+          : "Sin ubicación";
+        $("btnGps").textContent = lat && lng ? "Volver a tomar ubicación" : "Tomar ubicación GPS del cliente";
+      };
+      pintarGps();
+      $("btnGps").addEventListener("click", () => tomarGps($("btnGps"), (lat, lng, prec) => { $("cLat").value = lat; $("cLng").value = lng; pintarGps(prec); }));
+      $("btnCliVolver").addEventListener("click", () => { modo = enEdicion || clienteElegido() ? "ficha" : "buscar"; pintar(); });
+      $("fCli").addEventListener("input", () => { $("cError").hidden = true; });
+      $("cNegocio").focus();
+      $("fCli").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const c = {
+          id: enEdicion ? enEdicion.id : undefined,
+          negocio: $("cNegocio").value.trim(), contacto: $("cContacto").value.trim(), rif_cedula: $("cRif").value.trim(),
+          telefono: $("cTel1").value.trim(), telefono2: $("cTel2").value.trim(), direccion: $("cDireccion").value.trim(),
+          latitud: $("cLat").value, longitud: $("cLng").value,
+        };
+        const faltan = validarCliente(c);
+        if (faltan.length) { $("cError").textContent = "Falta: " + faltan.join(" · "); $("cError").hidden = false; return; }
+        if (c.id) {
+          // Cliente existente: el lápiz guarda los cambios en la hoja enseguida
+          const b = $("btnCliUsar");
+          b.disabled = true;
+          try {
+            const r = await api("guardarCliente", { cliente: c });
+            fijarCliente({ ...c, negocio: r.cliente.nombre });
+            toast("Datos del cliente actualizados");
+          } catch (e2) {
+            if (e2.code === "auth") throw e2;
+            if (!(e2 instanceof ErrorRed)) { $("cError").textContent = e2.message; $("cError").hidden = false; b.disabled = false; return; }
+            fijarCliente(c);
+            toast("Sin señal: los cambios se guardan con el pedido.");
+          }
+        } else {
+          fijarCliente(c);
+        }
+        modo = "ficha"; pintar();
+      });
+    };
+    pintar();
+  }
+
+  /* ---------- Nuevo pedido: 3) enviar (pago, nota o factura) ---------- */
+  function vNuevoEnviar(v) {
+    const cli = clienteElegido();
+    if (!cli) return ir("#/nuevo");
     const items = itemsDePedido(carrito(), allProductsMap());
-    if (!items.length) return ir("#/nuevo");
+    if (!items.length) return ir("#/nuevo/productos");
     const total = items.reduce((a, it) => a + it.cajas, 0);
-    v.innerHTML = `
-      <a class="resumen-carrito" href="#/nuevo">
-        <strong>${total} caja${total === 1 ? "" : "s"}</strong>
-        <span>${items.map((it) => `${it.cajas} × ${esc(it.producto)}`).join(" · ")}</span>
-        <em>Cambiar</em>
-      </a>
-      <form id="fCliente" novalidate>
-        <label class="field field-full"><span>Buscar cliente existente</span>
-          <input id="cBuscar" type="search" placeholder="Nombre, negocio o teléfono" autocomplete="off" enterkeyhint="search" />
-        </label>
-        <ul class="vend-resultados" id="cResultados" hidden></ul>
-        <input type="hidden" id="cId" />
-        <p class="vend-cliente-sel" id="cSel" hidden></p>
-        <div class="form-grid">
-          <label class="field"><span>Nombre del cliente</span><input id="cContacto" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Persona de contacto" /></label>
-          <label class="field"><span>Nombre del negocio</span><input id="cNegocio" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Peluquería / tienda" /></label>
-          <label class="field"><span>RIF / Cédula</span><input id="cRif" type="text" autocomplete="off" autocapitalize="characters" enterkeyhint="next" placeholder="J-12345678-9" /></label>
-          <label class="field"><span>Teléfono 1 *</span><input id="cTel1" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="0412-1234567" /></label>
-          <label class="field"><span>Teléfono 2</span><input id="cTel2" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="Opcional" /></label>
-          <label class="field field-full"><span>Dirección</span><input id="cDireccion" type="text" autocomplete="off" enterkeyhint="next" placeholder="Dirección de entrega" /></label>
-        </div>
-        <div class="gps-box">
-          <button type="button" class="btn btn-ghost btn-gps" id="btnGps">Tomar ubicación GPS del cliente</button>
-          <span class="gps-estado" id="gpsEstado">Sin ubicación</span>
-          <input type="hidden" id="cLat" /><input type="hidden" id="cLng" />
-        </div>
+    const unidades = {};
+    items.forEach((it) => { if (it.total_unidades) unidades[it.unidad] = (unidades[it.unidad] || 0) + it.total_unidades; });
+    v.innerHTML = `${pasos(3)}
+      <a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>
+      <section class="tarjeta">
+        <div class="fila-top"><h3 class="sub-titulo">Productos</h3><a class="link-btn" href="#/nuevo/productos">Cambiar</a></div>
+        <ul class="resumen-items">${items.map((it) => `<li><span>${it.cajas} × ${esc(it.producto)}</span><em>${it.total_unidades ? `${it.total_unidades} ${esc(it.unidad)}` : ""}</em></li>`).join("")}</ul>
+        <p class="total-ped"><strong>Total: ${total} caja${total === 1 ? "" : "s"}</strong> · ${Object.entries(unidades).map(([u, n]) => `${n} ${esc(u)}`).join(" + ")}</p>
+      </section>
+      <form id="fEnviar" novalidate>
+        <fieldset class="pay documento" id="fsDoc"><legend>¿El cliente quiere nota de entrega o factura? *</legend>
+          <label class="pay-opt"><input type="radio" name="eDoc" value="Nota de entrega" /> Nota de entrega</label>
+          <label class="pay-opt"><input type="radio" name="eDoc" value="Factura" /> Factura</label>
+          <label class="field field-full" id="eRifWrap" hidden><span>RIF o cédula para la factura *</span>
+            <input id="eRif" type="text" autocomplete="off" autocapitalize="characters" placeholder="J-12345678-9" value="${esc(cli.rif_cedula || "")}" /></label>
+        </fieldset>
         <fieldset class="pay"><legend>Método de pago</legend>
           ${["Bolívares · Contado", "Bolívares · Crédito", "Divisas · Contado", "Divisas · Crédito"].map((p) =>
-            `<label class="pay-opt"><input type="radio" name="cPago" value="${p}" /> ${p}</label>`).join("")}
+            `<label class="pay-opt"><input type="radio" name="ePago" value="${p}" /> ${p}</label>`).join("")}
         </fieldset>
-        <label class="field field-full"><span>Nota (entrega, descuento, etc.)</span><textarea id="cNota" rows="2" maxlength="300" placeholder="Opcional"></textarea></label>
-        <p class="form-warn" id="cError" hidden></p>
+        <label class="field field-full"><span>Nota (entrega, descuento, etc.)</span><textarea id="eNota" rows="2" maxlength="300" placeholder="Opcional"></textarea></label>
+        <p class="form-warn" id="eError" hidden></p>
         <div class="barra-accion">
-          <a class="btn btn-ghost" href="#/nuevo">Productos</a>
-          <button type="submit" class="btn btn-primary" id="btnGuardar">Guardar pedido</button>
+          <a class="btn btn-ghost" href="#/nuevo/productos">Atrás</a>
+          <button type="submit" class="btn btn-primary" id="btnEnviar">Enviar pedido</button>
         </div>
       </form>`;
-
-    const leer = () => { const c = {}; Object.entries(CAMPOS).forEach(([id, k]) => (c[k] = $(id).value.trim())); return c; };
-    const llenar = (c) => {
-      Object.entries(CAMPOS).forEach(([id, k]) => { $(id).value = (k === "negocio" ? (c.negocio ?? c.nombre) : c[k]) ?? ""; });
-      $("cSel").hidden = !c.id;
-      if (c.id) $("cSel").textContent = `Cliente existente: ${c.negocio || c.nombre || c.contacto}. Podés corregir sus datos.`;
-      pintarGps();
-    };
-    const borrador = () => guardarLS(K_CLIENTE, leer());
-    function pintarGps(prec) {
-      const lat = $("cLat").value, lng = $("cLng").value;
-      $("gpsEstado").innerHTML = lat && lng
-        ? `Ubicación lista${prec ? ` (±${Math.round(prec)} m)` : ""} · <a href="${esc(linkMapa(lat, lng))}" target="_blank" rel="noopener">ver mapa</a>`
-        : "Sin ubicación";
-      $("btnGps").textContent = lat && lng ? "Volver a tomar ubicación" : "Tomar ubicación GPS del cliente";
-    }
-    llenar(leerLS(K_CLIENTE, {}) || {});
-
-    let buscarT = null, ultimaQ = "";
-    $("cBuscar").addEventListener("input", () => {
-      clearTimeout(buscarT);
-      const q = $("cBuscar").value.trim();
-      if (q.length < 2) { $("cResultados").hidden = true; return; }
-      buscarT = setTimeout(async () => {
-        ultimaQ = q;
-        try {
-          const r = await api("clientes", { q });
-          if (q !== ultimaQ) return;
-          const ul = $("cResultados");
-          ul.innerHTML = r.clientes.length
-            ? r.clientes.map((c, i) => `<li><button type="button" data-i="${i}"><strong>${esc(c.nombre)}</strong><span>${esc([c.contacto, c.telefono, c.direccion].filter(Boolean).join(" · "))}</span></button></li>`).join("")
-            : '<li class="vacio">Sin resultados. Cargá los datos abajo como cliente nuevo.</li>';
-          ul.hidden = false;
-          ul.onclick = (e) => {
-            const b = e.target.closest("button[data-i]");
-            if (!b) return;
-            llenar(r.clientes[Number(b.dataset.i)]);
-            borrador();
-            ul.hidden = true;
-            $("cBuscar").value = "";
-          };
-        } catch (e) { /* sin señal: se carga a mano */ }
-      }, 350);
+    const doc = () => (document.querySelector('input[name="eDoc"]:checked') || {}).value || "";
+    $("fEnviar").addEventListener("input", () => { $("eError").hidden = true; });
+    $("fsDoc").addEventListener("change", () => {
+      $("eRifWrap").hidden = doc() !== "Factura";
+      $("fsDoc").classList.remove("falta");
+      if (doc() === "Factura" && !$("eRif").value) $("eRif").focus();
     });
-    $("fCliente").addEventListener("input", (e) => { if (!["cBuscar", "cNota"].includes(e.target.id) && e.target.name !== "cPago") borrador(); });
-    $("btnGps").addEventListener("click", () => {
-      if (!navigator.geolocation) return toast("Este teléfono no permite GPS en el navegador.");
-      const b = $("btnGps");
-      b.disabled = true; b.textContent = "Buscando GPS…";
-      navigator.geolocation.getCurrentPosition(
-        (pos) => { $("cLat").value = pos.coords.latitude.toFixed(6); $("cLng").value = pos.coords.longitude.toFixed(6); b.disabled = false; pintarGps(pos.coords.accuracy); borrador(); },
-        (err) => { b.disabled = false; pintarGps(); toast(err.code === 1 ? "Permiso de ubicación negado. Activalo en el navegador." : "No se pudo obtener el GPS. Probá al aire libre."); },
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
-    });
-    $("fCliente").addEventListener("submit", async (e) => {
+    $("fEnviar").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const cliente = leer();
-      const faltan = validarCliente(cliente);
-      const err = $("cError");
-      if (faltan.length) { err.textContent = "Falta: " + faltan.join(" · "); err.hidden = false; err.scrollIntoView({ block: "center" }); return; }
+      const err = $("eError");
+      const d = doc();
+      const rif = $("eRif").value.trim();
+      const mostrar = (m, el) => { err.textContent = m; err.hidden = false; (el || err).scrollIntoView({ block: "center" }); };
+      if (!d) { $("fsDoc").classList.add("falta"); return mostrar("Elegí si el cliente quiere nota de entrega o factura.", $("fsDoc")); }
+      if (d === "Factura" && rif.replace(/\D/g, "").length < 6) return mostrar("Para factura hace falta el RIF o la cédula.", $("eRifWrap"));
       err.hidden = true;
+      const { _listo, ...cliente } = cli;
+      if (d === "Factura") cliente.rif_cedula = rif;
       const its = itemsDePedido(carrito(), allProductsMap());
-      if (!its.length) return ir("#/nuevo");
-      const datos = { client_ref: nuevoRef(), cliente, items: its, pago: (document.querySelector('input[name="cPago"]:checked') || {}).value || "", nota: $("cNota").value.trim() };
-      const btn = $("btnGuardar");
-      btn.disabled = true; btn.textContent = "Guardando…";
+      const datos = { client_ref: nuevoRef(), cliente, items: its, documento: d,
+        pago: (document.querySelector('input[name="ePago"]:checked') || {}).value || "", nota: $("eNota").value.trim() };
+      const btn = $("btnEnviar");
+      btn.disabled = true; btn.textContent = "Enviando…";
       const terminar = (listo) => {
         guardarCarrito({});
         borrarLS(K_CLIENTE);
@@ -471,10 +593,10 @@
         const r = await api("guardarPedido", datos);
         terminar({ pedido: r.pedido, cliente: r.cliente || cliente });
       } catch (e2) {
-        btn.disabled = false; btn.textContent = "Guardar pedido";
+        btn.disabled = false; btn.textContent = "Enviar pedido";
         if (e2 instanceof ErrorRed) { SkalaAPI.encolar(datos); return terminar({ offline: true, cliente }); }
         if (e2.code === "auth") throw e2;
-        err.textContent = e2.message; err.hidden = false;
+        mostrar(e2.message);
       }
     });
   }
@@ -567,6 +689,7 @@
           <dt>Fecha</dt><dd>${esc(fechaLegible(p.fecha))}</dd>
           <dt>Vendedor</dt><dd>${esc(p.vendedor)}</dd>
           ${p.despachador ? `<dt>Despachador</dt><dd>${esc(p.despachador)}</dd>` : ""}
+          ${p.documento ? `<dt>Documento</dt><dd>${esc(p.documento)}</dd>` : ""}
           ${p.pago ? `<dt>Pago</dt><dd>${esc(p.pago)}</dd>` : ""}
           ${p.nota ? `<dt>Nota</dt><dd>${esc(p.nota)}</dd>` : ""}
           ${p.motivo ? `<dt>Motivo</dt><dd>${esc(p.motivo)}</dd>` : ""}
@@ -677,8 +800,8 @@
       <h3 class="sub-titulo">Pedidos</h3>
       <ul class="lista-ped" id="kPedidos"><li class="cargando">Cargando…</li></ul>`;
     $("btnPedirCliente").addEventListener("click", () => {
-      guardarLS(K_CLIENTE, { id: c.id, contacto: c.contacto, negocio: c.nombre, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: c.telefono2, direccion: c.direccion, latitud: c.latitud, longitud: c.longitud });
-      ir(cajasCarrito() ? "#/nuevo/cliente" : "#/nuevo");
+      fijarCliente({ id: c.id, contacto: c.contacto, negocio: c.nombre, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: c.telefono2, direccion: c.direccion, latitud: c.latitud, longitud: c.longitud });
+      ir("#/nuevo/productos");
     });
     const r = await api("pedidos", { cliente_id: c.id });
     if (!vigente()) return;
