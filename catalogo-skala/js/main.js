@@ -44,12 +44,11 @@ const KITS = [
   { code: "KT-08", name: "Kit Mais Cachos", line: "Definición", benefit: "Define y controla los rizos.", hair: "3A–4C", stock: 10 },
 ];
 
-/* Unidades por caja (ver js/producto.js).
-   - Baños de crema: cada caja trae 6 unidades de 1 kg.
-   - Kits: dato pendiente -> se muestra "información no disponible".
-     Cuando se confirme, cambiar null por el número (ej. 12). */
-BANOS.forEach((p) => { p.unidades = UNIDADES_POR_CAJA_BANO; });
-KITS.forEach((p) => { p.unidades = null; });
+/* Contenido por caja (ver js/producto.js).
+   - Baños de crema: 6 unidades de 1 kg.
+   - Kits: 6 dúos (shampoo + acondicionador). */
+BANOS.forEach((p) => { p.unidades = UNIDADES_POR_CAJA_BANO; p.unidad = "unidades"; });
+KITS.forEach((p) => { p.unidades = DUOS_POR_CAJA_KIT; p.unidad = "dúos"; });
 
 /* -------------------- PEDIDO (estado) -------------------- */
 let pedido = {};
@@ -85,16 +84,25 @@ function placeholder(name) {
   return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
 }
 
-function cardHTML(p, group) {
+/* Imágenes responsive: WebP livianos (400/800 px) con PNG original de respaldo.
+   Las primeras tarjetas cargan con prioridad; el resto en diferido (lazy). */
+const IMG_SIZES = "(min-width: 901px) 270px, (min-width: 561px) 45vw, 92vw";
+
+function cardHTML(p, group, i = 99) {
   const b = stockBadge(p.stock);
   const img = `assets/img/${p.code}.png`;
+  const web = `assets/img/web/${p.code}`;
+  const prioridad = i < 2 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
   const q = pedido[p.code] || 0;
   return `
   <article class="card">
     <div class="card-img">
       <span class="card-badge ${b.cls}">${b.label}</span>
-      <img src="${img}" alt="${p.name}" loading="lazy"
-           onerror="this.onerror=null; this.src=placeholder('${p.name}');" />
+      <picture>
+        <source type="image/webp" srcset="${web}-400.webp 400w, ${web}-800.webp 800w" sizes="${IMG_SIZES}" />
+        <img src="${img}" alt="${p.name}" width="400" height="317" ${prioridad} decoding="async"
+             onerror="this.onerror=null; this.parentNode.querySelectorAll('source').forEach(function(s){s.remove()}); this.src=placeholder('${p.name}');" />
+      </picture>
     </div>
     <div class="card-body">
       <span class="card-line">${p.line}</span>
@@ -107,10 +115,10 @@ function cardHTML(p, group) {
       </div>
       <div class="card-order">
         <div class="qty">
-          <button class="qty-btn" data-act="minus" data-code="${p.code}" aria-label="Restar una caja">−</button>
+          <button type="button" class="qty-btn" data-act="minus" data-code="${p.code}" aria-label="Restar una caja de ${p.name}">−</button>
           <input class="qty-input" type="number" min="0" step="1" value="${q}" data-code="${p.code}"
-                 inputmode="numeric" aria-label="Cajas de ${p.name}" />
-          <button class="qty-btn" data-act="plus" data-code="${p.code}" aria-label="Sumar una caja">+</button>
+                 inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" aria-label="Cajas de ${p.name}" />
+          <button type="button" class="qty-btn" data-act="plus" data-code="${p.code}" aria-label="Sumar una caja de ${p.name}">+</button>
         </div>
         <span class="qty-label">cajas</span>
       </div>
@@ -122,7 +130,7 @@ function cardHTML(p, group) {
 function render(elId, items, group) {
   const el = document.getElementById(elId);
   if (!el) return;
-  el.innerHTML = items.map((p) => cardHTML(p, group)).join("");
+  el.innerHTML = items.map((p, i) => cardHTML(p, group, elId === "gridBanos" ? i : 99)).join("");
 }
 
 /* Refresca los inputs con el estado guardado (tras re-render por filtros). */
@@ -200,7 +208,7 @@ function buildMessage(c) {
   const lineas = items.map(([code, q]) => {
     const p = map[code];
     const name = p ? p.name : code;
-    const und = p && p.unidades ? ` (${q * p.unidades} unidades)` : "";
+    const und = textoUnidadesPedido(p, q);
     return `• ${name} (${code}) — ${q} caja${q === 1 ? "" : "s"}${und}`;
   });
   const parts = [
@@ -250,10 +258,20 @@ function openModal() {
   if (totalCajas() <= 0) return;
   fillCliente();
   refreshMessage();
+  lastFocus = document.activeElement;
   document.getElementById("orderModal").hidden = false;
+  document.body.classList.add("modal-open"); // bloquea el scroll del fondo en móvil
+  const box = document.querySelector("#orderModal .modal-box");
+  box.scrollTop = 0;
+  box.focus({ preventScroll: true });
 }
+let lastFocus = null;
 function closeModal() {
-  document.getElementById("orderModal").hidden = true;
+  const modal = document.getElementById("orderModal");
+  if (modal.hidden) return;
+  modal.hidden = true;
+  document.body.classList.remove("modal-open");
+  if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
 }
 
 /* -------------------- INICIALIZACIÓN -------------------- */
@@ -299,6 +317,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnClose").addEventListener("click", closeModal);
   document.getElementById("orderModal").addEventListener("click", (e) => {
     if (e.target.id === "orderModal") closeModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeModal();
   });
 
   const btnCopy = document.getElementById("btnCopy");

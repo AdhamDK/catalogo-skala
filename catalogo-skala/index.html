@@ -2,10 +2,13 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#fdf7ef" />
+  <meta name="format-detection" content="telephone=no" />
   <meta name="description" content="Catálogo 2026 — Skala Venezuela. Baños de crema 1kg y kits shampoo + acondicionador, directo de Brasil. Precios a consultar." />
   <title>Skala Venezuela — Catálogo 2026</title>
-  <link rel="icon" href="assets/img/logo.png" type="image/png" />
+  <link rel="icon" href="assets/img/web/logo-96.png" type="image/png" />
+  <link rel="apple-touch-icon" href="assets/img/web/logo-192.png" />
 
   <!-- Tipografías (Google Fonts). Si querés que funcione 100% offline, quitá estos dos <link> y usá las fuentes del sistema. -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -26,7 +29,7 @@
   <!-- Barra superior -->
   <header class="topbar">
     <a class="brand" href="#inicio">
-      <span class="brand-mark"><img src="assets/img/logo.png" alt="Skala Venezuela" width="38" height="38"></span>
+      <span class="brand-mark"><img src="assets/img/web/logo-96.png" alt="Skala Venezuela" width="38" height="38"></span>
       <span class="brand-text">Skala <em>Venezuela</em></span>
     </a>
     <nav class="nav" aria-label="Principal">
@@ -151,7 +154,7 @@
         <div>
           <p class="eyebrow">Combos</p>
           <h2>Kits · Shampoo + Acondicionador</h2>
-          <p class="section-note">Unidades por caja: información no disponible por el momento.</p>
+          <p class="section-note">Cada caja trae <strong>6 dúos</strong> (shampoo + acondicionador).</p>
         </div>
       </div>
       <div class="grid grid-kits" id="gridKits"></div>
@@ -223,28 +226,28 @@
       <span class="order-count"><strong id="orderTotal">0</strong> cajas seleccionadas</span>
       <span class="order-hint" id="orderHint"></span>
     </div>
-    <button class="order-clear" id="btnClear" title="Borrar todo">Borrar todo</button>
-    <button class="btn btn-primary" id="btnArmarPedido">Armar pedido por WhatsApp</button>
+    <button type="button" class="order-clear" id="btnClear" title="Borrar todo">Borrar todo</button>
+    <button type="button" class="btn btn-primary" id="btnArmarPedido">Armar pedido por WhatsApp</button>
   </div>
 
   <!-- Modal de pedido -->
   <div class="modal" id="orderModal" hidden>
-    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="orderModalTitle">
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="orderModalTitle" tabindex="-1">
       <h3 id="orderModalTitle">Tu pedido</h3>
       <p class="modal-sub">Revisá el pedido abajo. Los datos del cliente son opcionales.</p>
 
       <div class="form-grid">
         <label class="field"><span>RIF</span>
-          <input id="fRif" type="text" placeholder="J-12345678-9" autocomplete="off" />
+          <input id="fRif" type="text" placeholder="J-12345678-9" autocomplete="off" autocapitalize="characters" enterkeyhint="next" />
         </label>
         <label class="field"><span>Nombre del negocio</span>
-          <input id="fNegocio" type="text" placeholder="Razón social / nombre" autocomplete="organization" />
+          <input id="fNegocio" type="text" placeholder="Razón social / nombre" autocomplete="organization" enterkeyhint="next" />
         </label>
         <label class="field field-full"><span>Dirección</span>
-          <input id="fDireccion" type="text" placeholder="Dirección de entrega" autocomplete="street-address" />
+          <input id="fDireccion" type="text" placeholder="Dirección de entrega" autocomplete="street-address" enterkeyhint="next" />
         </label>
         <label class="field field-full"><span>Número de teléfono</span>
-          <input id="fTelefono" type="tel" placeholder="0412-1234567" autocomplete="tel" />
+          <input id="fTelefono" type="tel" inputmode="tel" placeholder="0412-1234567" autocomplete="tel" enterkeyhint="done" />
         </label>
       </div>
 

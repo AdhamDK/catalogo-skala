@@ -5,8 +5,9 @@
    Se carga antes de js/main.js. Tests: node --test tests/
    ============================================================ */
 
-/* Unidades que trae cada caja de baño de crema (1 kg). */
-const UNIDADES_POR_CAJA_BANO = 6;
+/* Contenido de cada caja. */
+const UNIDADES_POR_CAJA_BANO = 6; // 6 unidades de baño de crema 1 kg
+const DUOS_POR_CAJA_KIT = 6;      // 6 dúos (shampoo + acondicionador)
 
 /* Mismo orden, nombres y símbolos que la sección "Guía de curvatura". */
 const CURVATURAS = [
@@ -38,13 +39,22 @@ function iconosCabelloHTML(hair) {
     .join("");
 }
 
-/* Texto de unidades por caja. Si no hay dato (kits), se informa. */
+/* Texto de unidades por caja ("Caja x 6 unidades" / "Caja x 6 dúos").
+   p.unidad es el nombre de la unidad (por defecto "unidades").
+   Si no hay dato, se informa. */
 function textoUnidades(p) {
   const u = p && p.unidades;
-  if (Number.isFinite(u) && u > 0) return `Caja x ${u} unidades`;
+  if (Number.isFinite(u) && u > 0) return `Caja x ${u} ${(p && p.unidad) || "unidades"}`;
   return "Unidades por caja: información no disponible";
 }
 
+/* Sufijo para el mensaje de pedido: 2 cajas de 6 -> " (12 unidades)". */
+function textoUnidadesPedido(p, cajas) {
+  const u = p && p.unidades;
+  if (!(Number.isFinite(u) && u > 0) || !(cajas > 0)) return "";
+  return ` (${cajas * u} ${p.unidad || "unidades"})`;
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { UNIDADES_POR_CAJA_BANO, CURVATURAS, tiposDeCabello, iconosCabelloHTML, textoUnidades };
+  module.exports = { UNIDADES_POR_CAJA_BANO, DUOS_POR_CAJA_KIT, CURVATURAS, tiposDeCabello, iconosCabelloHTML, textoUnidades, textoUnidadesPedido };
 }

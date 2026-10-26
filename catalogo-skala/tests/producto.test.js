@@ -5,7 +5,9 @@ const {
   tiposDeCabello,
   iconosCabelloHTML,
   textoUnidades,
+  textoUnidadesPedido,
   UNIDADES_POR_CAJA_BANO,
+  DUOS_POR_CAJA_KIT,
 } = require("../js/producto.js");
 
 const clases = (hair) => tiposDeCabello(hair).map((t) => t.clase);
@@ -66,7 +68,18 @@ test("caja de baño de crema trae 6 unidades", () => {
   assert.equal(textoUnidades({ unidades: 6 }), "Caja x 6 unidades");
 });
 
-test("kit sin dato de unidades muestra información no disponible", () => {
+test("caja de kit trae 6 dúos (shampoo + acondicionador)", () => {
+  assert.equal(DUOS_POR_CAJA_KIT, 6);
+  assert.equal(textoUnidades({ unidades: 6, unidad: "dúos" }), "Caja x 6 dúos");
+});
+
+test("producto sin dato de unidades muestra información no disponible", () => {
   assert.equal(textoUnidades({ unidades: null }), "Unidades por caja: información no disponible");
   assert.equal(textoUnidades({}), "Unidades por caja: información no disponible");
+});
+
+test("unidades del pedido: cajas x unidades, con su nombre", () => {
+  assert.equal(textoUnidadesPedido({ unidades: 6 }, 2), " (12 unidades)");
+  assert.equal(textoUnidadesPedido({ unidades: 6, unidad: "dúos" }, 1), " (6 dúos)");
+  assert.equal(textoUnidadesPedido({ unidades: null }, 3), "");
 });

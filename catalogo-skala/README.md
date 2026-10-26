@@ -94,12 +94,26 @@ además hay **"Copiar mensaje"** para reenviarlo manualmente.
 - **Iconos de curvatura:** cada tarjeta muestra el rango (ej. `1A–4C`) y un icono por cada
   curvatura que cubre (Liso ●, Ondulado ◒, Cacheado ◉, Crespo ✦), con los mismos colores
   de la *Guía de curvatura*. Se calculan solos a partir del campo `hair` (`js/producto.js`).
-- **Unidades por caja:** baños de crema = **6 unidades** (`UNIDADES_POR_CAJA_BANO` en
-  `js/producto.js`). Kits = *información no disponible*; cuando se confirme, cambiar
-  `p.unidades = null` por el número en `js/main.js`. El mensaje de WhatsApp incluye las
-  unidades cuando se conocen.
+- **Unidades por caja:** baños de crema = **6 unidades** (`UNIDADES_POR_CAJA_BANO`) y
+  kits = **6 dúos** shampoo + acondicionador (`DUOS_POR_CAJA_KIT`), ambos en
+  `js/producto.js`. El mensaje de WhatsApp incluye el total (ej. "2 cajas (12 unidades)").
+
+## Mobile first
+
+El CSS parte del teléfono y agrega pantallas grandes con `@media (min-width: 561px | 901px)`.
+
+- Menú y filtros como filas deslizables (sin hamburguesa); el título no queda bajo la barra fija.
+- Botones táctiles de 44px o más; inputs con letra de 16px (iOS no hace zoom).
+- Barra de pedido en 2 filas con el botón de WhatsApp a lo ancho; modal tipo hoja inferior
+  con el botón de enviar siempre visible; Esc cierra; el fondo no se desplaza.
+- Respeta el notch/barra de gestos (`safe-area-inset`), `dvh`, hover solo con mouse y
+  `prefers-reduced-motion`.
+- Imágenes WebP de 400/800 px en `assets/img/web/` con `srcset` (≈270 KB las 19 vs 14 MB en
+  PNG); los PNG originales quedan de respaldo. Logo liviano de 96/192 px.
+- Si agregás un producto: poné `assets/img/CODIGO.png` y generá `web/CODIGO-400.webp` y
+  `web/CODIGO-800.webp` (si faltan, se usa el PNG).
 
 ## Tests
 
 - Unitarios (sin dependencias): `node --test tests/producto.test.js`
-- En navegador (requiere Playwright): `node tests/e2e.js`
+- En navegador (requiere Playwright): `node tests/e2e.js` — prueba 320, 360, 390, 768 y 1280 px.
