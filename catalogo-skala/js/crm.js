@@ -5,7 +5,7 @@
    ============================================================ */
 
 /* ⚠️ Pegar aquí la URL de la App web de Apps Script (termina en /exec). */
-const CRM_API_URL = "";
+const CRM_API_URL = "https://script.google.com/macros/s/AKfycbzEr3zjJi1dZwHjr2TP7_XAkAIltSlcm5QIg58UCNIrSgaqPWLCRXfl8qNZMni35rhIJA/exec";
 
 (function () {
   const API = window.SKALA_CRM_URL || CRM_API_URL;
@@ -116,6 +116,7 @@ const CRM_API_URL = "";
     alEntrar = despues || null;
     mostrarError("loginError", "");
     $("loginPin").value = "";
+    $("loginPin").type = "password";
     $("loginUsuario").value = leerLS(K_ULTIMO, "");
     abrir("loginModal");
     ($("loginUsuario").value ? $("loginPin") : $("loginUsuario")).focus();
@@ -124,13 +125,13 @@ const CRM_API_URL = "";
   async function enviarLogin(ev) {
     ev.preventDefault();
     const usuario = $("loginUsuario").value.trim();
-    const pin = $("loginPin").value.trim();
+    const clave = $("loginPin").value;
     if (!usuario) return mostrarError("loginError", "Escribí tu usuario.");
-    if (!/^\d{4,6}$/.test(pin)) return mostrarError("loginError", "El PIN tiene de 4 a 6 números.");
+    if (!clave) return mostrarError("loginError", "Escribí tu clave.");
     const btn = $("btnLogin");
     btn.disabled = true; btn.textContent = "Entrando…";
     try {
-      const r = await api("login", { usuario, pin });
+      const r = await api("login", { usuario, clave });
       guardarLS(K_SESION, { token: r.token, usuario: r.usuario });
       guardarLS(K_ULTIMO, r.usuario.usuario);
       pintarSesion();
@@ -549,8 +550,9 @@ const CRM_API_URL = "";
     $("uNombre").value = u ? u.nombre : "";
     $("uRol").value = u ? u.rol : "vendedor";
     $("uPin").value = "";
+    $("uPin").type = "password";
     $("uActivo").checked = u ? u.activo : true;
-    $("uPinLabel").textContent = u ? "PIN nuevo (dejar vacío para no cambiarlo)" : "PIN (4 a 6 números; Master: 6)";
+    $("uPinLabel").textContent = u ? "Clave nueva (dejar vacía para no cambiarla)" : "Clave";
     mostrarError("usuarioError", "");
     abrir("usuarioModal");
   }
@@ -558,7 +560,7 @@ const CRM_API_URL = "";
     ev.preventDefault();
     const datos = {
       id: $("uId").value || undefined, usuario: $("uUsuario").value.trim(), nombre: $("uNombre").value.trim(),
-      rol: $("uRol").value, activo: $("uActivo").checked, pin: $("uPin").value.trim() || undefined,
+      rol: $("uRol").value, activo: $("uActivo").checked, clave: $("uPin").value || undefined,
     };
     const btn = $("btnGuardarUsuario");
     btn.disabled = true;
@@ -601,6 +603,15 @@ const CRM_API_URL = "";
       toast("Elegí los productos y tocá Armar pedido.");
     });
     $("asignarForm").addEventListener("submit", enviarAsignar);
+    /* Botón "Ver" para mostrar u ocultar la clave mientras se escribe */
+    document.querySelectorAll(".ver-clave").forEach((b) => b.addEventListener("click", () => {
+      const inp = $(b.dataset.ver);
+      const ver = inp.type === "password";
+      inp.type = ver ? "text" : "password";
+      b.textContent = ver ? "Ocultar" : "Ver";
+      b.setAttribute("aria-label", ver ? "Ocultar clave" : "Mostrar clave");
+      inp.focus();
+    }));
     $("asignarDespachador").addEventListener("change", () => mostrarError("asignarError", ""));
     $("usuarioForm").addEventListener("submit", guardarUsuario);
 

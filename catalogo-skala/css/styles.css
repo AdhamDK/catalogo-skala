@@ -901,6 +901,14 @@ fieldset.pay legend {
 .rol-admin { background: #4a90d9; }
 .rol-vendedor { background: var(--verde-osc); }
 .rol-despachador { background: #a05bd0; }
+/* Campo de clave con botón "Ver" */
+.clave-wrap { position: relative; display: block; }
+.clave-wrap input { padding-right: 84px; }
+.ver-clave {
+  position: absolute; top: 1px; right: 1px; bottom: 1px; min-width: 76px; min-height: 44px;
+  border: none; border-left: 1px solid rgba(38, 36, 31, 0.1); border-radius: 0 10px 10px 0;
+  background: var(--crema-2); color: var(--tinta-suave); font-family: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+}
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 0.95rem; }
 .check input { width: 20px; height: 20px; accent-color: var(--verde); }
 .foot-link { display: inline-flex; align-items: center; min-height: 44px; text-decoration: underline; }

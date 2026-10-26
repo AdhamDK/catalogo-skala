@@ -14,10 +14,10 @@ const SHOTS = process.env.SHOTS || "";
 (async () => {
   const gas = crearGas();
   gas.ctx.prepararHojas();
-  gas.ctx.crearUsuario("jose", "José Montiel", "master", "111111");
-  gas.ctx.crearUsuario("ana", "Ana", "admin", "2222");
-  gas.ctx.crearUsuario("oscar", "Óscar", "vendedor", "1234");
-  gas.ctx.crearUsuario("luis", "Luis", "despachador", "5555");
+  gas.ctx.crearUsuario("jose", "José Montiel", "master", "Skala#2026");
+  gas.ctx.crearUsuario("ana", "Ana", "admin", "Ana*2222");
+  gas.ctx.crearUsuario("oscar", "Óscar", "vendedor", "Oscar.1234");
+  gas.ctx.crearUsuario("luis", "Luis", "despachador", "Luis5555");
 
   const browser = await chromium.launch();
   const ctx = await browser.newContext({
@@ -83,8 +83,14 @@ const SHOTS = process.env.SHOTS || "";
   await foto("02-login");
   await ingresar("oscar", "0000");
   await page.waitForSelector("#loginError:not([hidden])");
-  assert.match(await page.innerText("#loginError"), /Usuario o PIN incorrecto/);
-  await ingresar("Oscar", "1234");
+  assert.match(await page.innerText("#loginError"), /Usuario o clave incorrecta/);
+  // Botón "Ver" muestra la clave
+  await page.fill("#loginPin", "Oscar.1234");
+  await page.click('.ver-clave[data-ver="loginPin"]');
+  assert.equal(await page.getAttribute("#loginPin", "type"), "text");
+  await page.click('.ver-clave[data-ver="loginPin"]');
+  assert.equal(await page.getAttribute("#loginPin", "type"), "password");
+  await ingresar("Oscar", "Oscar.1234");
   await page.waitForSelector("#vendModal:not([hidden])");
   assert.equal(await page.innerText("#btnCuenta"), "Óscar");
   assert.match(await page.innerText("#vendModal .js-quien"), /Óscar · Vendedor/);
@@ -132,7 +138,7 @@ const SHOTS = process.env.SHOTS || "";
 
   /* ---------- ADMINISTRACIÓN ---------- */
   await page.click("#btnCuenta");
-  await ingresar("ana", "2222");
+  await ingresar("ana", "Ana*2222");
   await page.waitForSelector("#panelModal:not([hidden])");
   assert.equal(await page.innerText("#panelTitulo"), "Administración");
   assert.deepEqual(await page.locator("#panelTabs .tab").allInnerTexts(), ["Por confirmar", "En curso", "Entregados", "Cancelados", "Resumen"]);
@@ -160,7 +166,7 @@ const SHOTS = process.env.SHOTS || "";
 
   /* ---------- DESPACHADOR ---------- */
   await page.click("#btnCuenta");
-  await ingresar("luis", "5555");
+  await ingresar("luis", "Luis5555");
   await page.waitForSelector("#panelModal:not([hidden])");
   assert.equal(await page.innerText("#panelTitulo"), "Mis entregas");
   assert.deepEqual(await page.locator("#panelTabs .tab").allInnerTexts(), ["Por entregar", "Entregados"]);
@@ -195,7 +201,7 @@ const SHOTS = process.env.SHOTS || "";
 
   /* ---------- MASTER ---------- */
   await page.click("#btnCuenta");
-  await ingresar("jose", "111111");
+  await ingresar("jose", "Skala#2026");
   await page.waitForSelector("#panelModal:not([hidden])");
   assert.equal(await page.innerText("#panelTitulo"), "Panel Master");
   assert.deepEqual(await page.locator("#panelTabs .tab").allInnerTexts(), ["Por confirmar", "En curso", "Entregados", "Cancelados", "Resumen", "Usuarios"]);
@@ -220,8 +226,11 @@ const SHOTS = process.env.SHOTS || "";
   await page.selectOption("#uRol", "vendedor");
   await page.click("#btnGuardarUsuario");
   await page.waitForSelector("#usuarioError:not([hidden])");
-  assert.match(await page.innerText("#usuarioError"), /Asigná un PIN/);
-  await page.fill("#uPin", "9876");
+  assert.match(await page.innerText("#usuarioError"), /Asigná una clave/);
+  await page.fill("#uPin", "123456");
+  await page.click("#btnGuardarUsuario");
+  await page.waitForFunction(() => /letras y números/.test(document.getElementById("usuarioError").textContent));
+  await page.fill("#uPin", "Kevin#9876");
   await page.click("#btnGuardarUsuario");
   await page.waitForFunction(() => document.querySelectorAll("#panelContenido .usuarios-lista li").length === 5);
   await page.locator("#panelContenido .usuarios-lista li").filter({ hasText: "Kevin" }).locator("[data-editar]").click();

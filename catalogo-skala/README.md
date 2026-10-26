@@ -115,7 +115,7 @@ El CSS parte del teléfono y agrega pantallas grandes con `@media (min-width: 56
 
 ## CRM de pedidos con roles (Google Sheets)
 
-Botón **Ingresar** (usuario + PIN) en la barra superior. Roles:
+Botón **Ingresar** (usuario + clave con letras, números y símbolos) en la barra superior. Roles:
 **Master** (todo + usuarios + resumen) · **Administración** (confirma pedidos y asigna
 despachador) · **Vendedor** (toma pedidos en la calle con GPS y los envía al grupo de
 WhatsApp) · **Despachador** (sus entregas: en ruta → entregado, con llamar y mapa).

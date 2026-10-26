@@ -301,8 +301,11 @@
       <label class="field field-full"><span>Usuario</span>
         <input id="loginUsuario" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" placeholder="ej. oscar" required />
       </label>
-      <label class="field field-full"><span>PIN</span>
-        <input id="loginPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="current-password" enterkeyhint="go" placeholder="••••" required />
+      <label class="field field-full"><span>Clave</span>
+        <span class="clave-wrap">
+          <input id="loginPin" type="password" maxlength="64" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Tu clave" required />
+          <button type="button" class="ver-clave" data-ver="loginPin" aria-label="Mostrar clave">Ver</button>
+        </span>
       </label>
       <p class="form-warn" id="loginError" hidden></p>
       <div class="modal-actions">
@@ -443,9 +446,13 @@
           <option value="master">Master</option>
         </select>
       </label>
-      <label class="field field-full"><span id="uPinLabel">PIN (4 a 6 números)</span>
-        <input id="uPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password" placeholder="••••" />
+      <label class="field field-full"><span id="uPinLabel">Clave</span>
+        <span class="clave-wrap">
+          <input id="uPin" type="password" maxlength="64" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Letras y números" />
+          <button type="button" class="ver-clave" data-ver="uPin" aria-label="Mostrar clave">Ver</button>
+        </span>
       </label>
+      <p class="nota-chica" id="uPinAyuda">Mínimo 6 caracteres con letras y números (Master: 8). Puede llevar símbolos como * # @ !</p>
       <label class="check"><input type="checkbox" id="uActivo" checked /> Activo (puede ingresar)</label>
       <p class="form-warn" id="usuarioError" hidden></p>
       <div class="modal-actions">

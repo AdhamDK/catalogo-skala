@@ -17,9 +17,10 @@ Tiempo: ~10 minutos. Usá la cuenta de Google de la empresa (será la dueña de 
    (si pide permisos: *Revisar permisos → tu cuenta → Configuración avanzada → Ir a … → Permitir*).
    - Crea `Usuarios`, `Clientes`, `Pedidos`, `PedidoItems` e `Historial`.
    - Si ya tenías la hoja `Vendedores` (versión anterior), pasa esos vendedores a `Usuarios`
-     con el mismo PIN. Después podés borrar la hoja `Vendedores`.
+     con el mismo PIN (les sirve para entrar; conviene cambiarlo por una clave). Después podés borrar la hoja `Vendedores`.
 2. Recargá la hoja → menú **Skala CRM → 2. Crear usuario**:
-   usuario `jose` (o el que quieras), nombre, rol **master**, PIN de **6 números**.
+   usuario `jose` (o el que quieras), nombre, rol **master** y una **clave de al menos 8
+   caracteres con letras y números** (puede llevar símbolos: `Skala#2026`).
 3. Los demás usuarios los podés crear igual, o más cómodo **desde la web** con el Master
    (botón **Ingresar → Usuarios → Nuevo usuario**).
 
@@ -29,11 +30,12 @@ Tiempo: ~10 minutos. Usá la cuenta de Google de la empresa (será la dueña de 
 3. **Implementar** y copiá la **URL de la app web** (termina en `/exec`).
 4. Prueba: abrila en el navegador; debe mostrar `{"ok":true,"app":"skala-crm","version":2}`.
 
-> "Cualquier persona" es necesario para que el catálogo pueda llamarla. Sin usuario y PIN
+> "Cualquier persona" es necesario para que el catálogo pueda llamarla. Sin usuario y clave
 > válidos no se puede leer ni escribir nada; cada acción se valida según el rol.
 
 ## 4. Conectar el catálogo
 Pegá la URL en `catalogo-skala/js/crm.js` → `const CRM_API_URL = "…/exec";` y subí el cambio.
+(Ya está configurada con la URL de Skala.)
 
 ## Si cambiás `Code.gs` más adelante
 **Implementar → Administrar implementaciones → ✏️ → Versión: Nueva versión → Implementar.**
@@ -44,7 +46,10 @@ Así la URL `/exec` no cambia.
 - **Administración**: **Ingresar → Por confirmar → Confirmar** (elige despachador).
 - **Despachador**: **Ingresar → Por entregar** → *En ruta* → *Entregado* (con Llamar y Mapa).
 - **Master**: todo lo anterior + **Resumen** + **Usuarios** (crear, PIN, rol, activar).
-- Si alguien olvida el PIN: el Master le pone uno nuevo (Usuarios → Editar).
+- Claves: mínimo 6 caracteres con letras y números (Master: 8); pueden llevar símbolos.
+- Si alguien olvida la clave: el Master le pone una nueva (Usuarios → Editar).
+- **La hoja NO debe compartirse con "Cualquier persona con el enlace"**: dejala en
+  *Compartir → Restringido*. La API funciona igual (corre con tu cuenta).
 
 ## Respaldo
 La hoja vive en tu Drive: **Archivo → Historial de versiones** guarda todo. La hoja

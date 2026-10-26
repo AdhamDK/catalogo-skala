@@ -7,15 +7,15 @@ const { crearGas } = require("./fake-gas.js");
 function preparar() {
   const g = crearGas({ ahora: "2026-10-25T18:30:00Z" }); // 14:30 en Caracas
   g.ctx.prepararHojas();
-  g.ctx.crearUsuario("jose", "José Montiel", "master", "111111");
-  g.ctx.crearUsuario("ana", "Ana", "admin", "2222");
-  g.ctx.crearUsuario("oscar", "Óscar", "vendedor", "1234");
-  g.ctx.crearUsuario("kevin", "Kevin", "vendedor", "9876");
-  g.ctx.crearUsuario("luis", "Luis", "despachador", "5555");
-  g.ctx.crearUsuario("pedro", "Pedro", "despachador", "6666");
+  g.ctx.crearUsuario("jose", "José Montiel", "master", "Skala#2026");
+  g.ctx.crearUsuario("ana", "Ana", "admin", "Ana*2222");
+  g.ctx.crearUsuario("oscar", "Óscar", "vendedor", "Oscar.1234");
+  g.ctx.crearUsuario("kevin", "Kevin", "vendedor", "Kevin9876");
+  g.ctx.crearUsuario("luis", "Luis", "despachador", "Luis5555");
+  g.ctx.crearUsuario("pedro", "Pedro", "despachador", "Pedro6666");
   return g;
 }
-function login(g, usuario = "oscar", pin = "1234") {
+function login(g, usuario = "oscar", pin = "Oscar.1234") {
   const r = g.post({ action: "login", usuario, pin });
   assert.equal(r.ok, true, JSON.stringify(r));
   return r.token;
@@ -43,35 +43,39 @@ test("crea 5 hojas; Clientes empieza con las columnas de GPS_CLIENTES", () => {
     ["id", "nombre", "rif_cedula", "direccion", "latitud", "longitud", "telefono", "updated_at", "sync_status", "deleted"]);
 });
 
-test("PIN cifrado; Master exige 6 números; usuario único y normalizado", () => {
+test("clave cifrada; reglas de clave; usuario único y normalizado", () => {
   const g = preparar();
   const u = g.tabla("Usuarios").find((x) => x.usuario === "oscar");
   assert.match(u.pin_hash, /^[0-9a-f]{64}$/);
-  assert.throws(() => g.ctx.crearUsuario("otro", "Otro", "master", "1234"), /6 números/);
-  assert.throws(() => g.ctx.crearUsuario("OSCAR", "Dup", "vendedor", "1234"), /ya existe/);
-  assert.throws(() => g.ctx.crearUsuario("x", "X", "vendedor", "1234"), /al menos 3/);
-  assert.throws(() => g.ctx.crearUsuario("nuevo", "N", "jefe", "1234"), /Rol inválido/);
-  g.ctx.crearUsuario("María José", "MJ", "vendedor", "4321");
+  assert.throws(() => g.ctx.crearUsuario("otro", "Otro", "master", "Abc1234"), /al menos 8/);
+  assert.throws(() => g.ctx.crearUsuario("otro", "Otro", "vendedor", "123456"), /letras y números/);
+  assert.throws(() => g.ctx.crearUsuario("otro", "Otro", "vendedor", "abcdef"), /letras y números/);
+  assert.throws(() => g.ctx.crearUsuario("otro", "Otro", "vendedor", "Ab1"), /al menos 6/);
+  assert.ok(g.ctx.crearUsuario("otro", "Otro", "vendedor", "Ñandú#7 ok"));
+  assert.throws(() => g.ctx.crearUsuario("OSCAR", "Dup", "vendedor", "Oscar.1234"), /ya existe/);
+  assert.throws(() => g.ctx.crearUsuario("x", "X", "vendedor", "Oscar.1234"), /al menos 3/);
+  assert.throws(() => g.ctx.crearUsuario("nuevo", "N", "jefe", "Oscar.1234"), /Rol inválido/);
+  g.ctx.crearUsuario("María José", "MJ", "vendedor", "Mj$2026");
   assert.ok(g.tabla("Usuarios").some((x) => x.usuario === "mariajose"));
 });
 
 test("login con usuario + PIN (sin importar mayúsculas); error genérico", () => {
   const g = preparar();
-  const r = g.post({ action: "login", usuario: " Oscar ", pin: "1234" });
+  const r = g.post({ action: "login", usuario: " Oscar ", pin: "Oscar.1234" });
   assert.equal(r.ok, true);
   assert.deepEqual(r.usuario, { id: idDe(g, "oscar"), usuario: "oscar", nombre: "Óscar", rol: "vendedor", rol_nombre: "Vendedor" });
   assert.equal(g.post({ action: "login", usuario: "oscar", pin: "0000" }).code, "bad_pin");
-  assert.equal(g.post({ action: "login", usuario: "nadie", pin: "1234" }).code, "bad_pin");
+  assert.equal(g.post({ action: "login", usuario: "nadie", pin: "Oscar.1234" }).code, "bad_pin");
   assert.equal(g.post({ action: "yo", token: r.token }).usuario.rol, "vendedor");
 });
 
 test("5 intentos fallidos bloquean; usuario inactivo no entra", () => {
   const g = preparar();
   for (let i = 0; i < 5; i++) g.post({ action: "login", usuario: "oscar", pin: "1111" });
-  assert.equal(g.post({ action: "login", usuario: "oscar", pin: "1234" }).code, "locked");
+  assert.equal(g.post({ action: "login", usuario: "oscar", pin: "Oscar.1234" }).code, "locked");
   const fila = g.tabla("Usuarios").findIndex((x) => x.usuario === "kevin") + 2;
   g.hojas.Usuarios.filas[fila - 1][5] = false;
-  assert.equal(g.post({ action: "login", usuario: "kevin", pin: "9876" }).code, "bad_pin");
+  assert.equal(g.post({ action: "login", usuario: "kevin", pin: "Kevin9876" }).code, "bad_pin");
 });
 
 test("token: inválido, vencido o de usuario desactivado → auth", () => {
@@ -125,11 +129,11 @@ test("guardar pedido: cliente, pedido SKL-AAMMDD-NNN, items e historial", () => 
 
 test("despachador no puede tomar pedidos ni buscar clientes; admin y master sí", () => {
   const g = preparar();
-  const tl = login(g, "luis", "5555");
+  const tl = login(g, "luis", "Luis5555");
   assert.equal(pedir(g, tl).code, "forbidden");
   assert.equal(g.post({ action: "clientes", token: tl, q: "x" }).code, "forbidden");
-  assert.equal(pedir(g, login(g, "ana", "2222")).ok, true);
-  assert.equal(pedir(g, login(g, "jose", "111111")).ok, true);
+  assert.equal(pedir(g, login(g, "ana", "Ana*2222")).ok, true);
+  assert.equal(pedir(g, login(g, "jose", "Skala#2026")).ok, true);
 });
 
 test("correlativo diario y reintento sin duplicar", () => {
@@ -178,18 +182,18 @@ test("buscar clientes por nombre, contacto o teléfono", () => {
 /* ---------- Visibilidad por rol ---------- */
 test("vendedor ve solo los suyos; admin y master ven todos", () => {
   const g = preparar();
-  pedir(g, login(g, "oscar", "1234"));
-  pedir(g, login(g, "kevin", "9876"));
+  pedir(g, login(g, "oscar", "Oscar.1234"));
+  pedir(g, login(g, "kevin", "Kevin9876"));
   const ver = (u, p) => g.post({ action: "pedidos", token: login(g, u, p) }).pedidos.map((x) => x.vendedor);
-  assert.deepEqual(ver("oscar", "1234"), ["Óscar"]);
-  assert.equal(ver("ana", "2222").length, 2);
-  assert.equal(ver("jose", "111111").length, 2);
+  assert.deepEqual(ver("oscar", "Oscar.1234"), ["Óscar"]);
+  assert.equal(ver("ana", "Ana*2222").length, 2);
+  assert.equal(ver("jose", "Skala#2026").length, 2);
 });
 
 /* ---------- Flujo completo ---------- */
 test("flujo: pendiente → confirmado (asigna despachador) → en ruta → entregado", () => {
   const g = preparar();
-  const tv = login(g), ta = login(g, "ana", "2222"), tl = login(g, "luis", "5555"), tp = login(g, "pedro", "6666");
+  const tv = login(g), ta = login(g, "ana", "Ana*2222"), tl = login(g, "luis", "Luis5555"), tp = login(g, "pedro", "Pedro6666");
   const id = pedir(g, tv).pedido.id;
   const luis = idDe(g, "luis");
 
@@ -226,7 +230,7 @@ test("flujo: pendiente → confirmado (asigna despachador) → en ruta → entre
 
 test("reasignar despachador y reabrir (solo gestión)", () => {
   const g = preparar();
-  const ta = login(g, "ana", "2222"), tp = login(g, "pedro", "6666");
+  const ta = login(g, "ana", "Ana*2222"), tp = login(g, "pedro", "Pedro6666");
   const id = pedir(g, login(g)).pedido.id;
   g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: idDe(g, "luis") });
   const r = g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: idDe(g, "pedro") });
@@ -241,7 +245,7 @@ test("reasignar despachador y reabrir (solo gestión)", () => {
 
 test("cancelar: vendedor solo los suyos pendientes; motivo obligatorio", () => {
   const g = preparar();
-  const tv = login(g), tk = login(g, "kevin", "9876"), ta = login(g, "ana", "2222");
+  const tv = login(g), tk = login(g, "kevin", "Kevin9876"), ta = login(g, "ana", "Ana*2222");
   const id1 = pedir(g, tv).pedido.id;
   const id2 = pedir(g, tv).pedido.id;
   assert.equal(g.post({ action: "estado", token: tv, pedido_id: id1, estado: "cancelado" }).code, "motivo");
@@ -256,7 +260,7 @@ test("cancelar: vendedor solo los suyos pendientes; motivo obligatorio", () => {
 
 test("filtro por varios estados y lista de despachadores (solo gestión)", () => {
   const g = preparar();
-  const ta = login(g, "ana", "2222");
+  const ta = login(g, "ana", "Ana*2222");
   const id = pedir(g, login(g)).pedido.id;
   pedir(g, login(g));
   g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: idDe(g, "luis") });
@@ -269,7 +273,7 @@ test("filtro por varios estados y lista de despachadores (solo gestión)", () =>
 /* ---------- Resumen ---------- */
 test("resumen: gestión ve todo con vendedores; vendedor solo lo suyo", () => {
   const g = preparar();
-  const to = login(g), tk = login(g, "kevin", "9876"), ta = login(g, "ana", "2222");
+  const to = login(g), tk = login(g, "kevin", "Kevin9876"), ta = login(g, "ana", "Ana*2222");
   pedir(g, to);
   pedir(g, to);
   const idk = pedir(g, tk).pedido.id;
@@ -284,34 +288,34 @@ test("resumen: gestión ve todo con vendedores; vendedor solo lo suyo", () => {
   const rv = g.post({ action: "resumen", token: tk });
   assert.equal(rv.total_pedidos, 1);
   assert.deepEqual(rv.por_vendedor, []);
-  assert.equal(g.post({ action: "resumen", token: login(g, "luis", "5555") }).code, "forbidden");
+  assert.equal(g.post({ action: "resumen", token: login(g, "luis", "Luis5555") }).code, "forbidden");
 });
 
 /* ---------- Usuarios (Master) ---------- */
 test("solo el Master administra usuarios", () => {
   const g = preparar();
-  const tm = login(g, "jose", "111111");
-  assert.equal(g.post({ action: "usuarios", token: login(g, "ana", "2222") }).code, "forbidden");
+  const tm = login(g, "jose", "Skala#2026");
+  assert.equal(g.post({ action: "usuarios", token: login(g, "ana", "Ana*2222") }).code, "forbidden");
   const lista = g.post({ action: "usuarios", token: tm }).usuarios;
   assert.equal(lista.length, 6);
   assert.ok(!JSON.stringify(lista).includes("pin_hash"));
 
-  const r = g.post({ action: "guardarUsuario", token: tm, usuario: "carla", nombre: "Carla", rol: "admin", pin: "4444" });
+  const r = g.post({ action: "guardarUsuario", token: tm, usuario: "carla", nombre: "Carla", rol: "admin", pin: "Carla4444" });
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.equal(login(g, "carla", "4444").length > 10, true);
+  assert.equal(login(g, "carla", "Carla4444").length > 10, true);
   assert.equal(g.post({ action: "guardarUsuario", token: tm, usuario: "sinpin", nombre: "S", rol: "vendedor" }).code, "usuario");
 
   // cambiar rol, desactivar, cambiar PIN
   const kevin = idDe(g, "kevin");
   g.post({ action: "guardarUsuario", token: tm, id: kevin, usuario: "kevin", nombre: "Kevin", rol: "despachador", activo: true });
-  assert.equal(g.post({ action: "yo", token: login(g, "kevin", "9876") }).usuario.rol, "despachador");
-  g.post({ action: "guardarUsuario", token: tm, id: kevin, usuario: "kevin", nombre: "Kevin", rol: "despachador", activo: false, pin: "1111" });
-  assert.equal(g.post({ action: "login", usuario: "kevin", pin: "1111" }).code, "bad_pin");
+  assert.equal(g.post({ action: "yo", token: login(g, "kevin", "Kevin9876") }).usuario.rol, "despachador");
+  g.post({ action: "guardarUsuario", token: tm, id: kevin, usuario: "kevin", nombre: "Kevin", rol: "despachador", activo: false, pin: "Nueva1111" });
+  assert.equal(g.post({ action: "login", usuario: "kevin", pin: "Nueva1111" }).code, "bad_pin");
 });
 
 test("no se puede dejar la empresa sin Master activo", () => {
   const g = preparar();
-  const tm = login(g, "jose", "111111");
+  const tm = login(g, "jose", "Skala#2026");
   const jose = idDe(g, "jose");
   const r = g.post({ action: "guardarUsuario", token: tm, id: jose, usuario: "jose", nombre: "José", rol: "admin" });
   assert.match(r.error, /al menos un Master/);
@@ -345,4 +349,20 @@ test("GPS_CLIENTES puede escribir las 10 primeras columnas sin borrar las extra"
   assert.equal(c.nombre, "Peluquería Bella (GPS)");
   assert.equal(c.contacto, "María Pérez");
   assert.equal(c.telefono2, "0275-8812345");
+});
+
+test("login con clave con símbolos y espacios internos; acepta campo clave", () => {
+  const g = preparar();
+  g.ctx.crearUsuario("rosa", "Rosa", "vendedor", "Ro sa#2026!");
+  assert.equal(g.post({ action: "login", usuario: "rosa", clave: "Ro sa#2026!" }).ok, true);
+  assert.equal(g.post({ action: "login", usuario: "rosa", clave: "ro sa#2026!" }).code, "bad_pin"); // distingue mayúsculas
+});
+
+test("un PIN numérico viejo (v1) sigue sirviendo para entrar", () => {
+  const g = preparar();
+  const lista = g.tabla("Usuarios");
+  const u = lista.find((x) => x.usuario === "oscar");
+  const fila = lista.indexOf(u) + 1;
+  g.hojas.Usuarios.filas[fila][4] = "'" + g.ctx.hashPin_(u.id, "1234");
+  assert.equal(g.post({ action: "login", usuario: "oscar", pin: "1234" }).ok, true);
 });

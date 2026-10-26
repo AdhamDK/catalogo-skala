@@ -214,19 +214,23 @@ function normUsuario_(s) {
     .replace(/[^a-z0-9._-]/g, '').slice(0, 30);
 }
 
-function validarPin_(pin, rol) {
-  pin = String(pin || '').trim();
-  var min = rol === 'master' ? 6 : 4;
-  if (!new RegExp('^\\d{' + min + ',6}$').test(pin)) {
-    throw new Error(rol === 'master' ? 'El PIN del Master debe tener 6 números.' : 'El PIN debe tener de 4 a 6 números.');
+/* Clave: letras + números (símbolos opcionales). Mínimo 6; Master mínimo 8.
+   Se guarda cifrada (SHA-256 con un secreto que NO está en la hoja). */
+var CLAVE_MIN = 6, CLAVE_MIN_MASTER = 8, CLAVE_MAX = 64;
+function validarPin_(clave, rol) {
+  clave = String(clave || '');
+  var min = rol === 'master' ? CLAVE_MIN_MASTER : CLAVE_MIN;
+  if (clave.length < min || clave.length > CLAVE_MAX || !/[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(clave) || !/\d/.test(clave) || /^\s|\s$/.test(clave)) {
+    throw new Error('La clave' + (rol === 'master' ? ' del Master' : '') + ' debe tener al menos ' + min +
+      ' caracteres, con letras y números (puede llevar símbolos como * # @ !).');
   }
-  return pin;
+  return clave;
 }
 
 /* -------------------- Acciones: sesión -------------------- */
 function accionLogin_(p) {
   var usuario = normUsuario_(p.usuario);
-  var pin = txt_(p.pin, 12);
+  var pin = String(p.clave !== undefined ? p.clave : (p.pin || '')).slice(0, CLAVE_MAX);
   var cache = CacheService.getScriptCache();
   var clave = 'intentos_' + usuario;
   var intentos = Number(cache.get(clave) || 0);
@@ -234,9 +238,9 @@ function accionLogin_(p) {
     return { ok: false, error: 'Demasiados intentos. Esperá 10 minutos.', code: 'locked' };
   }
   var u = leer_('Usuarios').filter(function (x) { return normUsuario_(x.usuario) === usuario && activo_(x); })[0];
-  if (!u || !/^\d{4,6}$/.test(pin) || !u.pin_hash || hashPin_(String(u.id), pin) !== String(u.pin_hash)) {
+  if (!u || !pin || !u.pin_hash || hashPin_(String(u.id), pin) !== String(u.pin_hash)) {
     cache.put(clave, String(intentos + 1), BLOQUEO_SEG);
-    return { ok: false, error: 'Usuario o PIN incorrecto.', code: 'bad_pin' };
+    return { ok: false, error: 'Usuario o clave incorrecta.', code: 'bad_pin' };
   }
   cache.remove(clave);
   return { ok: true, token: crearToken_(String(u.id)), usuario: usuarioPublico_(u) };
@@ -591,9 +595,10 @@ function guardarUsuario_(d, ses) {
     var otros = usuarios.filter(function (u) { return String(u.rol) === 'master' && activo_(u) && String(u.id) !== String(existente.id); });
     if (!otros.length) throw new Error('Debe quedar al menos un Master activo.');
   }
-  var pin = d.pin ? validarPin_(d.pin, rol) : '';
-  if (!existente && !pin) throw new Error('Asigná un PIN al usuario nuevo.');
-  if (existente && rol === 'master' && String(existente.rol) !== 'master' && !pin) throw new Error('Para pasar a Master asigná un PIN de 6 números.');
+  var nueva = d.clave !== undefined ? d.clave : d.pin;
+  var pin = nueva ? validarPin_(nueva, rol) : '';
+  if (!existente && !pin) throw new Error('Asigná una clave al usuario nuevo.');
+  if (existente && rol === 'master' && String(existente.rol) !== 'master' && !pin) throw new Error('Para pasar a Master asigná una clave nueva de al menos 8 caracteres.');
 
   var u = existente || { id: 'U' + String(usuarios.reduce(function (m, x) { return Math.max(m, Number(String(x.id).replace(/\D/g, '')) || 0); }, 0) + 1), created_at: ahora_() };
   u.usuario = usuario; u.nombre = nombre; u.rol = rol; u.activo = activo;
@@ -617,7 +622,7 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('Skala CRM')
     .addItem('1. Preparar hojas', 'prepararHojas')
     .addItem('2. Crear usuario', 'menuCrearUsuario')
-    .addItem('3. Cambiar PIN', 'menuCambiarPin')
+    .addItem('3. Cambiar clave', 'menuCambiarPin')
     .addToUi();
 }
 
@@ -640,13 +645,13 @@ function prepararHojas() {
     });
   }
   var msg = 'Listo: hojas Usuarios, Clientes, Pedidos, PedidoItems e Historial.' +
-    (migrados ? '\n' + migrados + ' vendedor(es) pasados a Usuarios (mismo PIN; el usuario es su nombre en minúsculas). Podés borrar la hoja Vendedores.' : '') +
+    (migrados ? '\n' + migrados + ' vendedor(es) pasados a Usuarios (misma clave/PIN; el usuario es su nombre en minúsculas). Podés borrar la hoja Vendedores.' : '') +
     (leer_('Usuarios').some(function (u) { return u.rol === 'master'; }) ? '' : '\nAhora creá el usuario Master (menú 2).');
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
   return msg;
 }
 
-/* También se pueden usar desde el editor: crearUsuario('oscar','Óscar','master','123456') */
+/* También se pueden usar desde el editor: crearUsuario('jose','José','master','Skala#2026') */
 function crearUsuario(usuario, nombre, rol, pin) {
   return guardarUsuario_({ usuario: usuario, nombre: nombre, rol: rol, pin: pin }).id;
 }
@@ -665,7 +670,7 @@ function menuCrearUsuario() {
   var usuario = pedir('Crear usuario (1/4)', 'Usuario para ingresar (ej. oscar):'); if (usuario === null) return;
   var nombre = pedir('Crear usuario (2/4)', 'Nombre para mostrar (ej. Óscar):'); if (nombre === null) return;
   var rol = pedir('Crear usuario (3/4)', 'Rol: master, admin, vendedor o despachador'); if (rol === null) return;
-  var pin = pedir('Crear usuario (4/4)', 'PIN (4 a 6 números; Master: 6):'); if (pin === null) return;
+  var pin = pedir('Crear usuario (4/4)', 'Clave: letras y números, mínimo 6 (Master: 8). Puede llevar símbolos.'); if (pin === null) return;
   try {
     crearUsuario(usuario, nombre, rol.toLowerCase(), pin);
     ui.alert('Usuario "' + normUsuario_(usuario) + '" creado como ' + (NOMBRE_ROL[rol.toLowerCase()] || rol) + '.');
@@ -674,10 +679,10 @@ function menuCrearUsuario() {
 
 function menuCambiarPin() {
   var ui = SpreadsheetApp.getUi();
-  var a = ui.prompt('Cambiar PIN', 'Usuario (ej. oscar):', ui.ButtonSet.OK_CANCEL);
+  var a = ui.prompt('Cambiar clave', 'Usuario (ej. oscar):', ui.ButtonSet.OK_CANCEL);
   if (a.getSelectedButton() !== ui.Button.OK) return;
-  var b = ui.prompt('Cambiar PIN', 'PIN nuevo (4 a 6 números; Master: 6):', ui.ButtonSet.OK_CANCEL);
+  var b = ui.prompt('Cambiar clave', 'Clave nueva: letras y números, mínimo 6 (Master: 8):', ui.ButtonSet.OK_CANCEL);
   if (b.getSelectedButton() !== ui.Button.OK) return;
-  try { cambiarPin(a.getResponseText(), b.getResponseText()); ui.alert('PIN guardado (cifrado).'); }
+  try { cambiarPin(a.getResponseText(), b.getResponseText()); ui.alert('Clave guardada (cifrada).'); }
   catch (err) { ui.alert('No se pudo: ' + err.message); }
 }

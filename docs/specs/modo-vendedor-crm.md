@@ -26,7 +26,9 @@ Admin/Master pueden corregir (reabrir a pendiente, reasignar despachador).
 Cada cambio queda en la hoja `Historial` (fecha, pedido, usuario, acción, detalle).
 
 ## Ingreso
-Botón **Ingresar** en la barra superior: **usuario + PIN** (4–6 números; Master 6).
+Botón **Ingresar** en la barra superior: **usuario + clave** (mínimo 6 caracteres con letras y
+números, símbolos permitidos; Master mínimo 8). Botón "Ver" para mostrarla. Los PIN numéricos de
+la v1 siguen sirviendo para entrar.
 5 intentos fallidos → 10 min de bloqueo. Token HMAC de 12 h.
 "Armar pedido": sin sesión pregunta Cliente/Vendedor; con sesión de vendedor/admin/master
 va directo al formulario del pedido.
@@ -46,7 +48,7 @@ como rol `vendedor` conservando id y PIN.
 ## API (POST JSON `text/plain`)
 | action | roles | entrada |
 |---|---|---|
-| `login` | público | usuario, pin |
+| `login` | público | usuario, clave |
 | `yo` | todos | — |
 | `clientes` | M, A, V | q |
 | `guardarPedido` | M, A, V | client_ref, cliente{…}, items[], pago, nota |
@@ -54,7 +56,7 @@ como rol `vendedor` conservando id y PIN.
 | `estado` | según tabla | pedido_id, estado, motivo?, despachador_id? |
 | `despachadores` | M, A | — |
 | `resumen` | M, A, V | dias |
-| `usuarios` / `guardarUsuario` | M | id?, usuario, nombre, rol, activo, pin? |
+| `usuarios` / `guardarUsuario` | M | id?, usuario, nombre, rol, activo, clave? |
 
 ## Fuera de alcance
 Precios, inventario, envío automático a grupos de WhatsApp (se usa el menú compartir).
