@@ -131,7 +131,8 @@ const CRM_API_URL = "https://script.google.com/macros/s/AKfycbzEr3zjJi1dZwHjr2TP
     const btn = $("btnLogin");
     btn.disabled = true; btn.textContent = "Entrando…";
     try {
-      const r = await api("login", { usuario, clave });
+      // "pin" también, por compatibilidad con un servidor publicado sin actualizar
+      const r = await api("login", { usuario, clave, pin: clave });
       guardarLS(K_SESION, { token: r.token, usuario: r.usuario });
       guardarLS(K_ULTIMO, r.usuario.usuario);
       pintarSesion();
