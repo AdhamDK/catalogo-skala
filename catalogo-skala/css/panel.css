@@ -652,3 +652,13 @@ html[data-tema="oscuro"] .pcard.dif-menos .pcard-dif { color: #f2b25c; }
 html[data-tema="oscuro"] .pcard.dif-mas .pcard-dif { color: #79aef0; }
 @media (max-width: 440px) { .inv-acciones { grid-template-columns: 1fr; } }
 #icBarra strong { white-space: nowrap; }
+
+/* ---------- Barra de acción pegada al menú de abajo (también cuando la lista es corta) ---------- */
+.barra-accion {
+  position: fixed; left: 50%; transform: translateX(-50%); width: min(100%, 720px); margin: 0;
+  bottom: 0; padding-bottom: max(10px, env(safe-area-inset-bottom));
+  box-shadow: 0 -6px 18px rgba(38, 36, 31, 0.12);
+}
+body.app.con-nav .barra-accion { bottom: calc(68px + env(safe-area-inset-bottom)); padding-bottom: 10px; }
+.app-main:has(.barra-accion:not([hidden])) { padding-bottom: 104px; }
+@media (min-width: 900px) { .barra-accion { margin: 0; border-radius: 14px 14px 0 0; } }
