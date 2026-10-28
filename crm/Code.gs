@@ -430,6 +430,14 @@ function guardarCliente_(c, ses, opciones) {
   if (existente) {
     var actualizado = {};
     HOJAS.Clientes.forEach(function (k) { actualizado[k] = existente[k]; });
+    // Teléfono nuevo de un cliente que ya tenía otro (ej. se lo encontró por su RIF): el de siempre
+    // se conserva y el nuevo va a Teléfono 2. Solo al editar la ficha (lápiz) se reemplaza.
+    if (!opciones.reemplazar && datos.telefono && String(existente.telefono || '').trim()) {
+      var nuevoTel = datos.telefono;
+      datos.telefono = '';
+      if (!mismoTel_(existente.telefono, nuevoTel) && !mismoTel_(existente.telefono2, nuevoTel)) datos.telefono2 = nuevoTel;
+      else if (datos.telefono2 && (mismoTel_(existente.telefono, datos.telefono2) || mismoTel_(existente.telefono2, datos.telefono2))) datos.telefono2 = '';
+    }
     // Al editar se guarda todo lo del formulario; si no, solo se pisan los campos con dato
     Object.keys(datos).forEach(function (k) { if (opciones.reemplazar || datos[k] !== '') actualizado[k] = datos[k]; });
     actualizado.updated_at = t;

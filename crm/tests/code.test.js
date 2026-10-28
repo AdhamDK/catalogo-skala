@@ -961,3 +961,23 @@ test("teléfonos y RIF escritos de distintas formas: se encuentran y no se dupli
   pedir(g, tv, { tipo_pago: "pronto", cliente: { negocio: "Tienda Sol", telefono: "0414-0000000", rif_cedula: "v28072542-1" } });
   assert.equal(g.tabla("Clientes").length, 1);
 });
+
+test("un cliente que pide con otro teléfono: el de siempre se conserva y el nuevo va a Teléfono 2", () => {
+  const g = preparar();
+  const tv = login(g);
+  pedir(g, tv, { tipo_pago: "pronto", cliente: { negocio: "Tienda Sol", telefono: "+58 424 7387202", rif_cedula: "V-28072542-1" } });
+  pedir(g, tv, { tipo_pago: "pronto", cliente: { negocio: "Tienda Sol", telefono: "0414-0000000", rif_cedula: "v28072542-1" } });
+  let c = g.tabla("Clientes");
+  assert.equal(c.length, 1);
+  assert.equal(c[0].telefono, "+58 424 7387202"); assert.equal(c[0].telefono2, "0414-0000000");
+  // el mismo teléfono en otro formato no cambia nada
+  pedir(g, tv, { tipo_pago: "pronto", cliente: { negocio: "Tienda Sol", telefono: "04247387202" } });
+  pedir(g, tv, { tipo_pago: "pronto", cliente: { negocio: "Tienda Sol", telefono: "+584140000000", rif_cedula: "280725421" } });
+  c = g.tabla("Clientes");
+  assert.deepEqual([c.length, c[0].telefono, c[0].telefono2], [1, "+58 424 7387202", "0414-0000000"]);
+  // editar la ficha con el lápiz sí reemplaza
+  const ta = login(g, "ana", "Ana*2222");
+  g.post({ action: "guardarCliente", token: ta, cliente: { id: c[0].id, negocio: "Tienda Sol", telefono: "0412-5555555", telefono2: "" } });
+  c = g.tabla("Clientes");
+  assert.deepEqual([c[0].telefono, c[0].telefono2], ["0412-5555555", ""]);
+});
