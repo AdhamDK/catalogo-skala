@@ -1050,27 +1050,48 @@
     mapa: '<path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>',
     ruta: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19a2 2 0 1 0 0-.01M17 19a2 2 0 1 0 0-.01"/>',
     ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    ver: '<path d="M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5"/>',
   };
   const diaLocal = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
   const icoEnt = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICO_ENT[n]}</svg>`;
-  function tarjetaEntrega(p, conCheck) {
+  /* Tarjeta de entrega: en la vista solo el mapa y la acción; la flecha despliega productos y dirección,
+     y "Más detalles" muestra el teléfono para llamar. En "Por cargar", tocar la tarjeta la elige. */
+  function tarjetaEntrega(p, elegible, abierta) {
     const c = p.cliente_datos || {};
-    const tel = telLink(c.telefono), wa = telefonoWhatsapp(c.telefono), mapa = linkMapa(c.latitud, c.longitud);
+    const tel = telLink(c.telefono), tel2 = telLink(c.telefono2), mapa = linkMapa(c.latitud, c.longitud);
     const acc = accionesPedido(roles(), yo().id, p).find((a) => a === "en_ruta" || a === "entregado");
     const cajas = Number(p.total_cajas) || 0;
-    return `<li class="ent-card est-borde-${esc(p.estado)}" data-id="${esc(p.id)}">
-      ${conCheck ? `<label class="ent-check"><input type="checkbox" value="${esc(p.id)}" aria-label="Elegir ${esc(p.negocio)} para la carga" /></label>` : ""}
-      <a class="fila-ped ent-info" href="#/pedido/${encodeURIComponent(p.id)}">
-        <span class="ent-cajas"><strong>${cajas}</strong>caja${cajas === 1 ? "" : "s"}</span>
-        <span class="ent-txt">
-          <strong class="ent-neg">${esc(p.negocio)}</strong>
-          ${c.direccion ? `<span class="ent-dir">${icoEnt("mapa")}${esc(c.direccion)}</span>` : '<span class="ent-dir sin">Sin dirección</span>'}
-          <span class="ped-det">${esc(p.id)}${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}</span>
-        </span>
-      </a>
-      ${p.estado === "entregado" ? "" : `<div class="ent-botones">
-        ${tel ? `<a class="ent-ico" href="tel:${esc(tel)}" aria-label="Llamar a ${esc(p.negocio)}" title="Llamar">${icoEnt("tel")}<span>Llamar</span></a>` : ""}
-        ${wa ? `<a class="ent-ico ent-wa" href="https://wa.me/${wa}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(p.negocio)}" title="WhatsApp">${icoEnt("wa")}<span>WhatsApp</span></a>` : ""}
+    const items = Array.isArray(p.items) ? p.items : [];
+    return `<li class="ent-card est-borde-${esc(p.estado)}${elegible ? " elegible" : ""}${abierta ? " abierta" : ""}" data-id="${esc(p.id)}">
+      <div class="ent-cab">
+        <button type="button" class="ent-info" data-ent-tap aria-${elegible ? `pressed="false" aria-label="Elegir ${esc(p.negocio)} para la carga"` : `expanded="${!!abierta}"`}>
+          <span class="ent-cajas"><strong>${cajas}</strong>caja${cajas === 1 ? "" : "s"}</span>
+          <span class="ent-txt">
+            <strong class="ent-neg">${esc(p.negocio)}</strong>
+            ${c.direccion ? `<span class="ent-dir">${icoEnt("mapa")}${esc(c.direccion)}</span>` : '<span class="ent-dir sin">Sin dirección</span>'}
+            <span class="ped-det">${esc(p.id)}${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}</span>
+          </span>
+        </button>
+        <button type="button" class="ent-flecha" data-ent-ver aria-expanded="${!!abierta}" aria-label="Ver detalles de ${esc(p.negocio)}" title="Detalles">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </div>
+      <div class="ent-detalle"${abierta ? "" : " hidden"}>
+        <ul class="ent-items">${items.map((it) => `<li><b>${Number(it.cajas) || 0}</b><span>${esc(it.producto)} <span class="ped-det">${esc(it.code)}${it.total_unidades ? ` · ${it.total_unidades} ${esc(it.unidad)}` : ""}</span></span></li>`).join("") || '<li class="ped-det">Abrí el pedido para ver los productos.</li>'}</ul>
+        <p class="ent-dir-full"><span class="ped-det">Entregar en</span><br>${esc(c.direccion || "Sin dirección")}${p.cliente && p.cliente !== p.negocio ? `<br><span class="ped-det">Recibe: ${esc(p.cliente)}</span>` : ""}</p>
+        <details class="ent-mas">
+          <summary>Más detalles</summary>
+          <div class="ent-mas-cuerpo">
+            ${p.nota ? `<p class="ped-det">Nota: ${esc(p.nota)}</p>` : ""}
+            <div class="ent-botones">
+              ${tel ? `<a class="ent-ico" href="tel:${esc(tel)}" aria-label="Llamar a ${esc(p.negocio)}">${icoEnt("tel")}<span>Llamar</span></a>` : ""}
+              ${tel2 ? `<a class="ent-ico" href="tel:${esc(tel2)}" aria-label="Llamar al teléfono 2 de ${esc(p.negocio)}">${icoEnt("tel")}<span>Tel. 2</span></a>` : ""}
+              <a class="ent-ico" href="#/pedido/${encodeURIComponent(p.id)}">${icoEnt("ver")}<span>Ver pedido</span></a>
+            </div>
+          </div>
+        </details>
+      </div>
+      ${p.estado === "entregado" || (!mapa && !acc) ? "" : `<div class="ent-botones">
         ${mapa ? `<a class="ent-ico ent-mapa" href="${esc(mapa)}" target="_blank" rel="noopener" aria-label="Ver en el mapa" title="Mapa">${icoEnt("mapa")}<span>Mapa</span></a>` : ""}
         ${acc ? `<button type="button" class="btn btn-primary ent-acc${acc === "entregado" ? " es-entregar" : ""}" data-ent="${acc}">${icoEnt(acc === "entregado" ? "ok" : "ruta")}${acc === "entregado" ? "Entregado" : "Salió en ruta"}</button>` : ""}
       </div>`}
@@ -1089,19 +1110,25 @@
       ${tab === "curso" ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}`;
     const lista0 = $("pLista");
     let mias = [];
-    const elegidos = () => [...v.querySelectorAll(".ent-check input:checked")].map((c) => c.value);
+    const sel = new Set(), abiertas = new Set();
+    const elegidos = () => mias.filter((p) => sel.has(p.id) && p.estado === "confirmado").map((p) => p.id);
     const pintarSel = () => {
+      v.querySelectorAll(".ent-card.elegible").forEach((li) => {
+        const on = sel.has(li.dataset.id);
+        li.classList.toggle("elegida", on);
+        li.querySelector("[data-ent-tap]").setAttribute("aria-pressed", String(on));
+      });
       const b = $("pBarra"); if (!b) return;
       const ids = elegidos();
       const t = totalCarga(mias.filter((p) => ids.includes(p.id)));
       b.hidden = !ids.length;
       $("pSel").textContent = `${ids.length} pedido${ids.length === 1 ? "" : "s"}`;
       $("pSelCajas").textContent = ` · ${t.cajas} caja${t.cajas === 1 ? "" : "s"}`;
-      const todos = $("pTodos"); if (todos) todos.checked = ids.length > 0 && ids.length === v.querySelectorAll(".ent-check input").length;
+      const todos = $("pTodos");
+      if (todos) { const all = ids.length > 0 && ids.length === v.querySelectorAll(".ent-card.elegible").length; todos.setAttribute("aria-pressed", String(all)); todos.textContent = all ? "Quitar todos" : "Elegir todos"; }
     };
     const pintar = (todos) => {
       if (!document.body.contains(lista0)) return;
-      const antes = new Set(elegidos());
       const propios = (todos || []).filter((p) => String(p.despachador_id) === String(yo().id));
       const porCargar = propios.filter((p) => p.estado === "confirmado");
       const enRuta = propios.filter((p) => p.estado === "en_ruta");
@@ -1118,12 +1145,11 @@
         if (!mias.length) { lista0.innerHTML = '<p class="vacio-panel ent-vacio">No tenés entregas pendientes.</p>'; pintarSel(); return; }
         lista0.innerHTML = `
           ${porCargar.length ? `<div class="ent-grupo"><h3 class="ent-tit">Por cargar <b>${porCargar.length}</b></h3>
-            <label class="ent-todos"><input type="checkbox" id="pTodos" /> Elegir todos</label></div>
-            <p class="ent-ayuda">Marcá los pedidos que vas a llevar y tocá <strong>Ver total de carga</strong>.</p>
-            <ul class="lista-ped">${porCargar.map((p) => tarjetaEntrega(p, true)).join("")}</ul>` : ""}
+            <button type="button" class="ent-todos" id="pTodos" aria-pressed="false">Elegir todos</button></div>
+            <p class="ent-ayuda">Tocá los pedidos que vas a llevar y luego <strong>Ver total de carga</strong>.</p>
+            <ul class="lista-ped">${porCargar.map((p) => tarjetaEntrega(p, true, abiertas.has(p.id))).join("")}</ul>` : ""}
           ${enRuta.length ? `<div class="ent-grupo"><h3 class="ent-tit">En ruta <b>${enRuta.length}</b></h3></div>
-            <ul class="lista-ped">${enRuta.map((p) => tarjetaEntrega(p, false)).join("")}</ul>` : ""}`;
-        v.querySelectorAll(".ent-check input").forEach((c) => { c.checked = antes.has(c.value); });
+            <ul class="lista-ped">${enRuta.map((p) => tarjetaEntrega(p, false, abiertas.has(p.id))).join("")}</ul>` : ""}`;
         pintarSel();
       } else {
         const hechos = propios.filter((p) => p.estado === "entregado")
@@ -1133,17 +1159,35 @@
         if (!hechos.length) { lista0.innerHTML = '<p class="vacio-panel ent-vacio">Todavía no hay entregas registradas.</p>'; return; }
         const grupos = agruparPorDia(hechos.map((p) => ({ ...p, fecha: p._dia })));
         lista0.innerHTML = grupos.map((g) => `<div class="ent-grupo"><h3 class="ent-tit">${esc(g.titulo)} <b>${g.pedidos.length}</b></h3><span class="ent-suma">${sumaCajas(g.pedidos)} cajas</span></div>
-          <ul class="lista-ped">${g.pedidos.map((p) => tarjetaEntrega(p, false)).join("")}</ul>`).join("");
+          <ul class="lista-ped">${g.pedidos.map((p) => tarjetaEntrega(p, false, abiertas.has(p.id))).join("")}</ul>`).join("");
       }
     };
-    lista0.addEventListener("change", (e) => {
-      if (e.target.id === "pTodos") v.querySelectorAll(".ent-check input").forEach((c) => (c.checked = e.target.checked));
-      pintarSel();
-    });
+    const abrir = (li) => {
+      const on = !li.classList.contains("abierta");
+      li.classList.toggle("abierta", on);
+      li.querySelector(".ent-detalle").hidden = !on;
+      li.querySelector("[data-ent-ver]").setAttribute("aria-expanded", String(on));
+      if (!li.classList.contains("elegible")) li.querySelector("[data-ent-tap]").setAttribute("aria-expanded", String(on));
+      if (on) abiertas.add(li.dataset.id); else abiertas.delete(li.dataset.id);
+    };
     lista0.addEventListener("click", async (e) => {
+      if (e.target.closest("#pTodos")) {
+        const todasIds = [...v.querySelectorAll(".ent-card.elegible")].map((li) => li.dataset.id);
+        const todas = todasIds.every((id) => sel.has(id));
+        todasIds.forEach((id) => (todas ? sel.delete(id) : sel.add(id)));
+        return pintarSel();
+      }
+      const li = e.target.closest(".ent-card");
+      if (!li) return;
+      if (e.target.closest("[data-ent-ver]")) return abrir(li);
+      if (e.target.closest("[data-ent-tap]")) {
+        if (!li.classList.contains("elegible")) return abrir(li);
+        if (sel.has(li.dataset.id)) sel.delete(li.dataset.id); else sel.add(li.dataset.id);
+        return pintarSel();
+      }
       const b = e.target.closest("[data-ent]");
       if (!b) return;
-      const p = mias.find((x) => x.id === b.closest(".ent-card").dataset.id);
+      const p = mias.find((x) => x.id === li.dataset.id);
       if (p) await accionPedido(p, b.dataset.ent, b);
     });
     const bc = $("btnVerCarga");
@@ -1271,6 +1315,7 @@
     const peds = Array.isArray(ids) && ids.length ? r.pedidos.filter((p) => ids.includes(p.id)) : r.pedidos;
     const t = totalCarga(peds);
     if (!peds.length) { v.innerHTML = '<p class="vacio-panel">No hay pedidos por entregar.</p>'; return; }
+    const salen = peds.filter((p) => p.estado === "confirmado" && accionesPedido(roles(), yo().id, p).includes("en_ruta"));
     const texto = [`*CARGA ${yo().nombre.toUpperCase()}* · ${t.pedidos} pedido(s) · ${t.cajas} cajas`, "",
       ...t.productos.map((x) => `• ${x.cajas} × ${x.producto} (${x.code})`), "", "*Pedidos*",
       ...peds.map((p) => `• ${p.id} · ${p.negocio} · ${p.total_cajas} caja(s)`)].join("\n");
@@ -1282,7 +1327,12 @@
       <section class="tarjeta">
         <h3 class="sub-titulo">Cargar en el vehículo</h3>
         <ul class="lista-carga">${t.productos.map((x) => `<li><label class="check"><input type="checkbox" /> <span><strong>${x.cajas}</strong> × ${esc(x.producto)} <span class="ped-det">${esc(x.code)}${x.total_unidades ? ` · ${x.total_unidades} ${esc(x.unidad)}` : ""}</span></span></label></li>`).join("")}</ul>
-        <p class="nota-chica">Marcá cada producto a medida que lo subís.</p>
+        <p class="nota-chica" id="cargaProg">Marcá cada producto a medida que lo subís.</p>
+      </section>
+      <section class="carga-lista" id="cargaListo" hidden aria-live="polite">
+        <p class="carga-listo-tit">¡Completo!</p>
+        ${salen.length ? `<button type="button" class="btn btn-primary btn-bloque" id="btnSalirDespacho">${icoEnt("ruta")}¡Saliendo a despachar!</button>
+        <p class="nota-chica">Marca ${salen.length === 1 ? "el pedido" : `los ${salen.length} pedidos`} como <strong>Salió en ruta</strong>.</p>` : '<p class="nota-chica">Todo cargado.</p>'}
       </section>
       <section class="tarjeta">
         <h3 class="sub-titulo">Pedidos incluidos</h3>
@@ -1290,6 +1340,27 @@
       </section>
       <button type="button" class="btn btn-ghost btn-bloque" id="btnCompartirCarga">Compartir lista de carga</button>`;
     $("btnCompartirCarga").addEventListener("click", () => enviarAlGrupo(texto));
+    // Todo marcado: ¡Completo! → salen a despachar (pasan a En ruta)
+    const checks = [...v.querySelectorAll(".lista-carga input")];
+    v.querySelector(".lista-carga").addEventListener("change", () => {
+      const n = checks.filter((c) => c.checked).length;
+      $("cargaProg").textContent = n ? `Cargado ${n} de ${checks.length}` : "Marcá cada producto a medida que lo subís.";
+      const listo = n === checks.length;
+      const caja = $("cargaListo");
+      if (listo && caja.hidden) { caja.hidden = false; caja.classList.remove("ok-anim"); void caja.offsetWidth; caja.classList.add("ok-anim"); caja.scrollIntoView({ block: "center", behavior: "smooth" }); }
+      if (!listo) caja.hidden = true;
+    });
+    const bs = $("btnSalirDespacho");
+    if (bs) bs.addEventListener("click", async () => {
+      bs.disabled = true; bs.classList.add("ocupado");
+      let ok = 0;
+      for (const p of salen) {
+        try { const r2 = await api("estado", { pedido_id: p.id, estado: "en_ruta" }); guardarEnMemoria(r2.pedido); ok++; }
+        catch (e) { toast(`${p.id}: ${e.message}`); }
+      }
+      if (ok) { sessionStorage.removeItem(K_CARGA); toast(ok === 1 ? "¡En ruta! Buen viaje" : `¡${ok} pedidos en ruta! Buen viaje`); ir("#/entregas"); }
+      else { bs.disabled = false; bs.classList.remove("ocupado"); }
+    });
   }
 
   /* ---------- Detalle de pedido ---------- */
@@ -1314,7 +1385,7 @@
     $("appTitulo").textContent = p.id;
     const c = p.cliente_datos || {};
     const tel = telLink(c.telefono), tel2 = telLink(c.telefono2);
-    const wa = telefonoWhatsapp(c.telefono);
+    const wa = soloDespacha() ? "" : telefonoWhatsapp(c.telefono); // el despachador llama, no escribe
     const mapa = linkMapa(c.latitud, c.longitud);
     const acciones = accionesPedido(roles(), yo().id, p);
     const principal = ["confirmar", "en_ruta", "entregado", "cobrar", "conciliar"];

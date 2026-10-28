@@ -538,7 +538,6 @@ html[data-tema="oscuro"] .etq-nuevo { background: rgba(233, 78, 140, 0.18); colo
 .ent-tit { margin: 0; font-size: 0.82rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tinta-suave); }
 .ent-tit b { margin-left: 4px; padding: 1px 8px; border-radius: 999px; background: var(--borde); color: var(--tinta); }
 .ent-todos { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-weight: 600; font-size: 0.9rem; cursor: pointer; }
-.ent-todos input, .ent-check input { width: 22px; height: 22px; accent-color: var(--verde); }
 .ent-suma { font-size: 0.82rem; color: var(--tinta-suave); }
 .ent-ayuda { margin: -4px 2px 10px; font-size: 0.85rem; color: var(--tinta-suave); }
 .ent-vacio { padding: 32px 8px; text-align: center; }
@@ -550,15 +549,48 @@ html[data-tema="oscuro"] .etq-nuevo { background: rgba(233, 78, 140, 0.18); colo
 .ent-card.est-borde-confirmado { border-left-color: #4a90d9; }
 .ent-card.est-borde-en_ruta { border-left-color: #a05bd0; }
 .ent-card.est-borde-entregado { border-left-color: var(--verde); }
-.ent-card:has(.ent-check input:checked) { background: #f8fcf3; border-color: var(--verde); border-left-color: var(--verde); }
-.ent-check {
-  position: absolute; top: 0; right: 0; display: grid; place-items: center; width: 52px; height: 52px; cursor: pointer; z-index: 1;
-}
+.ent-cab { display: flex; align-items: stretch; }
 .ent-card .ent-info {
-  display: grid; grid-template-columns: 58px 1fr; gap: 12px; align-items: center;
-  padding: 12px 14px; border: none; border-radius: 0; background: none;
+  flex: 1; min-width: 0; display: grid; grid-template-columns: 58px 1fr; gap: 12px; align-items: center;
+  padding: 12px 4px 12px 14px; border: none; border-radius: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
-.ent-card:has(.ent-check) .ent-info { padding-right: 52px; }
+.ent-card .ent-info:active { background: var(--crema-2); }
+.ent-flecha {
+  flex: 0 0 52px; display: grid; place-items: center; border: 0; background: none; color: var(--tinta-suave); cursor: pointer;
+}
+.ent-flecha svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s ease; }
+.ent-card.abierta .ent-flecha svg { transform: rotate(180deg); }
+.ent-flecha:active { background: var(--crema-2); }
+/* elegida para la carga: toda la tarjeta se marca */
+.ent-card.elegible .ent-cajas { position: relative; }
+.ent-card.elegida { background: #f3faea; border-color: var(--verde); border-left-color: var(--verde); }
+.ent-card.elegida .ent-cajas { background: var(--verde-osc); color: #fff; }
+.ent-card.elegida .ent-cajas strong { color: #fff; }
+.ent-card.elegida .ent-cajas::after {
+  content: "✓"; position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center; background: #3d7d22; color: #fff; font-size: 0.8rem; font-weight: 800; border: 2px solid var(--superficie);
+}
+.ent-detalle { padding: 0 14px 12px; border-top: 1px dashed var(--borde); margin: 0 12px; padding-left: 2px; padding-right: 2px; animation: entrar .2s ease; }
+.ent-items { list-style: none; margin: 10px 0 8px; padding: 0; display: grid; gap: 6px; }
+.ent-items li { display: flex; align-items: baseline; gap: 10px; font-size: 0.95rem; }
+.ent-items b { min-width: 34px; padding: 2px 6px; border-radius: 8px; background: var(--crema-2); text-align: center; font-size: 1rem; }
+.ent-dir-full { margin: 0 0 8px; font-size: 0.95rem; line-height: 1.35; }
+.ent-mas summary { min-height: 44px; display: flex; align-items: center; font-weight: 700; color: var(--enlace); cursor: pointer; }
+.ent-mas-cuerpo .ent-botones { padding: 0; }
+.ent-mas-cuerpo p { margin: 0 0 8px; }
+@keyframes entrar { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .ent-detalle { animation: none; } .ent-flecha svg { transition: none; } }
+.ent-todos { border: 1px solid var(--borde); background: var(--superficie); border-radius: 999px; padding: 0 14px; color: var(--tinta); font: inherit; }
+.ent-todos[aria-pressed="true"] { background: var(--tinta); color: #fff; border-color: var(--tinta); }
+html[data-tema="oscuro"] .ent-card.elegida { background: rgba(127, 186, 63, 0.12); }
+html[data-tema="oscuro"] .ent-todos[aria-pressed="true"] { background: var(--verde-osc); border-color: var(--verde-osc); }
+/* Total de carga: ¡Completo! */
+.carga-lista { margin: 0 0 12px; padding: 16px; border-radius: 18px; background: var(--verde-suave); border: 2px solid var(--verde); text-align: center; }
+.carga-listo-tit { margin: 0 0 10px; font-family: "Baloo 2", sans-serif; font-size: 1.8rem; font-weight: 800; color: #3d7d22; line-height: 1; }
+.carga-lista .btn { gap: 8px; min-height: 56px; font-size: 1.1rem; background: #3d7d22; border-color: #3d7d22; color: #fff; margin-bottom: 6px; }
+.carga-lista .btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.carga-lista.ok-anim { animation: okpaso .55s ease; }
+html[data-tema="oscuro"] .carga-listo-tit { color: var(--verde-claro); }
 .ent-cajas {
   display: flex; flex-direction: column; align-items: center; justify-content: center; width: 58px; height: 58px;
   border-radius: 14px; background: var(--crema-2); font-size: 0.7rem; color: var(--tinta-suave); line-height: 1.1;
@@ -583,7 +615,6 @@ html[data-tema="oscuro"] .etq-nuevo { background: rgba(233, 78, 140, 0.18); colo
 .ent-acc { flex: 2 1 150px; min-height: 48px; gap: 6px; }
 .ent-acc svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .ent-acc.es-entregar { background: #3d7d22; border-color: #3d7d22; color: #fff; }
-html[data-tema="oscuro"] .ent-card:has(.ent-check input:checked) { background: rgba(127, 186, 63, 0.12); }
 html[data-tema="oscuro"] .ent-resumen > div:first-child { background: var(--rosa); }
 html[data-tema="oscuro"] .ent-wa { color: #4cc883; }
 html[data-tema="oscuro"] .ent-mapa { color: #79aef0; }

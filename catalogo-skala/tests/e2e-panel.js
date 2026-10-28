@@ -589,7 +589,28 @@ function servidor() {
   await page.click('.app-nav a[href="#/entregas"]');
   await esperarRuta("#/entregas");
   assert.ok(await page.locator("#pBarra").isHidden());
-  await page.check("#pTodos");
+  // la barra: nombre y luego el menú en la esquina
+  assert.ok(await page.evaluate(() => document.getElementById("appQuien").nextElementSibling.id === "btnMas"));
+  // a la vista solo Mapa y la acción (sin Llamar ni WhatsApp); sin casillas: se toca la tarjeta
+  const card = '.ent-card[data-id]';
+  assert.deepEqual(await page.locator(`${card} > .ent-botones .ent-ico span`).allInnerTexts(), ["Mapa"]);
+  assert.equal(await page.locator(`${card} a[href^="https://wa.me"]`).count(), 0);
+  assert.equal(await page.locator(`${card} input[type=checkbox]`).count(), 0);
+  // la flecha despliega productos y dirección; "Más detalles" muestra Llamar
+  await page.click(`${card} [data-ent-ver]`);
+  assert.match(await page.innerText(`${card} .ent-detalle`), /5\s+Kit Aguacate[\s\S]*Entregar en\s+Av\. Bolívar/);
+  assert.equal(await page.locator(`${card} .ent-detalle a[href^="tel:"]`).first().isVisible(), false);
+  await page.click(`${card} .ent-mas summary`);
+  assert.ok(await page.locator(`${card} .ent-detalle a[href^="tel:"]`).first().isVisible());
+  await foto("07c0-detalle-entrega");
+  await page.click(`${card} [data-ent-ver]`);
+  assert.ok(await page.locator(`${card} .ent-detalle`).isHidden());
+  await page.click(`${card} [data-ent-tap]`);
+  assert.equal(await page.getAttribute(`${card} [data-ent-tap]`, "aria-pressed"), "true");
+  assert.match(await page.innerText("#pBarra"), /1 pedido · 9 cajas/);
+  await page.click("#pTodos"); // todos ya elegidos → quitar
+  assert.ok(await page.locator("#pBarra").isHidden());
+  await page.click("#pTodos");
   assert.match(await page.innerText("#pBarra"), /1 pedido · 9 cajas/);
   await foto("07c-elegir-carga");
   await revisarDiseno("entregas con selección");
@@ -599,24 +620,28 @@ function servidor() {
   assert.deepEqual((await page.locator(".lista-carga li").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim().split(" · ")[0]),
     ["5 × Kit Aguacate KT-02", "2 × Babosa BC-01", "1 × Mais Cachos BC-06", "1 × Kit 12 em 1 KT-01"]);
   await page.locator(".lista-carga input").first().check();
+  assert.ok(await page.locator("#cargaListo").isHidden());
+  assert.match(await page.innerText("#cargaProg"), /Cargado 1 de 4/);
   await page.click("#btnCompartirCarga");
   assert.match((await page.evaluate(() => window.__compartido)).at(-1), /\*CARGA LUIS\* · 1 pedido\(s\) · 9 cajas[\s\S]*• 5 × Kit Aguacate/);
+  for (const c of await page.locator(".lista-carga input").all()) await c.check();
+  await page.waitForSelector("#cargaListo:not([hidden])");
+  assert.match(await page.innerText("#cargaListo"), /¡Completo![\s\S]*¡Saliendo a despachar!/);
+  await page.waitForTimeout(600);
   await foto("07d-carga");
   await revisarDiseno("total de carga");
-  ok("despachador: hoy tenés N cajas, elegir pedidos → total de carga por producto y compartir");
-  await page.click("#btnAtras");
+  await page.click("#btnSalirDespacho");
   await esperarRuta("#/entregas");
-  // la barra: nombre y luego el menú en la esquina
-  assert.ok(await page.evaluate(() => document.getElementById("appQuien").nextElementSibling.id === "btnMas"));
-  // en la tarjeta: Llamar, WhatsApp, Mapa y "Salió en ruta" sin entrar al pedido
-  assert.deepEqual(await page.locator(".ent-card .ent-ico span").allInnerTexts(), ["Llamar", "WhatsApp", "Mapa"]);
-  await page.click('.ent-card [data-ent="en_ruta"]');
-  await page.waitForFunction(() => /En ruta/.test(document.querySelector(".ent-lista")?.textContent || "") && document.querySelector('.ent-card [data-ent="entregado"]'));
   assert.equal(gas.tabla("Pedidos")[0].estado, "en_ruta");
-  assert.equal(await page.locator(".ent-check").count(), 0); // en ruta ya no se elige para cargar
+  ok("despachador: tocar pedidos → total de carga; todo marcado → ¡Completo! y salen en ruta");
+  await page.waitForSelector('.ent-card [data-ent="entregado"]');
+  assert.match(await page.innerText(".ent-lista"), /En ruta/i);
   await foto("07e-en-ruta");
   await revisarDiseno("entregas en ruta");
-  await page.click("#pLista .fila-ped");
+  await page.click(`${card} [data-ent-tap]`); // en ruta: tocar despliega los detalles
+  assert.ok(await page.locator(`${card} .ent-detalle`).isVisible());
+  await page.click(`${card} .ent-mas summary`);
+  await page.click(`${card} .ent-mas a[href^="#/pedido/"]`);
   await esperarRuta("#/pedido/");
   assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Entregado"]);
   assert.ok(await page.locator('.botones-contacto a:has-text("Mapa")').count());

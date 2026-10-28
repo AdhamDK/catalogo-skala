@@ -53,9 +53,11 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
   RIF), pago y nota → **Enviar pedido** → **Enviar al grupo**.
 - **Administración**: **Inicio / Pedidos → Por aprobar** → abrir el pedido → **Aprobar** (elige despachador) o **Anular** (con motivo).
 - **Despachador**: en Inicio ve "Hoy tenés por entregar N cajas". **Entregas** muestra arriba cajas
-  por entregar, por cargar y en ruta. En *Por cargar* marca pedidos → **Ver total de carga** (cajas por
-  producto). Cada tarjeta trae Llamar, WhatsApp, Mapa y el botón *Salió en ruta* / *Entregado* sin
-  abrir el pedido. La pestaña *Entregados* los agrupa por día.
+  por entregar, por cargar y en ruta. En *Por cargar* toca las tarjetas de los pedidos que lleva →
+  **Ver total de carga** (cajas por producto). Al marcar todo lo cargado sale **¡Completo!** y
+  *¡Saliendo a despachar!* pasa esos pedidos a *En ruta*. Cada tarjeta muestra Mapa y el botón
+  *Salió en ruta* / *Entregado*; la flecha despliega productos y dirección, y *Más detalles* el
+  botón para llamar. La pestaña *Entregados* los agrupa por día.
 - **Fecha de entrega**: al marcar *Entregado* se elige **Hoy**, **Ayer** u **Otro día** (no puede ser
   futura ni anterior al pedido). Sirve cuando se entregó antes y se olvidó registrarlo.
 - **Cobro**: el vendedor, con el pedido entregado y pagado, toca **Marcar cancelado (pagado)** y
