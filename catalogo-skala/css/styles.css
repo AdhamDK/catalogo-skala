@@ -1111,3 +1111,30 @@ html[data-tema="oscuro"] .card-zoom { background: rgba(36, 34, 30, 0.92); }
 }
 @media (max-width: 360px) { .card-img { height: 96px; } }
 @media print { .card-zoom { display: none !important; } }
+
+/* ============================================================
+   Espaciado más compacto entre secciones (mismo contenido, menos aire)
+   ============================================================ */
+.hero { gap: 20px; padding: 24px 16px 26px; }
+.hero h1 { margin-bottom: 12px; }
+.hero-actions { margin-top: 18px; }
+.hero-chips { margin-top: 18px; }
+.about, .curvatura, .products { padding: 26px 0; }
+.como-comprar, .contacto { padding: 30px 0; }
+h2 { margin-bottom: 12px; }
+.about-grid { margin-top: 20px; gap: 12px; }
+.about-card { padding: 20px; }
+.curve-grid { margin-top: 18px; }
+.section-head { margin-bottom: 14px; }
+.steps { margin: 22px 0 18px; gap: 12px; }
+.step { padding: 18px; }
+.price-note { margin-bottom: 16px; }
+.contact-row { margin-top: 18px; gap: 12px; }
+.contact-card { padding: 20px; }
+.footer { padding: 24px 0; padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+@media (min-width: 901px) {
+  .hero { padding: 44px 24px 36px; min-height: clamp(380px, 50vh, 560px); }
+  .about, .curvatura, .products { padding: 38px 0; }
+  .como-comprar, .contacto { padding: 42px 0; }
+  .section-head { margin-bottom: 20px; }
+}
