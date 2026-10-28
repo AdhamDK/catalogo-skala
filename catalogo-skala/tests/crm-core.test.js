@@ -335,3 +335,57 @@ test("pedido web: referencia y mensaje con precios y vendedor", () => {
   assert.match(m, /• 10 × Babosa \(BC-01\) · 9,00 \$ c\/u/);
   assert.match(m, /Monto: 90,00 \$ \(Pronto pago\)/);
 });
+
+/* ---------- Datos en el teléfono (app) ---------- */
+test("actualización automática a las 8, 13 y 16 h", () => {
+  const h = (d, hh, mm = 0) => new Date(2026, 9, d, hh, mm);
+  assert.equal(core.debeSincronizar("", h(26, 9)), true);
+  assert.equal(core.debeSincronizar(h(26, 8, 5).toISOString(), h(26, 12, 59)), false);
+  assert.equal(core.debeSincronizar(h(26, 8, 5).toISOString(), h(26, 13, 1)), true);
+  assert.equal(core.debeSincronizar(h(25, 17).toISOString(), h(26, 7, 59)), false);
+  assert.equal(core.debeSincronizar(h(25, 17).toISOString(), h(26, 8, 0)), true);
+  assert.equal(core.debeSincronizar(h(20, 17).toISOString(), h(26, 7)), true); // más de un día
+  assert.deepEqual(core.proximaSync(h(26, 13, 30)), h(26, 16));
+  assert.deepEqual(core.proximaSync(h(26, 17)), h(27, 8));
+});
+
+test("sin señal: respuestas con los datos guardados (mismos filtros que el servidor)", () => {
+  const hoy = new Date("2026-10-26T15:00:00Z");
+  const local = {
+    fecha: "2026-10-26T12:00:00Z",
+    catalogo: { productos: [{ code: "BC-01", menor: 10 }] },
+    clientes: [{ id: "C1", nombre: "Peluquería Bella", contacto: "María", telefono: "0412-1234567" }, { id: "C2", nombre: "Barbería Max", telefono: "0414-9999999" }],
+    pedidos: [
+      { id: "P1", estado: "pendiente", created_at: "2026-08-01T10:00:00Z", cliente_id: "C1" },
+      { id: "P2", estado: "entregado", created_at: "2026-10-20T10:00:00Z", dias_credito: 15, cobro: "" },
+      { id: "P3", estado: "entregado", created_at: "2026-10-21T10:00:00Z", cobro: "cancelado" },
+      { id: "P4", estado: "entregado", created_at: "2026-10-22T10:00:00Z", cobro: "conciliado", conciliado_at: "2026-10-25T10:00:00Z" },
+      { id: "P5", estado: "cancelado", created_at: "2026-06-01T10:00:00Z" },
+    ],
+    pedidos_web: [{ id: "WEB-1", estado: "nuevo" }, { id: "WEB-2", estado: "tomado" }],
+  };
+  const ids = (r) => r.pedidos.map((p) => p.id);
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { estados: ["pendiente"] }, local, hoy)), ["P1"]); // abierto aunque sea viejo
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { estados: ["cancelado"], dias: 60 }, local, hoy)), []);
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { por_cobrar: true }, local, hoy)), ["P2"]);
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { por_conciliar: true }, local, hoy)), ["P3"]);
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { conciliados: true, dias: 7 }, local, hoy)), ["P4"]);
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { cliente_id: "C1" }, local, hoy)), ["P1"]);
+  assert.equal(core.respuestaLocal("pedido", { pedido_id: "P3" }, local, hoy).pedido.id, "P3");
+  assert.equal(core.respuestaLocal("pedido", { pedido_id: "X" }, local, hoy), null);
+  assert.deepEqual(core.respuestaLocal("clientes", { q: "bella" }, local, hoy).clientes.map((c) => c.id), ["C1"]);
+  assert.deepEqual(core.respuestaLocal("clientes", { q: "9999" }, local, hoy).clientes.map((c) => c.id), ["C2"]);
+  assert.equal(core.respuestaLocal("pedidosWeb", {}, local, hoy).pedidos.length, 1);
+  assert.equal(core.respuestaLocal("catalogo", {}, local, hoy).productos[0].menor, 10);
+  assert.equal(core.respuestaLocal("resumen", {}, local, hoy), null); // necesita señal
+  assert.equal(core.respuestaLocal("pedidos", {}, null, hoy), null);
+  assert.equal(core.respuestaLocal("pedidos", {}, local, hoy).local, true);
+});
+
+test("app: aviso de versión nueva y versión mínima", () => {
+  const cfg = { version_apk: 3, minima_apk: 2, url_apk: "https://x/skala.apk" };
+  assert.deepEqual(core.estadoApp(3, cfg), { nueva: false, obligatoria: false, version: 3 });
+  assert.deepEqual(core.estadoApp(2, cfg), { nueva: true, obligatoria: false, version: 3 });
+  assert.deepEqual(core.estadoApp(1, cfg), { nueva: true, obligatoria: true, version: 3 });
+  assert.equal(core.estadoApp(1, { version_apk: 3, url_apk: "" }).nueva, false); // sin enlace no avisa
+});

@@ -16,7 +16,48 @@
     if (enCurso) tCarga = setTimeout(() => { b.hidden = false; }, 150);
     else b.hidden = true;
   }
-  const api = (...a) => { cargando(1); return SkalaAPI.api(...a).finally(() => cargando(-1)); };
+  const api = (...a) => {
+    cargando(1);
+    return SkalaAPI.api(...a).then((r) => { pintarModoLocal(r); return r; }).finally(() => cargando(-1));
+  };
+  const APP = SkalaAPI.app(); // puente de la app Android (null en el navegador)
+  const horaCorta = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    const hoy = new Date(), ayer = new Date(Date.now() - 86400000);
+    const dia = d.toDateString() === hoy.toDateString() ? "hoy" : d.toDateString() === ayer.toDateString() ? "ayer" : d.toLocaleDateString("es-VE");
+    return `${dia} ${d.toLocaleTimeString("es-VE", { hour: "numeric", minute: "2-digit" })}`;
+  };
+  /* Sin señal: aviso de que se ven los datos guardados en el teléfono */
+  function pintarModoLocal(r) {
+    const el = document.getElementById("modoLocal");
+    if (!el || !r || typeof r !== "object") return;
+    if (r.local) { el.textContent = `Sin señal · mostrando los datos guardados (${horaCorta(r.fecha_local)})`; el.hidden = false; }
+    else el.hidden = true;
+  }
+  /* Actualización automática 8 am, 1 pm y 4 pm (y al abrir si ya pasó la hora) */
+  function autoSync() {
+    if (!sesion()) return;
+    const d = SkalaAPI.datosLocales();
+    if (!debeSincronizar(d && d.fecha)) { pintarAvisoApp(d); return; }
+    SkalaAPI.sincronizar().then((x) => { pintarAvisoApp(x); }).catch(() => {});
+  }
+  setInterval(autoSync, 10 * 60000);
+  /* App Android: versión nueva disponible / obligatoria */
+  function pintarAvisoApp(d) {
+    const el = document.getElementById("avisoApp");
+    if (!el || !APP || !d || !d.config) return;
+    let ver = 0;
+    try { ver = Number(APP.versionCode()); } catch (e) {}
+    const e = estadoApp(ver, d.config);
+    el.hidden = !e.nueva;
+    if (!e.nueva) return;
+    el.innerHTML = `<span>${e.obligatoria ? "<strong>Actualización obligatoria.</strong> " : ""}Hay una versión nueva de la app${d.config.notas ? `: ${esc(d.config.notas)}` : "."}</span>
+      <button type="button" class="btn btn-primary" id="btnActualizarApp">Actualizar</button>`;
+    el.classList.toggle("obligatoria", e.obligatoria);
+    document.body.classList.toggle("app-bloqueada", e.obligatoria);
+    $("btnActualizarApp").onclick = () => { try { APP.actualizarApp(d.config.url_apk); toast("Descargando la actualización…"); } catch (x) { toast("No se pudo descargar."); } };
+  }
   const spin = (texto = "Cargando…") => `<div class="cargando" role="status"><span class="spinner" aria-hidden="true"></span><span>${texto}</span></div>`;
   const $ = (id) => document.getElementById(id);
   const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -104,6 +145,7 @@
     pintarCola();
     const vista = $("vista");
     vista.classList.remove("entra");
+    $("modoLocal").hidden = true;
     vista.innerHTML = spin();
     window.scrollTo(0, 0);
     try {
@@ -191,6 +233,7 @@
   }
 
   async function enviarAlGrupo(mensaje) {
+    if (APP) { try { APP.compartir(mensaje); return; } catch (e) {} }
     if (navigator.share) {
       try { await navigator.share({ text: mensaje }); return; }
       catch (e) { if (e && e.name === "AbortError") return; }
@@ -226,7 +269,7 @@
         </label>
         <p class="form-warn" id="lError" hidden></p>
         <button type="submit" class="btn btn-primary btn-bloque" id="btnLogin">Entrar</button>
-        <a class="btn btn-ghost btn-bloque" href="index.html">Volver al catálogo</a>
+        ${APP ? "" : '<a class="btn btn-ghost btn-bloque" href="index.html">Volver al catálogo</a>'}
       </form>`;
     ($("lUsuario").value ? $("lClave") : $("lUsuario")).focus();
     $("fLogin").onsubmit = async (e) => {
@@ -239,11 +282,13 @@
       btn.disabled = true; btn.classList.add("ocupado"); btn.textContent = "Entrando…";
       try {
         // "pin" también, por compatibilidad con un servidor publicado sin actualizar
-        const r = await api("login", { usuario, clave, pin: clave });
+        const r = await api("login", { usuario, clave, pin: clave, dispositivo: !!APP });
         SkalaAPI.guardarSesion(r.token, r.usuario);
         guardarLS(K_ULTIMO_USUARIO, r.usuario.usuario);
         toast(`Hola, ${r.usuario.nombre}`);
         subirCola();
+        // Primera vez en este teléfono: baja la base de datos de la nube
+        SkalaAPI.sincronizar().then((x) => { toast("Datos descargados en el teléfono"); pintarAvisoApp(x); }).catch(() => {});
         const destino = sessionStorage.getItem(K_DESTINO);
         sessionStorage.removeItem(K_DESTINO);
         ir(destino && !destino.includes("ingresar") ? destino : "#/inicio");
@@ -1499,15 +1544,25 @@
     if (TOMAN.includes(r)) items.push(["#/resumen", "Resumen", "Pedidos, cajas y productos más pedidos"]);
     if (r === "master" || r === "admin") items.push(["#/inventario", "Inventario y precios", "Existencias, entradas de mercancía y los 5 precios"]);
     if (r === "master") items.push(["#/usuarios", "Usuarios", "Crear usuarios, claves, roles y activar"]);
-    items.push(["index.html", "Ver catálogo", "La página que ven los clientes"]);
+    if (!APP) items.push(["index.html", "Ver catálogo", "La página que ven los clientes"]);
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    const instalada = window.matchMedia("(display-mode: standalone)").matches;
+    const instalada = !!APP || window.matchMedia("(display-mode: standalone)").matches;
+    const local = SkalaAPI.datosLocales();
+    const prox = proximaSync();
+    let verApp = "", verPant = "";
+    try { if (APP) { verApp = APP.versionName(); verPant = APP.versionPantallas(); } } catch (e) {}
     v.innerHTML = `
       <section class="tarjeta perfil"><strong>${esc(u.nombre)}</strong><span>@${esc(u.usuario)} · ${esc(u.rol_nombre)}</span></section>
       <ul class="menu-mas">${items.map(([h, t, d]) => `<li><a href="${h}"><strong>${t}</strong><span>${d}</span></a></li>`).join("")}</ul>
       ${instalada ? "" : `<section class="tarjeta"><h3 class="sub-titulo">Instalar en el teléfono</h3>
         ${eventoInstalar ? '<button type="button" class="btn btn-primary btn-bloque" id="btnInstalar">Instalar app Skala Equipo</button>'
           : `<p class="modal-sub">${ios ? "En Safari: botón Compartir → <strong>Agregar a inicio</strong>." : "En Chrome: menú ⋮ → <strong>Instalar app</strong> o <strong>Agregar a pantalla principal</strong>."}</p>`}</section>`}
+      <section class="tarjeta" id="secDatos"><h3 class="sub-titulo">Datos en el teléfono</h3>
+        <p class="modal-sub" id="datosEstado">${local && local.fecha ? `Actualizados ${esc(horaCorta(local.fecha))} · ${(local.pedidos || []).length} pedidos · ${(local.clientes || []).length} clientes` : "Todavía no hay datos guardados en este teléfono."}</p>
+        <button type="button" class="btn btn-primary btn-bloque" id="btnSync">Actualizar ahora</button>
+        <p class="nota-chica">Se actualizan solos a las 8 am, 1 pm y 4 pm${prox ? ` (próxima: ${esc(horaCorta(prox.toISOString()))})` : ""}. Sin señal, la app muestra lo guardado.</p>
+        ${APP ? `<p class="nota-chica" id="verApp">App ${esc(verApp)}${verPant ? ` · pantallas ${esc(verPant)}` : ""}</p>` : ""}
+      </section>
       <section class="tarjeta"><h3 class="sub-titulo">Tema</h3>
         <div class="selector-tema" role="group" aria-label="Tema de la app">${[["auto", "Automático"], ["claro", "Claro"], ["oscuro", "Oscuro"]].map(([k, t]) =>
           `<button type="button" data-tema="${k}" aria-pressed="${SkalaTema.pref() === k}">${t}</button>`).join("")}</div>
@@ -1520,6 +1575,23 @@
       v.querySelectorAll(".selector-tema button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
     });
     $("btnSalir").addEventListener("click", () => { SkalaAPI.cerrarSesion(); toast("Sesión cerrada"); ir("#/ingresar"); });
+    $("btnSync").addEventListener("click", async () => {
+      const b = $("btnSync");
+      b.disabled = true; b.classList.add("ocupado"); b.textContent = "Actualizando…";
+      cargando(1);
+      try {
+        const d = await SkalaAPI.sincronizar();
+        toast("Datos actualizados");
+        pintarAvisoApp(d);
+        try { if (APP) APP.revisarActualizaciones(); } catch (e) {}
+        if ($("datosEstado")) $("datosEstado").textContent = `Actualizados ${horaCorta(d.fecha)} · ${d.pedidos.length} pedidos · ${d.clientes.length} clientes`;
+      } catch (e) {
+        toast(e instanceof ErrorRed ? "Sin señal: probá de nuevo cuando haya conexión." : e.message);
+      } finally {
+        cargando(-1);
+        if ($("btnSync")) { b.disabled = false; b.classList.remove("ocupado"); b.textContent = "Actualizar ahora"; }
+      }
+    });
     const bi = $("btnInstalar");
     if (bi) bi.addEventListener("click", async () => { eventoInstalar.prompt(); await eventoInstalar.userChoice; eventoInstalar = null; render(); });
   }
@@ -1546,9 +1618,15 @@
     });
     window.addEventListener("online", () => subirCola());
     window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); eventoInstalar = e; });
-    if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
+    if (APP) {
+      document.documentElement.classList.add("en-app");
+      // la app nativa necesita la sesión para actualizar los datos con la app cerrada
+      try { const s0 = sesion(); if (s0) APP.guardarToken(s0.token); } catch (e) {}
+    }
+    else if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
     if (!location.hash) location.replace("#/" + (sesion() ? "inicio" : "ingresar"));
     render();
     if (navigator.onLine) subirCola();
+    autoSync();
   });
 })();

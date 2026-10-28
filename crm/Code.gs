@@ -11,6 +11,7 @@
 
 var TZ = 'America/Caracas';
 var SESION_HORAS = 12;
+var SESION_DIAS_APP = 30;   // la app Android recuerda la sesión 30 días (para actualizarse sola 8 am, 1 pm y 4 pm)
 var MAX_INTENTOS = 5;
 var BLOQUEO_SEG = 600;
 
@@ -82,7 +83,9 @@ var HOJAS = {
   Inventario: ['fecha', 'code', 'producto', 'cajas', 'tipo', 'nota', 'usuario'],
   // Pedidos que arma el cliente en el catálogo: esperan a que su vendedor los tome
   PedidosWeb: ['id', 'fecha', 'created_at', 'vendedor_id', 'vendedor', 'negocio', 'contacto', 'rif_cedula', 'telefono', 'direccion',
-               'items', 'tipo_pago', 'total_cajas', 'total', 'nota', 'estado', 'pedido_id', 'atendido_por', 'atendido_at', 'motivo']
+               'items', 'tipo_pago', 'total_cajas', 'total', 'nota', 'estado', 'pedido_id', 'atendido_por', 'atendido_at', 'motivo'],
+  // Ajustes de la app Android (versión y enlaces de actualización)
+  Config: ['clave', 'valor', 'nota']
 };
 
 /* -------------------- Entradas HTTP -------------------- */
@@ -121,6 +124,8 @@ var ACCIONES = {
   pedidosWeb: [accionPedidosWeb_, TOMAN_PEDIDOS],
   descartarWeb: [accionDescartarWeb_, TOMAN_PEDIDOS],
   borrarPedido: [accionBorrarPedido_, TOMAN_PEDIDOS],
+  sincronizar: [accionSincronizar_, ROLES],   // copia de los datos para el teléfono (app y sin señal)
+  config: [accionConfig_, null],
   inventario: [accionInventario_, GESTION],
   movimiento: [accionMovimiento_, GESTION],
   guardarPrecio: [accionGuardarPrecio_, GESTION],
@@ -244,8 +249,8 @@ function firmar_(texto) {
   return hex_(Utilities.computeHmacSha256Signature(texto, secreto_()));
 }
 
-function crearToken_(userId) {
-  var exp = Date.now() + SESION_HORAS * 3600 * 1000;
+function crearToken_(userId, largo) {
+  var exp = Date.now() + (largo ? SESION_DIAS_APP * 24 : SESION_HORAS) * 3600 * 1000;
   var base = userId + '.' + exp;
   return base + '.' + firmar_(base);
 }
@@ -306,7 +311,7 @@ function accionLogin_(p) {
     return { ok: false, error: 'Usuario o clave incorrecta.', code: 'bad_pin' };
   }
   cache.remove(clave);
-  return { ok: true, token: crearToken_(String(u.id)), usuario: usuarioPublico_(u) };
+  return { ok: true, token: crearToken_(String(u.id), p.dispositivo === true), usuario: usuarioPublico_(u) };
 }
 
 function accionYo_(p, ses) { return { ok: true, usuario: ses }; }
@@ -1036,6 +1041,46 @@ function accionBorrarPedido_(p, ses) {
   }
 }
 
+/* -------------------- App Android: datos para el teléfono y ajustes -------------------- */
+var CONFIG_BASE = [
+  ['version_apk', 1, 'Número de la última versión de la app (versionCode). Subilo al publicar una APK nueva.'],
+  ['url_apk', '', 'Enlace directo a la APK (ej. GitHub Releases).'],
+  ['minima_apk', 1, 'Versión mínima permitida: las más viejas deben actualizar para seguir.'],
+  ['version_pantallas', '', 'Versión del paquete de pantallas (ej. 2026.11.01). Vacío = las que trae la app.'],
+  ['url_pantallas', '', 'Enlace directo al .zip de pantallas (ej. GitHub Releases).'],
+  ['notas', '', 'Texto corto que verá el equipo en el aviso de actualización.']
+];
+function leerConfig_() {
+  var o = {};
+  CONFIG_BASE.forEach(function (c) { o[c[0]] = c[1]; });
+  leer_('Config').forEach(function (x) { var k = String(x.clave).trim(); if (k) o[k] = x.valor; });
+  return {
+    version_apk: Number(o.version_apk) || 0, url_apk: String(o.url_apk || ''), minima_apk: Number(o.minima_apk) || 0,
+    version_pantallas: String(o.version_pantallas || ''), url_pantallas: String(o.url_pantallas || ''), notas: String(o.notas || '')
+  };
+}
+function accionConfig_() { return { ok: true, config: leerConfig_() }; }
+
+/* Todo lo que el usuario necesita ver sin señal: precios y stock, clientes, sus pedidos y pedidos web */
+function accionSincronizar_(p, ses) {
+  var toma = TOMAN_PEDIDOS.indexOf(ses.rol) !== -1;
+  var cat = accionCatalogo_({ token: p.token });
+  var pedidos = accionPedidos_({ dias: 60 }, ses).pedidos;
+  var porCobrar = toma ? accionPedidos_({ por_cobrar: true }, ses).pedidos : [];
+  var vistos = {};
+  var lista = [];
+  pedidos.concat(porCobrar).forEach(function (x) { if (!vistos[x.id]) { vistos[x.id] = 1; lista.push(x); } });
+  var clientes = [];
+  if (toma) {
+    clientes = leer_('Clientes').filter(function (c) { return !(String(c.deleted) === '1' || c.deleted === true); })
+      .sort(function (a, b) { return String(b.updated_at).localeCompare(String(a.updated_at)); })
+      .slice(0, 3000).map(clientePublico_);
+  }
+  return { ok: true, fecha: ahora_(), usuario: ses, catalogo: { productos: cat.productos, pagos: cat.pagos, cajas_mayor: cat.cajas_mayor, actualizado: cat.actualizado },
+    clientes: clientes, pedidos: lista, pedidos_web: toma ? accionPedidosWeb_({}, ses).pedidos : [],
+    despachadores: esGestion_(ses) ? accionDespachadores_().despachadores : [], config: leerConfig_() };
+}
+
 /* -------------------- Resumen -------------------- */
 function accionResumen_(p, ses) {
   var dias = Math.min(Math.max(Number(p.dias) || 30, 1), 365);
@@ -1136,6 +1181,9 @@ function onOpen() {
 function prepararHojas() {
   Object.keys(HOJAS).forEach(hoja_);
   secreto_();
+  var yaConfig = {};
+  leer_('Config').forEach(function (x) { yaConfig[String(x.clave)] = 1; });
+  CONFIG_BASE.forEach(function (c) { if (!yaConfig[c[0]]) agregar_('Config', { clave: c[0], valor: c[1], nota: c[2] }); });
   var yaPrecios = tablaPrecios_();
   PRODUCTOS_BASE.forEach(function (b) { if (!yaPrecios[b[0]]) agregar_('Precios', { code: b[0], producto: b[1] }); });
   var migrados = 0;
@@ -1152,7 +1200,7 @@ function prepararHojas() {
       migrados++;
     });
   }
-  var msg = 'Listo: hojas Usuarios, Clientes, Pedidos, PedidoItems, Historial, Precios e Inventario.\nCargá los precios en la hoja Precios ($ por caja).' +
+  var msg = 'Listo: hojas Usuarios, Clientes, Pedidos, PedidoItems, Historial, Precios, Inventario, PedidosWeb y Config.\nCargá los precios en la hoja Precios ($ por caja).' +
     (migrados ? '\n' + migrados + ' vendedor(es) pasados a Usuarios (misma clave/PIN; el usuario es su nombre en minúsculas). Podés borrar la hoja Vendedores.' : '') +
     (leer_('Usuarios').some(function (u) { return u.rol === 'master'; }) ? '' : '\nAhora creá el usuario Master (menú 2).');
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}

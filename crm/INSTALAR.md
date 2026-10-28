@@ -1,4 +1,4 @@
-# Instalar el CRM de pedidos (Google Sheets + Drive) — v2 con roles
+# Instalar el CRM de pedidos (Google Sheets + Drive) — v3
 
 El catálogo sigue publicado en Netlify. Los pedidos se guardan en **una hoja de Google en tu
 Drive**, y un **Apps Script** pegado en esa hoja hace de "servidor" (gratis, sin hosting extra).
@@ -15,7 +15,8 @@ Tiempo: ~10 minutos. Usá la cuenta de Google de la empresa (será la dueña de 
 ## 2. Preparar hojas y crear el Master
 1. En el editor, en el desplegable de funciones elegí **prepararHojas** → **▶ Ejecutar**
    (si pide permisos: *Revisar permisos → tu cuenta → Configuración avanzada → Ir a … → Permitir*).
-   - Crea `Usuarios`, `Clientes`, `Pedidos`, `PedidoItems` e `Historial`.
+   - Crea `Usuarios`, `Clientes`, `Pedidos`, `PedidoItems`, `Historial`, `Precios`, `Inventario`,
+     `PedidosWeb` y `Config` (las que falten; no borra nada).
    - Si ya tenías la hoja `Vendedores` (versión anterior), pasa esos vendedores a `Usuarios`
      con el mismo PIN (les sirve para entrar; conviene cambiarlo por una clave). Después podés borrar la hoja `Vendedores`.
 2. Recargá la hoja → menú **Skala CRM → 2. Crear usuario**:
@@ -28,7 +29,7 @@ Tiempo: ~10 minutos. Usá la cuenta de Google de la empresa (será la dueña de 
 1. **Implementar → Nueva implementación → tipo: App web**.
 2. *Ejecutar como*: **Yo** · *Quién tiene acceso*: **Cualquier persona**.
 3. **Implementar** y copiá la **URL de la app web** (termina en `/exec`).
-4. Prueba: abrila en el navegador; debe mostrar `{"ok":true,"app":"skala-crm","version":2,"claves":true}`.
+4. Prueba: abrila en el navegador; debe mostrar `{"ok":true,"app":"skala-crm","version":3,"claves":true,"precios":true}`.
 
 > "Cualquier persona" es necesario para que el catálogo pueda llamarla. Sin usuario y clave
 > válidos no se puede leer ni escribir nada; cada acción se valida según el rol.
@@ -72,6 +73,34 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
 - Si alguien olvida la clave: el Master le pone una nueva (Usuarios → Editar).
 - **La hoja NO debe compartirse con "Cualquier persona con el enlace"**: dejala en
   *Compartir → Restringido*. La API funciona igual (corre con tu cuenta).
+
+## Precios e inventario
+- **Precios** (hoja `Precios` o panel → Más → *Inventario y precios*), en **$ por caja**:
+  `menor` (menos de 15 cajas), `mayor` (15 cajas o más) y tres **descuentos** que se restan según
+  cómo pague: `desc_pronto` (pronto pago: paga hasta el día siguiente a la entrega),
+  `desc_efectivo_credito` y `desc_efectivo_pronto`.
+  Ejemplo: menor 10 $ con descuentos 1 / 3 / 4 → 10 cajas = Crédito 100 $ · Pronto pago 90 $ ·
+  Efectivo a crédito 70 $ · Efectivo pronto pago 60 $.
+- El vendedor puede dar **precio al mayor por excepción** (ej. 10 cajas a precio mayor).
+- Al **marcar cancelado** se elige cómo pagó de verdad (ej. era crédito y pagó en efectivo al
+  contado): el total final se recalcula con ese descuento.
+- **Inventario**: Administración carga las **entradas** de mercancía (y ajustes con motivo).
+  Disponible = entradas − pedidos aprobados. Al **aprobar** se aparta la mercancía (si no
+  alcanza, no deja aprobar); si se anula, vuelve. Un producto sin ninguna entrada no se controla.
+
+## Pedidos web (los arma el cliente)
+En el catálogo el cliente revisa su pedido, ve el monto según la forma de pago, **elige a su
+vendedor** y lo envía por WhatsApp. El pedido llega también a la app de ese vendedor
+(Pedidos → **Web**, y un aviso en Inicio): lo toma, lo revisa o edita y lo envía a
+Administración. Administración los ve, pero no los toma. Se pueden descartar con motivo.
+
+## Borrar pedidos
+El vendedor puede borrar sus pedidos (ej. uno de prueba) y el Master cualquiera, siempre con
+motivo. El pedido sale de las listas, los totales y el inventario, pero queda en la hoja
+(columna `borrado`) y en el Historial.
+
+## App Android
+Ver `android/LEEME.md` (compilar, instalar y publicar actualizaciones con la hoja `Config`).
 
 ## Respaldo
 La hoja vive en tu Drive: **Archivo → Historial de versiones** guarda todo. La hoja

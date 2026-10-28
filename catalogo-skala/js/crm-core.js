@@ -291,6 +291,84 @@ function textoStock(st) {
 }
 function topeStock(st) { return st && st.controlado && st.disponible != null ? Math.max(0, st.disponible) : Infinity; }
 
+/* -------------------- Datos en el teléfono (app y sin señal) --------------------
+   Se actualizan solos a las 8 am, 1 pm y 4 pm (y con "Actualizar ahora"). */
+const HORAS_SYNC = [8, 13, 16];
+/* ¿Pasó algún horario de actualización desde la última vez? */
+function debeSincronizar(fechaIso, ahora = new Date()) {
+  if (!fechaIso) return true;
+  const ult = new Date(fechaIso);
+  if (isNaN(ult)) return true;
+  if (ahora - ult > 24 * 3600000) return true;
+  for (let d = 0; d <= 1; d++) {
+    for (const h of HORAS_SYNC) {
+      const t = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - d, h, 0, 0);
+      if (t <= ahora && t > ult) return true;
+    }
+  }
+  return false;
+}
+function proximaSync(ahora = new Date()) {
+  for (let d = 0; d <= 1; d++) {
+    for (const h of HORAS_SYNC) {
+      const t = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + d, h, 0, 0);
+      if (t > ahora) return t;
+    }
+  }
+  return null;
+}
+
+/* Mismos filtros que el servidor (crm/Code.gs → accionPedidos_), sobre la copia del teléfono */
+function filtrarPedidosLocal(pedidos, p = {}, hoy = new Date()) {
+  const dias = Math.min(Math.max(Number(p.dias) || 30, 1), 365);
+  const desde = new Date(hoy.getTime() - dias * DIA).toISOString();
+  const estados = Array.isArray(p.estados) ? p.estados : p.estado ? [p.estado] : [];
+  return (pedidos || []).filter((x) => {
+    if (p.cliente_id) return String(x.cliente_id) === String(p.cliente_id);
+    if (p.por_cobrar) return x.estado !== "cancelado" && !x.cobro && (Number(x.dias_credito) > 0 || x.estado === "entregado");
+    if (p.por_conciliar) return x.cobro === "cancelado";
+    if (p.conciliados) return x.cobro === "conciliado" && String(x.conciliado_at) >= desde;
+    if (estados.length && !estados.includes(x.estado)) return false;
+    return ["pendiente", "confirmado", "en_ruta"].includes(x.estado) || String(x.created_at) >= desde;
+  }).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+}
+
+function buscarClientesLocal(clientes, q, limite = 20) {
+  const t = String(q || "").trim().toLowerCase();
+  const qd = t.replace(/\D/g, "");
+  return (clientes || []).filter((c) => {
+    if (!t) return true;
+    if ([c.nombre, c.contacto, c.rif_cedula, c.direccion].join(" ").toLowerCase().includes(t)) return true;
+    const dig = (v) => String(v || "").replace(/\D/g, "");
+    return qd.length >= 4 && (dig(c.telefono).includes(qd) || dig(c.telefono2).includes(qd) || dig(c.rif_cedula).includes(qd));
+  }).slice(0, Math.min(Math.max(Number(limite) || 20, 1), 200));
+}
+
+/* Respuesta armada con los datos del teléfono, o null si esa consulta necesita señal */
+function respuestaLocal(accion, datos, local, hoy = new Date()) {
+  if (!local) return null;
+  const extra = { ok: true, local: true, fecha_local: local.fecha };
+  switch (accion) {
+    case "catalogo": return local.catalogo ? { ...local.catalogo, ...extra } : null;
+    case "clientes": return { clientes: buscarClientesLocal(local.clientes, datos.q, datos.limite), ...extra };
+    case "pedidos": return { pedidos: filtrarPedidosLocal(local.pedidos, datos, hoy), ...extra };
+    case "pedido": {
+      const p = (local.pedidos || []).find((x) => x.id === datos.pedido_id);
+      return p ? { pedido: { historial: [], ...p }, ...extra } : null;
+    }
+    case "pedidosWeb": return { pedidos: (local.pedidos_web || []).filter((w) => datos.estado === "todos" || w.estado === "nuevo"), ...extra };
+    case "despachadores": return { despachadores: local.despachadores || [], ...extra };
+    default: return null;
+  }
+}
+
+/* App Android: ¿hay versión nueva? ¿es obligatoria? */
+function estadoApp(versionInstalada, config) {
+  const v = Number(versionInstalada) || 0;
+  const c = config || {};
+  return { nueva: !!(c.url_apk && Number(c.version_apk) > v), obligatoria: !!(c.url_apk && Number(c.minima_apk) > v), version: Number(c.version_apk) || 0 };
+}
+
 function validarCliente(c, opciones = {}) {
   const faltan = [];
   if (!String(c.negocio || c.nombre || c.contacto || "").trim()) faltan.push("Nombre del cliente o del negocio");
@@ -338,5 +416,6 @@ if (typeof module !== "undefined" && module.exports) {
     nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, coordsDeTexto, estadoCredito, totalCarga,
     monedaDePago, formatoMonto, resumenConciliados,
     CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, sinPrecio, dinero,
-    limitePronto, prontoVigente, textoStock, topeStock, puedeBorrar, refWeb, mensajeWeb };
+    limitePronto, prontoVigente, textoStock, topeStock, puedeBorrar, refWeb, mensajeWeb,
+    HORAS_SYNC, debeSincronizar, proximaSync, filtrarPedidosLocal, buscarClientesLocal, respuestaLocal, estadoApp };
 }

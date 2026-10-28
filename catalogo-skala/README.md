@@ -62,24 +62,23 @@ o el hosting que uses). Solo necesita archivos estáticos: HTML + CSS + JS + im�
 
 ## Armador de pedido (WhatsApp)
 
-Cada producto tiene un selector de **cajas** (− / número / +). Abajo aparece una barra
-flotante con el **total de cajas** y, al tocar **"Armar pedido por WhatsApp"**, se abre un
-modal donde el cliente completa:
+En el teléfono los productos van de a **2 por fila** y **tocar una tarjeta suma una caja**
+(aparecen − / número / + para ajustar). Cada tarjeta muestra el **precio por caja** (y el
+precio al mayor) y "Agotado" si no hay stock; los precios vienen del CRM (acción `catalogo`).
+Abajo, una barra flotante con el total de cajas y el monto. **"Armar pedido por WhatsApp"**
+abre **Tu pedido**:
 
-- **RIF**, **Nombre del negocio**, **Dirección** y **Número de teléfono** (obligatorios).
-- **Método de pago** (obligatorio): Bolívares · Contado, Bolívares · Crédito,
-  Divisas · Contado o Divisas · Crédito.
+- Lista editable (sumar, restar, quitar) con el total; precio al mayor desde 15 cajas.
+- **Forma de pago** con el monto de cada una: Crédito · Pronto pago · Efectivo a crédito ·
+  Efectivo pronto pago.
+- **Tu vendedor** (obligatorio), negocio y teléfono (obligatorios), nombre, RIF y dirección.
+- **Enviar por WhatsApp** abre WhatsApp con el mensaje (referencia `WEB-XXXXXX`) y además manda
+  el pedido a la app del vendedor elegido (Pedidos → Web) para que lo revise y lo envíe a
+  Administración.
 
-El mensaje se arma en vivo con los datos del cliente + el pedido (producto, código, cajas
-y total). El botón **"Enviar por WhatsApp"** se habilita solo cuando están todos los datos;
-además hay **"Copiar mensaje"** para reenviarlo manualmente.
-
-- **Configurar el número:** en `js/main.js`, cambiá `WHATSAPP_NUMBER` por tu número real,
-  con código de país y **sin** `+`, espacios ni guiones (ej. Venezuela: `"584121234567"`).
-- **Mínimo y meta:** en el mismo archivo, `MIN_CAJAS` (40) y `META_CAJAS` (100). La barra
-  muestra cuánto falta para el mínimo y avisa cuando se llega a la meta.
-- Las cantidades y los datos del cliente se guardan en el navegador (localStorage), así que
-  no se pierden al recargar.
+- **Configurar el número:** en `js/main.js`, `WHATSAPP_NUMBER` (con código de país, sin `+`).
+- **Mínimo y meta:** en el mismo archivo, `MIN_CAJAS` (40) y `META_CAJAS` (100).
+- Las cantidades y los datos del cliente se guardan en el navegador (localStorage).
 
 ## Personalización
 
@@ -124,7 +123,11 @@ Nuevo pedido en 3 pasos: Cliente (buscar / nuevo, ficha con lápiz) → Producto
 (nota de entrega o factura obligatorio; días de crédito si es a crédito).
 Cobro: Cancelado (vendedor) → Conciliado (Administración); banderas de vencimiento del crédito.
 Despachador: total de carga de los pedidos elegidos. Clientes se pueden añadir sin pedido (traspaso de la base). Tema claro/oscuro (`js/tema.js`).
-Sin señal, el pedido queda en el teléfono y se sube solo después.
+Precios (menor / mayor + 3 descuentos) e inventario (Más → Inventario y precios). Pedidos web
+de los clientes (pestaña Web). Borrar pedidos de prueba (con motivo).
+Datos en el teléfono: se actualizan a las 8 am, 1 pm y 4 pm y con "Actualizar ahora"; sin señal
+se ven los guardados y el pedido queda en el teléfono y se sube solo después.
+App Android: `../android/LEEME.md`.
 
 - **Panel del equipo: `panel.html`** (app instalable en el teléfono). Páginas: Inicio, Nuevo
   pedido (lista rápida), Pedidos + detalle, Entregas, Clientes + ficha, Resumen, Usuarios, Más.
@@ -140,3 +143,4 @@ Sin señal, el pedido queda en el teléfono y se sube solo después.
 - Unitarios (sin dependencias): `node --test tests/producto.test.js tests/crm-core.test.js ../crm/tests/code.test.js`
 - En navegador (requiere Playwright): `node tests/e2e.js` — prueba 320, 360, 390, 768 y 1280 px.
 - Panel del equipo con los 4 roles de punta a punta (backend simulado, HTTP): `node tests/e2e-panel.js`
+- Panel dentro de la app Android (puente `SkalaApp` simulado): `node tests/e2e-app.js`

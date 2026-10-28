@@ -1,6 +1,6 @@
 # Spec: CRM de pedidos con roles (Google Sheets)
 
-Estado: v2 implementado · Fecha: 2026-10-25
+Estado: v3 implementado · Fecha: 2026-10-27
 Arquitectura: catálogo estático en Netlify + Google Sheets (en Drive) con Apps Script como API.
 
 ## Roles
@@ -79,8 +79,12 @@ va directo al formulario del pedido.
 |---|---|
 | `Usuarios` | id, usuario, nombre, rol, pin_hash, activo, created_at |
 | `Clientes` | (10 de GPS_CLIENTES) id, nombre, rif_cedula, direccion, latitud, longitud, telefono, updated_at, sync_status, deleted + contacto, telefono2, vendedor_id, created_at |
-| `Pedidos` | id, fecha, vendedor_id, vendedor, cliente_id, cliente, negocio, total_cajas, detalle_unidades, pago, nota, estado, estado_at, estado_por, motivo, client_ref, created_at, updated_at, despachador_id, despachador, confirmado_por, confirmado_at, entregado_por, entregado_at, documento, dias_credito, cobro, cobrado_at, cobrado_por, conciliado_at, conciliado_por, monto, moneda |
-| `PedidoItems` | pedido_id, code, producto, cajas, unidades_caja, unidad, total_unidades |
+| `Pedidos` | id, fecha, vendedor_id, vendedor, cliente_id, cliente, negocio, total_cajas, detalle_unidades, pago, nota, estado, estado_at, estado_por, motivo, client_ref, created_at, updated_at, despachador_id, despachador, confirmado_por, confirmado_at, entregado_por, entregado_at, documento, dias_credito, cobro, cobrado_at, cobrado_por, conciliado_at, conciliado_por, monto, moneda, nivel_precio, excepcion_precio, tipo_pago, total, tipo_pago_real, total_final, web_id, borrado, borrado_motivo, borrado_por, borrado_at |
+| `PedidoItems` | pedido_id, code, producto, cajas, unidades_caja, unidad, total_unidades, precio, desc_pronto, desc_efectivo_credito, desc_efectivo_pronto |
+| `Precios` | code, producto, menor, mayor, desc_pronto, desc_efectivo_credito, desc_efectivo_pronto, updated_at, updated_por |
+| `Inventario` | fecha, code, producto, cajas, tipo (entrada/ajuste), nota, usuario |
+| `PedidosWeb` | id, fecha, created_at, vendedor_id, vendedor, negocio, contacto, rif_cedula, telefono, direccion, items, tipo_pago, total_cajas, total, nota, estado, pedido_id, atendido_por, atendido_at, motivo |
+| `Config` | clave, valor, nota |
 | `Historial` | fecha, pedido_id, usuario, accion, detalle |
 
 Migración: si existe la hoja `Vendedores` (v1), *Preparar hojas* copia sus filas a `Usuarios`
@@ -102,5 +106,31 @@ como rol `vendedor` conservando id y PIN.
 | `resumen` | M, A, V | dias |
 | `usuarios` / `guardarUsuario` | M | id?, usuario, nombre, rol, activo, clave? |
 
+## Precios (v3)
+Hoja `Precios`: `menor`, `mayor` ($ por caja) y descuentos `desc_pronto`, `desc_efectivo_credito`,
+`desc_efectivo_pronto`. Nivel: mayor desde 15 cajas (`CAJAS_MAYOR`) o excepción del vendedor
+(`precio_mayor`). Formas de pago: `credito` (base), `pronto`, `efectivo_credito`,
+`efectivo_pronto`. Cada item guarda su precio y descuentos al crear el pedido (cambios de precio
+posteriores no lo alteran). `total` = lo acordado; al cobrar, `tipo_pago_real` y `total_final`.
+Pronto pago vence al final del día siguiente a la entrega (aviso al cobrar fuera de plazo).
+
+## Inventario (v3)
+Hoja `Inventario`: entradas y ajustes. Disponible = Σ movimientos − cajas de pedidos
+`confirmado`/`en_ruta`/`entregado` (no borrados). Aprobar valida stock; `guardarPedido` también.
+Producto sin movimientos = no controlado.
+
+## Pedidos web (v3)
+Hoja `PedidosWeb` (id `WEB-XXXXXX`, cliente, vendedor elegido, items JSON, forma de pago, estado
+`nuevo`/`tomado`/`descartado`). Público: `vendedores`, `pedidoWeb` (máx. 5 por teléfono por hora,
+idempotente por id). `guardarPedido` con `web_id` lo toma (vendedor asignado o Master).
+
+## App Android (v3)
+`android/`: WebView con `panel.html` adentro; `window.SkalaApp` (ver `android/LEEME.md`).
+`login` con `dispositivo: true` → token de 30 días. `sincronizar` → copia para el teléfono
+(catálogo con stock, clientes, pedidos del usuario, pedidos web, despachadores, config).
+Sin señal, `js/crm-api.js` responde las consultas con esa copia (`respuestaLocal` en
+`js/crm-core.js`). Hoja `Config`: `version_apk`, `url_apk`, `minima_apk`,
+`version_pantallas`, `url_pantallas`, `notas`.
+
 ## Fuera de alcance
-Lista de precios (el monto lo escribe quien cobra), inventario, envío automático a grupos de WhatsApp (se usa el menú compartir).
+Tasa de cambio Bs/$ (el monto en Bs lo escribe quien cobra), inventario, envío automático a grupos de WhatsApp (se usa el menú compartir).

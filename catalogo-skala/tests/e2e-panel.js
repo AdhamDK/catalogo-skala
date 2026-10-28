@@ -355,17 +355,32 @@ function servidor() {
 
   /* ---------- Sin señal ---------- */
   await tocar('input[name="ePago"][value="pronto"]');
+  await page.evaluate(() => SkalaAPI.sincronizar()); // copia de los datos en el teléfono
+  assert.equal(await page.evaluate(() => SkalaAPI.datosLocales().pedidos.length), 1);
   sinSenal = true;
   await tocar("#btnEnviar");
   await esperarRuta("#/nuevo/listo");
   assert.match(await page.innerText(".listo h2"), /Guardado en el teléfono/);
   await page.click('.app-nav a[href="#/inicio"]');
   await page.waitForSelector("#pendSubir:not([hidden])");
+  await page.goto(BASE + "/panel.html#/pedidos?tab=pendiente");
+  await esperarRuta("#/pedidos");
+  assert.match(await page.innerText("#modoLocal"), /Sin señal · mostrando los datos guardados/);
+  assert.equal(await page.locator("#pLista .fila-ped").count(), 1); // de la copia del teléfono
+  await page.click("#pLista .fila-ped");
+  await esperarRuta("#/pedido/");
+  assert.match(await titulo(), /^SKL-\d{6}-001$/);
   sinSenal = false;
   await page.click("#btnSubirPend");
   await page.waitForSelector("#pendSubir", { state: "hidden" });
   assert.equal(gas.tabla("Pedidos").length, 2);
-  ok("sin señal: queda en el teléfono y se sube con Subir ahora");
+  await page.goto(BASE + "/panel.html#/mas");
+  await esperarRuta("#/mas");
+  assert.ok(await page.locator("#modoLocal").isHidden());
+  assert.match(await page.innerText("#datosEstado"), /Actualizados hoy/);
+  await page.click("#btnSync");
+  await page.waitForFunction(() => /2 pedidos/.test(document.getElementById("datosEstado").textContent));
+  ok("sin señal: muestra los datos guardados; el pedido queda en el teléfono y se sube; Actualizar ahora");
   await salir();
 
   /* ---------- Administración ---------- */

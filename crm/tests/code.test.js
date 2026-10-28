@@ -35,9 +35,10 @@ const pedir = (g, token, extra = {}) =>
 const idDe = (g, usuario) => g.tabla("Usuarios").find((u) => u.usuario === usuario).id;
 
 /* ---------- Hojas, usuarios, login ---------- */
-test("crea 8 hojas; Clientes empieza con las columnas de GPS_CLIENTES; Precios precargada", () => {
+test("crea 9 hojas; Clientes empieza con las columnas de GPS_CLIENTES; Precios y Config precargadas", () => {
   const g = preparar();
-  assert.deepEqual(Object.keys(g.hojas).sort(), ["Clientes", "Historial", "Inventario", "PedidoItems", "Pedidos", "PedidosWeb", "Precios", "Usuarios"]);
+  assert.deepEqual(Object.keys(g.hojas).sort(), ["Clientes", "Config", "Historial", "Inventario", "PedidoItems", "Pedidos", "PedidosWeb", "Precios", "Usuarios"]);
+  assert.deepEqual(g.tabla("Config").map((x) => x.clave), ["version_apk", "url_apk", "minima_apk", "version_pantallas", "url_pantallas", "notas"]);
   assert.equal(g.tabla("Precios").length, 19);
   assert.deepEqual(g.tabla("Precios")[0], { code: "BC-01", producto: "Babosa", menor: "", mayor: "", desc_pronto: "", desc_efectivo_credito: "", desc_efectivo_pronto: "", updated_at: "", updated_por: "" });
   g.ctx.prepararHojas(); // no duplica
@@ -753,4 +754,44 @@ test("borrar pedido: vendedor los suyos, Master todos; sale de listas, resumen y
   assert.equal(g.post({ action: "inventario", token: ta }).productos.find((x) => x.code === "BC-01").disponible, 10);
   assert.equal(g.tabla("Pedidos").length, 2); // siguen en la hoja
   assert.equal(g.tabla("Historial").filter((h) => h.accion === "borrado").length, 2);
+});
+
+/* ---------- App Android (v3): sesión larga, datos para el teléfono y ajustes ---------- */
+test("login desde la app: sesión de 30 días; desde la web: 12 horas", () => {
+  const g = preparar();
+  const corta = g.post({ action: "login", usuario: "oscar", clave: "Oscar.1234" }).token;
+  const larga = g.post({ action: "login", usuario: "oscar", clave: "Oscar.1234", dispositivo: true }).token;
+  const dur = (t) => (Number(t.split(".")[1]) - Date.parse("2026-10-25T18:30:00Z")) / 3600000;
+  assert.equal(Math.round(dur(corta)), 12);
+  assert.equal(Math.round(dur(larga)), 30 * 24);
+  g.setAhora("2026-11-10T12:00:00Z");
+  assert.equal(g.post({ action: "yo", token: corta }).code, "auth");
+  assert.equal(g.post({ action: "yo", token: larga }).ok, true);
+});
+
+test("sincronizar: precios, stock, clientes, pedidos del usuario y pedidos web; config pública", () => {
+  const g = preparar();
+  const ta = conPrecios(g);
+  const to = login(g);
+  pedir(g, to, { tipo_pago: "pronto" });
+  pedir(g, login(g, "kevin", "Kevin9876"), { tipo_pago: "pronto", cliente: { ...CLIENTE, telefono: "0416-0000000", negocio: "Otro", rif_cedula: "" } });
+  g.post({ action: "pedidoWeb", ...WEB, vendedor_id: idDe(g, "oscar") });
+  const s = g.post({ action: "sincronizar", token: to });
+  assert.equal(s.ok, true);
+  assert.equal(s.pedidos.length, 1); // solo los suyos
+  assert.equal(s.clientes.length, 2);
+  assert.equal(s.pedidos_web.length, 1);
+  assert.equal(s.catalogo.productos.find((x) => x.code === "BC-01").menor, 10);
+  assert.equal(s.catalogo.productos.find((x) => x.code === "BC-01").controlado, false);
+  assert.equal(s.config.version_apk, 1);
+  assert.equal(g.post({ action: "sincronizar", token: ta }).pedidos.length, 2);
+  const d = g.post({ action: "sincronizar", token: login(g, "luis", "Luis5555") });
+  assert.deepEqual([d.pedidos.length, d.clientes.length, d.pedidos_web.length], [0, 0, 0]);
+  // Config: se edita en la hoja
+  const fila = g.tabla("Config").findIndex((x) => x.clave === "version_apk") + 2;
+  g.hojas.Config.filas[fila - 1][1] = 3;
+  g.hojas.Config.filas.find((f) => f[0] === "url_apk" || f[0] === "'url_apk")[1] = "'https://github.com/x/releases/download/v3/skala.apk";
+  const c = g.post({ action: "config" }).config;
+  assert.equal(c.version_apk, 3);
+  assert.equal(c.url_apk, "https://github.com/x/releases/download/v3/skala.apk");
 });

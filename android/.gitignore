@@ -1,0 +1,15 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+# Copia automática de catalogo-skala (la hace Gradle al compilar)
+app/src/main/assets/www/
+# La llave de firma NO se sube: guardala aparte (sin ella no se puede actualizar la app)
+keystore/*.jks
+keystore/*.keystore
+keystore/keystore.properties
+# APK generadas
+*.apk
+salida/

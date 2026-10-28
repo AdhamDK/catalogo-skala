@@ -437,3 +437,13 @@ html[data-tema="oscuro"] .btn-peligro { color: #ff8a80; border-color: rgba(255, 
   .spinner, .btn.ocupado::before { animation: girar 1.6s linear infinite !important; }
   .barra-carga::before { animation: barra 2s ease-in-out infinite !important; }
 }
+
+/* ---------- Datos en el teléfono y app Android ---------- */
+.modo-local { margin-top: 8px; padding: 8px 12px; border-radius: 12px; background: #fff3e6; color: #6b3a0b; font-size: 0.85rem; text-align: center; }
+html[data-tema="oscuro"] .modo-local { background: rgba(245, 130, 42, 0.15); color: #ffc58f; }
+.aviso-app { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 10px 12px; border-radius: 14px; background: var(--verde-suave); font-size: 0.9rem; }
+.aviso-app span { flex: 1; }
+.aviso-app .btn { min-height: 44px; padding: 8px 14px; }
+.aviso-app.obligatoria { background: #fde8f1; }
+body.app-bloqueada #vista, body.app-bloqueada #appNav { pointer-events: none; opacity: .35; }
+html[data-tema="oscuro"] .aviso-app.obligatoria { background: rgba(233, 78, 140, 0.15); }

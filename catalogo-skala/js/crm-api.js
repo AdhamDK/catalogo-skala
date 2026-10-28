@@ -21,12 +21,64 @@ const SkalaAPI = (function () {
     if (!s || !s.token || !s.usuario || expiracionToken(s.token) < Date.now()) return null;
     return s;
   }
-  function guardarSesion(token, usuario) { guardarLS(K_SESION, { token, usuario }); }
-  function cerrarSesion() { borrarLS(K_SESION); }
+  /* App Android: el puente nativo (window.SkalaApp) guarda el token para actualizar los datos en segundo plano */
+  const app = () => (typeof window !== "undefined" && window.SkalaApp) || null;
+  function guardarSesion(token, usuario) {
+    const previo = leerLS(K_LOCAL, null);
+    if (previo && previo.usuario && previo.usuario.id !== usuario.id) borrarLS(K_LOCAL); // otro usuario: datos fuera
+    guardarLS(K_SESION, { token, usuario });
+    try { if (app()) app().guardarToken(token); } catch (e) {}
+  }
+  function cerrarSesion() {
+    borrarLS(K_SESION);
+    borrarLS(K_LOCAL);
+    try { if (app()) { app().guardarToken(""); app().guardarDatos(""); } } catch (e) {}
+  }
 
   class ErrorRed extends Error {}
 
-  async function api(action, datos = {}) {
+  /* ---------- Datos en el teléfono: copia que se actualiza 8 am, 1 pm y 4 pm ---------- */
+  const K_LOCAL = "skala_local_v1";
+  const LECTURAS = ["catalogo", "clientes", "pedidos", "pedido", "pedidosWeb", "despachadores"];
+  function datosLocales() {
+    let d = leerLS(K_LOCAL, null);
+    // La app pudo actualizarlos sola (con la app cerrada): usar la copia más nueva
+    try {
+      const nativo = app() && app().leerDatos ? JSON.parse(app().leerDatos() || "null") : null;
+      if (nativo && nativo.fecha && (!d || nativo.fecha > d.fecha)) { d = nativo; guardarLS(K_LOCAL, d); }
+    } catch (e) {}
+    const s = sesion();
+    if (d && s && d.usuario && d.usuario.id !== s.usuario.id) return null;
+    return d;
+  }
+  let sincronizando = null;
+  function sincronizar() {
+    if (sincronizando) return sincronizando;
+    sincronizando = (async () => {
+      const r = await api("sincronizar", {}, { sinCopia: true });
+      const { ok, ...datos } = r;
+      guardarLS(K_LOCAL, datos);
+      guardarLS(K_CATALOGO, { t: Date.now(), s: true, d: datos.catalogo });
+      try { if (app()) app().guardarDatos(JSON.stringify(datos)); } catch (e) {}
+      return datos;
+    })().finally(() => { sincronizando = null; });
+    return sincronizando;
+  }
+
+  async function api(action, datos = {}, opciones = {}) {
+    try {
+      return await apiRed(action, datos);
+    } catch (e) {
+      // Sin señal: las consultas se responden con los datos guardados en el teléfono
+      if (e instanceof ErrorRed && !opciones.sinCopia && LECTURAS.includes(action) && typeof respuestaLocal === "function") {
+        const r = respuestaLocal(action, datos, datosLocales());
+        if (r) return r;
+      }
+      throw e;
+    }
+  }
+
+  async function apiRed(action, datos = {}) {
     if (!API) throw new Error("El CRM no está configurado (falta CRM_API_URL en js/crm-api.js).");
     const s = sesion();
     const ctrl = new AbortController();
@@ -117,5 +169,5 @@ const SkalaAPI = (function () {
     }
   }
 
-  return { enviarSinEsperar, catalogo, catalogoGuardado, preciosMapa, api, sesion, guardarSesion, cerrarSesion, ErrorRed, cola, encolar, subirCola, leerLS, guardarLS, borrarLS };
+  return { app, datosLocales, sincronizar, enviarSinEsperar, catalogo, catalogoGuardado, preciosMapa, api, sesion, guardarSesion, cerrarSesion, ErrorRed, cola, encolar, subirCola, leerLS, guardarLS, borrarLS };
 })();
