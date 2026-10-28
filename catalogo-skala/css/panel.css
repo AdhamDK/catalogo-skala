@@ -588,3 +588,36 @@ html[data-tema="oscuro"] .ent-resumen > div:first-child { background: var(--rosa
 html[data-tema="oscuro"] .ent-wa { color: #4cc883; }
 html[data-tema="oscuro"] .ent-mapa { color: #79aef0; }
 .tabs-ent { margin-bottom: 12px !important; }
+
+/* ---------- Inventario: cargar mercancía y conteo ---------- */
+.inv-acciones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 10px; }
+.inv-accion {
+  display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 10px 12px; border-radius: 16px;
+  background: var(--superficie); border: 1px solid var(--borde-suave); color: inherit; box-shadow: 0 4px 14px rgba(38, 36, 31, 0.05);
+}
+.inv-accion:active { background: var(--crema-2); }
+.inv-accion > b {
+  flex: 0 0 40px; height: 40px; display: grid; place-items: center; border-radius: 12px;
+  background: var(--rosa-osc); color: #fff; font-size: 1.3rem; line-height: 1;
+}
+.inv-accion + .inv-accion > b { background: #2a6fc0; }
+.inv-accion span { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.inv-accion strong { font-size: 0.95rem; }
+.inv-accion em { font-style: normal; font-size: 0.75rem; color: var(--tinta-suave); }
+.inv-explica { margin: 0 0 10px; }
+.grilla-inv .pcard-stock b { color: var(--tinta); }
+.pcard-dif { font-size: 0.75rem; font-weight: 700; color: var(--verde-osc); }
+.pcard-dif:empty { display: none; }
+.grilla-inv.modo-conteo .pcard-qty { display: flex; }
+.grilla-inv.modo-conteo .qty-input::placeholder { font-size: 0.8rem; }
+.pcard.dif-menos { border-color: #d98a1c; }
+.pcard.dif-menos .pcard-n { background: #b5660a; }
+.pcard.dif-menos .pcard-dif { color: #9a5408; }
+.pcard.dif-mas .pcard-n { background: #2a6fc0; }
+.pcard.dif-mas .pcard-dif { color: #1f5b9a; }
+.hoja-lista { max-height: 40vh; overflow: auto; margin: 0 0 10px; }
+html[data-tema="oscuro"] .pcard-dif { color: var(--verde-claro); }
+html[data-tema="oscuro"] .pcard.dif-menos .pcard-dif { color: #f2b25c; }
+html[data-tema="oscuro"] .pcard.dif-mas .pcard-dif { color: #79aef0; }
+@media (max-width: 440px) { .inv-acciones { grid-template-columns: 1fr; } }
+#icBarra strong { white-space: nowrap; }

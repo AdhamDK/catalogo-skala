@@ -152,6 +152,7 @@ var ACCIONES = {
   config: [accionConfig_, null],
   inventario: [accionInventario_, GESTION],
   movimiento: [accionMovimiento_, GESTION],
+  cargarInventario: [accionCargarInventario_, GESTION],
   guardarPrecio: [accionGuardarPrecio_, GESTION],
   guardarProducto: [accionGuardarProducto_, GESTION],
   despachadores: [accionDespachadores_, GESTION],
@@ -577,7 +578,7 @@ function totalPorPago_(items, tipo) {
 /* Existencias por producto. controlado = tiene al menos un movimiento cargado. */
 function existencias_(pedidos, items) {
   var st = {};
-  var de = function (code) { return st[code] || (st[code] = { code: code, cargado: 0, aprobado: 0, en_proceso: 0, controlado: false }); };
+  var de = function (code) { return st[code] || (st[code] = { code: code, cargado: 0, aprobado: 0, salido: 0, en_proceso: 0, controlado: false }); };
   leer_('Inventario').forEach(function (m) {
     var code = String(m.code).trim().toUpperCase();
     if (!code) return;
@@ -590,9 +591,11 @@ function existencias_(pedidos, items) {
     if (!e) return;
     var x = de(String(it.code).toUpperCase());
     if (ESTADOS_CON_STOCK.indexOf(e) !== -1) x.aprobado += Number(it.cajas) || 0;
+    if (e === 'en_ruta' || e === 'entregado') x.salido += Number(it.cajas) || 0;
     else if (e === 'pendiente') x.en_proceso += Number(it.cajas) || 0;
   });
-  Object.keys(st).forEach(function (k) { st[k].disponible = st[k].cargado - st[k].aprobado; });
+  // disponible = lo cargado − lo aprobado; en depósito (físico) = lo cargado − lo que ya salió (en ruta / entregado)
+  Object.keys(st).forEach(function (k) { st[k].disponible = st[k].cargado - st[k].aprobado; st[k].fisico = st[k].cargado - st[k].salido; });
   return st;
 }
 
@@ -643,34 +646,87 @@ function accionInventario_(p) {
   Object.keys(precios).forEach(function (k) { codes[k] = codes[k] || precios[k].producto; });
   Object.keys(stock).forEach(function (k) { codes[k] = codes[k] || k; });
   return { ok: true, productos: Object.keys(codes).sort().map(function (code) {
-    var s = stock[code] || { cargado: 0, aprobado: 0, en_proceso: 0, disponible: 0, controlado: false };
+    var s = stock[code] || { cargado: 0, aprobado: 0, salido: 0, en_proceso: 0, disponible: 0, fisico: 0, controlado: false };
     var pr = precios[code] || {};
-    return { code: code, producto: (precios[code] && precios[code].producto) || codes[code], cargado: s.cargado, aprobado: s.aprobado, en_proceso: s.en_proceso, disponible: s.disponible, controlado: s.controlado,
+    return { code: code, producto: (precios[code] && precios[code].producto) || codes[code], cargado: s.cargado, aprobado: s.aprobado, en_proceso: s.en_proceso, disponible: s.disponible,
+      fisico: s.fisico, por_salir: s.aprobado - s.salido, controlado: s.controlado,
       menor: pr.menor || 0, mayor: pr.mayor || 0, pronto: pr.pronto || 0, efectivo_credito: pr.efectivo_credito || 0, efectivo_pronto: pr.efectivo_pronto || 0,
       mayor_pronto: pr.mayor_pronto || 0, mayor_efectivo_credito: pr.mayor_efectivo_credito || 0, mayor_efectivo_pronto: pr.mayor_efectivo_pronto || 0,
       nuevo: !esBase_(code), info: !esBase_(code) && pr.tipo ? infoProducto_(pr) : null };
   }), movimientos: movs.slice(0, Math.min(Math.max(Number(p.limite) || 50, 1), 500)) };
 }
 
-/* Entrada de mercancía (cajas > 0) o ajuste (+/-, con nota) */
+/* Entrada de mercancía (cajas > 0), ajuste (+/-, con nota) o conteo (el total que hay en el depósito) */
 function accionMovimiento_(p, ses) {
+  var tipo = p.tipo === 'ajuste' || p.tipo === 'conteo' ? p.tipo : 'entrada';
+  if (tipo !== 'ajuste') {
+    var r = accionCargarInventario_({ tipo: tipo, nota: p.nota, items: [{ code: p.code, cajas: p.cajas }] }, ses);
+    if (!r.ok) return r;
+    return { ok: true, disponible: r.productos[0].disponible, fisico: r.productos[0].fisico, diferencia: r.productos[0].diferencia };
+  }
   var code = txt_(p.code, 20).toUpperCase();
   var cajas = Math.round(Number(p.cajas));
-  var tipo = p.tipo === 'ajuste' ? 'ajuste' : 'entrada';
   var nota = txt_(p.nota, 200);
   if (!code) return { ok: false, error: 'Elegí el producto.', code: 'producto' };
   if (!isFinite(cajas) || cajas === 0 || Math.abs(cajas) > 100000) return { ok: false, error: 'Indicá la cantidad de cajas.', code: 'cajas' };
-  if (tipo === 'entrada' && cajas < 0) return { ok: false, error: 'Una entrada debe ser mayor que 0. Para restar usá Ajuste.', code: 'cajas' };
-  if (tipo === 'ajuste' && !nota) return { ok: false, error: 'Indicá el motivo del ajuste.', code: 'nota' };
+  if (!nota) return { ok: false, error: 'Indicá el motivo del ajuste.', code: 'nota' };
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var base = {}; PRODUCTOS_BASE.forEach(function (b) { base[b[0]] = b[1]; });
-    var pr = tablaPrecios_()[code];
-    var nombre = (pr && pr.producto) || base[code] || txt_(p.producto, 120) || code;
-    agregar_('Inventario', { fecha: ahora_(), code: code, producto: nombre, cajas: cajas, tipo: tipo, nota: nota, usuario: ses.nombre });
+    agregar_('Inventario', { fecha: ahora_(), code: code, producto: nombreProducto_(code, p.producto), cajas: cajas, tipo: 'ajuste', nota: nota, usuario: ses.nombre });
     var s = existencias_()[code];
     return { ok: true, disponible: s ? s.disponible : cajas };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function nombreProducto_(code, alt) {
+  var pr = tablaPrecios_()[code];
+  if (pr && pr.producto) return pr.producto;
+  for (var i = 0; i < PRODUCTOS_BASE.length; i++) if (PRODUCTOS_BASE[i][0] === code) return PRODUCTOS_BASE[i][1];
+  return txt_(alt, 120) || code;
+}
+
+/* Carga de varios productos a la vez (panel con fotos).
+   tipo 'entrada': suma las cajas que llegaron (> 0).
+   tipo 'conteo': cajas = el total contado en el depósito; se guarda la diferencia con lo que dice el sistema. */
+function accionCargarInventario_(p, ses) {
+  var tipo = p.tipo === 'conteo' ? 'conteo' : 'entrada';
+  var items = Array.isArray(p.items) ? p.items : [];
+  var nota = txt_(p.nota, 200);
+  if (!items.length) return { ok: false, error: 'Elegí al menos un producto.', code: 'producto' };
+  if (items.length > 300) return { ok: false, error: 'Demasiados productos de una vez.', code: 'cajas' };
+  var precios = tablaPrecios_();
+  var vistos = {}, limpios = [];
+  for (var i = 0; i < items.length; i++) {
+    var code = txt_(items[i] && items[i].code, 20).toUpperCase();
+    var cajas = Math.round(Number(items[i] && items[i].cajas));
+    if (!code) return { ok: false, error: 'Elegí el producto.', code: 'producto' };
+    if (!esBase_(code) && !precios[code]) return { ok: false, error: 'Producto desconocido: ' + code, code: 'producto' };
+    if (vistos[code]) return { ok: false, error: code + ' está repetido.', code: 'producto' };
+    vistos[code] = true;
+    if (!isFinite(cajas) || cajas > 100000) return { ok: false, error: 'Revisá las cajas de ' + code + '.', code: 'cajas' };
+    if (tipo === 'entrada' && cajas <= 0) return { ok: false, error: 'Una entrada debe ser mayor que 0 (' + code + '). Para restar usá Ajuste o Conteo.', code: 'cajas' };
+    if (tipo === 'conteo' && cajas < 0) return { ok: false, error: 'El conteo no puede ser negativo (' + code + ').', code: 'cajas' };
+    limpios.push({ code: code, cajas: cajas });
+  }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var antes = existencias_();
+    var fecha = ahora_();
+    var res = limpios.map(function (it) {
+      var s = antes[it.code] || { fisico: 0, controlado: false };
+      var mov = tipo === 'entrada' ? it.cajas : it.cajas - s.fisico;
+      var texto = tipo === 'entrada' ? nota : 'Conteo: ' + it.cajas + ' cajas en depósito (sistema: ' + (s.controlado ? s.fisico : 'sin cargar') + ')' + (nota ? ' · ' + nota : '');
+      // el conteo se guarda aunque coincida (queda la constancia y el producto pasa a controlarse)
+      agregar_('Inventario', { fecha: fecha, code: it.code, producto: nombreProducto_(it.code), cajas: mov, tipo: tipo, nota: txt_(texto, 300), usuario: ses.nombre });
+      return { code: it.code, diferencia: mov };
+    });
+    var desp = existencias_();
+    res.forEach(function (r) { var s = desp[r.code] || {}; r.disponible = s.disponible || 0; r.fisico = s.fisico || 0; });
+    return { ok: true, guardados: res.length, productos: res };
   } finally {
     lock.releaseLock();
   }

@@ -621,6 +621,43 @@ test("producto sin precio cargado: total 0 y no falla", () => {
   assert.equal(r.ok, true); assert.equal(r.pedido.total, 0);
 });
 
+test("inventario: conteo total y carga de varios productos (entrada / conteo)", () => {
+  const g = preparar();
+  const ta = conPrecios(g);
+  const tv = login(g);
+  assert.equal(g.post({ action: "cargarInventario", token: tv, tipo: "entrada", items: [{ code: "BC-01", cajas: 5 }] }).code, "forbidden");
+  assert.match(g.post({ action: "cargarInventario", token: ta, tipo: "entrada", items: [] }).error, /al menos un producto/);
+  assert.match(g.post({ action: "cargarInventario", token: ta, tipo: "entrada", items: [{ code: "XX-99", cajas: 5 }] }).error, /desconocido/);
+  assert.match(g.post({ action: "cargarInventario", token: ta, tipo: "entrada", items: [{ code: "BC-01", cajas: 0 }] }).error, /mayor que 0/);
+  assert.match(g.post({ action: "cargarInventario", token: ta, tipo: "conteo", items: [{ code: "BC-01", cajas: -1 }] }).error, /negativo/);
+  assert.match(g.post({ action: "cargarInventario", token: ta, tipo: "entrada", items: [{ code: "BC-01", cajas: 1 }, { code: "bc-01", cajas: 2 }] }).error, /repetido/);
+  // Primer conteo: solo el total que hay; un producto en 0 también queda controlado
+  let r = g.post({ action: "cargarInventario", token: ta, tipo: "conteo", items: [{ code: "BC-01", cajas: 40 }, { code: "KT-01", cajas: 12 }, { code: "KT-02", cajas: 0 }] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.productos.map((x) => [x.code, x.diferencia, x.fisico, x.disponible]), [["BC-01", 40, 40, 40], ["KT-01", 12, 12, 12], ["KT-02", 0, 0, 0]]);
+  assert.equal(g.tabla("Inventario")[0].tipo, "conteo");
+  assert.match(g.tabla("Inventario")[0].nota, /Conteo: 40 cajas en depósito \(sistema: sin cargar\)/);
+  assert.equal(g.post({ action: "catalogo" }).productos.find((x) => x.code === "KT-02").agotado, true);
+  // Entrada de varios productos
+  r = g.post({ action: "cargarInventario", token: ta, tipo: "entrada", nota: "Factura 123", items: [{ code: "BC-01", cajas: 10 }, { code: "KT-02", cajas: 6 }] });
+  assert.deepEqual(r.productos.map((x) => x.disponible), [50, 6]);
+  // Un pedido aprobado (aún en depósito) y otro que ya salió
+  const luis = idDe(g, "luis");
+  const p1 = pedir(g, tv, { tipo_pago: "pronto", items: [{ code: "BC-01", producto: "Babosa", cajas: 5 }] });
+  const p2 = pedir(g, tv, { tipo_pago: "pronto", items: [{ code: "BC-01", producto: "Babosa", cajas: 3 }] });
+  g.post({ action: "estado", token: ta, pedido_id: p1.pedido.id, estado: "confirmado", despachador_id: luis });
+  g.post({ action: "estado", token: ta, pedido_id: p2.pedido.id, estado: "confirmado", despachador_id: luis });
+  g.post({ action: "estado", token: login(g, "luis", "Luis5555"), pedido_id: p2.pedido.id, estado: "en_ruta" });
+  let b = g.post({ action: "inventario", token: ta }).productos.find((x) => x.code === "BC-01");
+  assert.deepEqual([b.fisico, b.por_salir, b.disponible], [47, 5, 42]);
+  // Conteo: en el depósito hay 45 (faltan 2) → se guarda -2; el disponible descuenta lo aprobado que no salió
+  const m = g.post({ action: "movimiento", token: ta, code: "BC-01", cajas: 45, tipo: "conteo" });
+  assert.deepEqual([m.ok, m.diferencia, m.fisico, m.disponible], [true, -2, 45, 40]);
+  assert.match(g.tabla("Inventario").at(-1).nota, /Conteo: 45 cajas en depósito \(sistema: 47\)/);
+  // Conteo igual al sistema: queda la constancia con 0
+  assert.equal(g.post({ action: "movimiento", token: ta, code: "BC-01", cajas: 45, tipo: "conteo" }).diferencia, 0);
+});
+
 test("inventario: entradas y ajustes; aprobar aparta stock; anular lo devuelve; no se pide más de lo que hay", () => {
   const g = preparar();
   const ta = conPrecios(g);

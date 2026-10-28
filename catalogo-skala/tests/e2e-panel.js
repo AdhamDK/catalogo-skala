@@ -527,6 +527,55 @@ function servidor() {
   await page.goto(BASE + "/panel.html#/inicio");
   await esperarRuta("#/inicio");
   ok("inventario: entradas, precios finales a varios productos y producto nuevo (sale en gris sin stock)");
+
+  // Conteo total con fotos (como al tomar un pedido): solo se escribe cuántas hay
+  await page.goto(BASE + "/panel.html#/inventario");
+  await esperarRuta("#/inventario");
+  await page.click("#lnkConteo");
+  await esperarRuta("#/inventario/cargar");
+  await page.waitForSelector('#icLista .pcard[data-code="KT-02"] img');
+  assert.match(await page.innerText('#icLista .pcard[data-code="KT-02"]'), /En depósito: 16/); // 16 cargadas, 5 aprobadas sin salir
+  assert.match(await page.innerText('#icLista .pcard[data-code="BC-01"]'), /Sin cargar/);
+  assert.ok(await page.locator("#icGuardar").isDisabled());
+  await page.click('#icLista .pcard[data-code="BC-01"] .pcard-tap'); // abre el número
+  await page.fill('#icLista .pcard[data-code="BC-01"] .qty-input', "40");
+  await page.fill('#icLista .pcard[data-code="KT-02"] .qty-input', "15");
+  await page.locator('#icLista .pcard[data-code="KT-02"] .qty-input').blur();
+  assert.equal(await page.innerText('#icLista .pcard[data-code="BC-01"] .pcard-n'), "+40");
+  assert.equal(await page.innerText('#icLista .pcard[data-code="KT-02"] .pcard-n'), "−1");
+  assert.match(await page.innerText("#icBarra"), /2 productos · dif\. \+39/);
+  // el borrador no se pierde si se sale de la pantalla
+  await page.reload();
+  await page.waitForSelector('#icLista .pcard[data-code="KT-02"].elegido');
+  assert.equal(await page.inputValue('#icLista .pcard[data-code="KT-02"] .qty-input'), "15");
+  await page.click('#icFiltros [data-f="elegidos"]');
+  assert.equal(await page.locator("#icLista .pcard:not([hidden])").count(), 2);
+  await foto("07f-conteo");
+  await revisarDiseno("conteo de inventario");
+  await page.click("#icGuardar");
+  assert.match(await page.innerText("#hoja"), /Babosa[\s\S]*40[\s\S]*\+40[\s\S]*Kit Aguacate[\s\S]*15[\s\S]*−1/);
+  await page.fill('#hoja input[name="nota"]', "Primer conteo");
+  await page.click("#hojaOk");
+  await esperarRuta("#/inventario");
+  const movs = gas.tabla("Inventario").filter((m) => m.tipo === "conteo");
+  assert.deepEqual(movs.map((m) => [m.code, m.cajas]), [["BC-01", 40], ["KT-02", -1]]);
+  assert.match(movs[0].nota, /Primer conteo/);
+  await page.waitForFunction(() => /^10/.test(document.querySelector('.inv-fila[data-code="KT-02"] .inv-stock')?.textContent || ""));
+  // Entrada de mercancía: tocar el producto suma cajas
+  await page.click("#lnkEntrada");
+  await esperarRuta("#/inventario/cargar");
+  await page.waitForSelector('#icLista .pcard[data-code="BC-06"] img');
+  await page.click('#icLista .pcard[data-code="BC-06"] .pcard-tap');
+  await page.click('#icLista .pcard[data-code="BC-06"] .pcard-tap');
+  await page.click('#icLista .pcard[data-code="BC-06"] [data-act="plus"]');
+  assert.equal(await page.innerText('#icLista .pcard[data-code="BC-06"] .pcard-n'), "+3");
+  assert.match(await page.innerText("#icBarra"), /1 producto · \+3 cajas/);
+  await foto("07g-entrada");
+  await page.click("#icGuardar");
+  await page.click("#hojaOk");
+  await esperarRuta("#/inventario");
+  assert.deepEqual(gas.tabla("Inventario").filter((m) => m.tipo === "entrada" && m.code === "BC-06").map((m) => m.cajas), [3]);
+  ok("inventario: conteo total y carga de mercancía con fotos (borrador guardado)");
   await salir();
 
   /* ---------- Despachador ---------- */

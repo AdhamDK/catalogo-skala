@@ -98,9 +98,16 @@ pedido es inmediato y el historial llega después.
 - El vendedor puede dar **precio al mayor por excepción** (ej. 10 cajas a precio mayor).
 - Al **marcar cancelado** se elige cómo pagó de verdad (ej. era crédito y pagó en efectivo al
   contado): el total final se recalcula con ese descuento.
-- **Inventario**: Administración carga las **entradas** de mercancía (y ajustes con motivo).
-  Disponible = entradas − pedidos aprobados. Al **aprobar** se aparta la mercancía (si no
-  alcanza, no deja aprobar); si se anula, vuelve. Un producto sin ninguna entrada no se controla.
+- **Inventario**: Administración usa dos pantallas con fotos (como al tomar un pedido):
+  - **Cargar mercancía**: tocar cada producto suma las cajas que llegaron.
+  - **Conteo total**: escribir cuántas cajas hay en el depósito. Se guarda la diferencia con el
+    sistema (sirve para el primer ajuste y para los conteos de fin de mes).
+  Lo escrito queda guardado en el teléfono hasta que se envía. Por producto: *Ajustar stock*
+  (entrada, conteo o ajuste con motivo).
+  En depósito = entradas, conteos y ajustes − lo que ya salió (en ruta / entregado).
+  Disponible = en depósito − aprobados que todavía no salieron. Al **aprobar** se aparta la
+  mercancía (si no alcanza, no deja aprobar); si se anula, vuelve. Un producto sin ninguna
+  entrada ni conteo no se controla.
 
 ## Pedidos web (los arma el cliente)
 En el catálogo el cliente revisa su pedido, ve el monto según la forma de pago, **elige a su
