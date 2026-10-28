@@ -250,33 +250,58 @@
         <div id="pagosWeb" class="pagos-lista" hidden></div>
       </section>
 
+      <section class="vendedor-web cliente-web" id="fsCliente" aria-labelledby="cliTit">
+        <div class="pagos-cab">
+          <h4 id="cliTit">Seleccionar cliente <span class="req">*</span></h4>
+          <button type="button" class="btn-mas-lista" id="btnCliente" aria-expanded="false" aria-controls="cliPanel" aria-label="Buscar o registrar cliente">+</button>
+        </div>
+        <div id="cliElegido"></div>
+        <div id="cliPanel" class="cli-panel" hidden>
+          <form class="cli-buscar" id="fCliBuscar" novalidate>
+            <input type="search" id="cliBuscar" inputmode="tel" autocomplete="tel" enterkeyhint="search" placeholder="🔍 Tu teléfono o RIF" aria-label="Buscar cliente por teléfono o RIF" />
+            <button type="submit" class="btn btn-ghost" id="btnCliBuscar">Buscar</button>
+          </form>
+          <p class="cli-res" id="cliRes" aria-live="polite"></p>
+          <button type="button" class="btn-nuevo-cli" id="btnCliNuevo"><span aria-hidden="true">+</span> Nuevo · registrarme</button>
+        </div>
+        <div id="cliForm" class="cli-form" hidden>
+          <div class="form-grid">
+            <label class="field"><span>Nombre del negocio *</span>
+              <input id="fNegocio" type="text" placeholder="Razón social / nombre" autocomplete="organization" enterkeyhint="next" />
+            </label>
+            <label class="field"><span>Tu nombre</span>
+              <input id="fContacto" type="text" placeholder="Persona de contacto" autocomplete="name" enterkeyhint="next" />
+            </label>
+            <label class="field"><span>Teléfono *</span>
+              <input id="fTelefono" type="tel" inputmode="tel" placeholder="0412-1234567" autocomplete="tel" enterkeyhint="next" />
+            </label>
+            <label class="field"><span>RIF</span>
+              <input id="fRif" type="text" placeholder="J-12345678-9" autocomplete="off" autocapitalize="characters" enterkeyhint="next" />
+            </label>
+            <div class="field field-full dir-con-ubic">
+              <label for="fDireccion"><span>Dirección</span></label>
+              <div class="dir-fila">
+                <input id="fDireccion" type="text" placeholder="Dirección de entrega" autocomplete="street-address" enterkeyhint="done" />
+                <button type="button" class="btn-ubic" id="btnUbic" aria-label="Tomar mi ubicación actual" title="Tomar mi ubicación actual">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><path d="M12 7v6M9 10h6"/></svg>
+                </button>
+              </div>
+              <span class="ubic-estado" id="ubicEstado"></span>
+            </div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-listo-cli" id="btnCliListo">Listo</button>
+        </div>
+      </section>
+
       <section class="vendedor-web" id="fsVendedor" aria-labelledby="vendTit">
         <div class="pagos-cab">
-          <h4 id="vendTit">Elige un vendedor <span class="req">*</span></h4>
+          <h4 id="vendTit">Seleccionar vendedor <span class="req">*</span></h4>
           <button type="button" class="btn-mas-lista" id="btnVendedores" aria-expanded="false" aria-controls="listaVendedores" aria-label="Ver lista de vendedores">+</button>
         </div>
         <input type="hidden" id="fVendedor" value="" />
         <div id="vendElegido"></div>
         <ul class="lista-vend" id="listaVendedores" hidden></ul>
       </section>
-
-      <div class="form-grid">
-        <label class="field"><span>Nombre del negocio *</span>
-          <input id="fNegocio" type="text" placeholder="Razón social / nombre" autocomplete="organization" enterkeyhint="next" />
-        </label>
-        <label class="field"><span>Tu nombre</span>
-          <input id="fContacto" type="text" placeholder="Persona de contacto" autocomplete="name" enterkeyhint="next" />
-        </label>
-        <label class="field"><span>Teléfono *</span>
-          <input id="fTelefono" type="tel" inputmode="tel" placeholder="0412-1234567" autocomplete="tel" enterkeyhint="next" />
-        </label>
-        <label class="field"><span>RIF</span>
-          <input id="fRif" type="text" placeholder="J-12345678-9" autocomplete="off" autocapitalize="characters" enterkeyhint="next" />
-        </label>
-        <label class="field field-full"><span>Dirección</span>
-          <input id="fDireccion" type="text" placeholder="Dirección de entrega" autocomplete="street-address" enterkeyhint="done" />
-        </label>
-      </div>
 
       <details class="ver-mensaje"><summary>Ver el mensaje de WhatsApp</summary>
         <textarea id="orderText" readonly rows="9" aria-label="Mensaje a enviar"></textarea>

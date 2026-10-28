@@ -84,9 +84,10 @@ pedido es inmediato y el historial llega después.
 
 ## Precios e inventario
 - **Precios** (hoja `Precios` o panel → Más → *Inventario y precios*): el **precio final** en $ por
-  caja que paga el cliente en cada forma de pago: `menor` (normal, crédito), `mayor` (15 cajas o
-  más), `pronto`, `efectivo_credito` y `efectivo_pronto`. Ejemplo: 29,5 · 28,3 · 24 · 23,3.
-  Al precio al mayor se le aplica la misma rebaja (normal − precio de esa forma de pago).
+  caja que paga el cliente en cada forma de pago, **al por menor** (`menor`, `pronto`,
+  `efectivo_credito`, `efectivo_pronto`) y **al mayor**, 15 cajas o más (`mayor`, `mayor_pronto`,
+  `mayor_efectivo_credito`, `mayor_efectivo_pronto`). Ejemplo al por menor: 29,5 · 28,3 · 24 · 23,3.
+  Si un precio al mayor queda vacío, se le aplica la misma rebaja que al por menor.
   Se pueden **elegir varios productos** con la casilla y ponerles los mismos precios.
 - **Producto nuevo** (Inventario y precios → Nuevo producto): nombre, tipo (baño o kit), línea,
   cabello, unidades por caja, foto (enlace https, opcional) y precios. Sale en el catálogo y en el
@@ -103,6 +104,11 @@ En el catálogo el cliente revisa su pedido, ve el monto según la forma de pago
 vendedor** y lo envía por WhatsApp. El pedido llega también a la app de ese vendedor
 (Pedidos → **Web**, y un aviso en Inicio): lo toma, lo revisa o edita y lo envía a
 Administración. Administración los ve, pero no los toma. Se pueden descartar con motivo.
+
+En **Tu pedido** el cliente elige forma de pago, luego **Seleccionar cliente** (se busca por su
+teléfono o RIF exacto, o toca *Nuevo · registrarme*; al lado de Dirección puede tomar su
+ubicación actual) y luego **Seleccionar vendedor**. Si ya estaba registrado, el pedido llega
+enlazado a su ficha (no se duplica) y con su ubicación.
 
 ## Borrar pedidos
 El vendedor puede borrar sus pedidos (ej. uno de prueba) y el Master cualquiera, siempre con

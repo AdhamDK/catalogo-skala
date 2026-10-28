@@ -92,16 +92,19 @@ var HOJAS = {
   PedidoItems: ['pedido_id', 'code', 'producto', 'cajas', 'unidades_caja', 'unidad', 'total_unidades',
                 'precio', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto'],
   Historial: ['fecha', 'pedido_id', 'usuario', 'accion', 'detalle'],
-  // Precios FINALES en $ por caja: menor (normal), mayor (15+ cajas), pronto, efectivo_credito, efectivo_pronto.
-  // Al mayor se le aplica la misma rebaja (menor − precio de esa forma de pago).
+  // Precios FINALES en $ por caja de cada forma de pago, al por menor y al mayor (15+ cajas):
+  //   menor · pronto · efectivo_credito · efectivo_pronto   |   mayor · mayor_pronto · mayor_efectivo_credito · mayor_efectivo_pronto
+  // Si falta un precio al mayor, se le aplica la misma rebaja que al por menor.
   // Productos nuevos: datos para el catálogo (tipo banos/kits, línea, beneficio, cabello, unidades, imagen).
   Precios: ['code', 'producto', 'menor', 'mayor', 'pronto', 'efectivo_credito', 'efectivo_pronto', 'updated_at', 'updated_por',
-            'tipo', 'linea', 'beneficio', 'cabello', 'unidades_caja', 'imagen'],
+            'tipo', 'linea', 'beneficio', 'cabello', 'unidades_caja', 'imagen',
+            'mayor_pronto', 'mayor_efectivo_credito', 'mayor_efectivo_pronto'],
   // Entradas de mercancía y ajustes (positivo o negativo). Lo aprobado se descuenta solo.
   Inventario: ['fecha', 'code', 'producto', 'cajas', 'tipo', 'nota', 'usuario'],
   // Pedidos que arma el cliente en el catálogo: esperan a que su vendedor los tome
   PedidosWeb: ['id', 'fecha', 'created_at', 'vendedor_id', 'vendedor', 'negocio', 'contacto', 'rif_cedula', 'telefono', 'direccion',
-               'items', 'tipo_pago', 'total_cajas', 'total', 'nota', 'estado', 'pedido_id', 'atendido_por', 'atendido_at', 'motivo'],
+               'items', 'tipo_pago', 'total_cajas', 'total', 'nota', 'estado', 'pedido_id', 'atendido_por', 'atendido_at', 'motivo',
+               'cliente_id', 'latitud', 'longitud'],
   // Ajustes de la app Android (versión y enlaces de actualización)
   Config: ['clave', 'valor', 'nota']
 };
@@ -139,6 +142,7 @@ var ACCIONES = {
   catalogo: [accionCatalogo_, null],          // precios (público); con sesión también existencias
   vendedores: [accionVendedores_, null],      // para que el cliente elija su vendedor
   pedidoWeb: [accionPedidoWeb_, null],        // el cliente envía su pedido desde el catálogo
+  buscarClienteWeb: [accionBuscarClienteWeb_, null], // el cliente se busca por su teléfono o RIF
   pedidosWeb: [accionPedidosWeb_, TOMAN_PEDIDOS],
   descartarWeb: [accionDescartarWeb_, TOMAN_PEDIDOS],
   borrarPedido: [accionBorrarPedido_, TOMAN_PEDIDOS],
@@ -504,12 +508,18 @@ function tablaPrecios_() {
   leer_('Precios').forEach(function (x) {
     var code = String(x.code).trim().toUpperCase();
     if (!code) return;
-    var menor = numPrecio_(x.menor);
-    // rebaja de cada forma de pago = normal − precio final (0 si no se cargó o es mayor)
-    var rebaja = function (v) { var n = numPrecio_(v); return n && menor && n < menor ? r2_(menor - n) : 0; };
-    m[code] = { code: code, producto: String(x.producto), menor: menor, mayor: numPrecio_(x.mayor),
+    var menor = numPrecio_(x.menor), mayor = numPrecio_(x.mayor);
+    var baseMay = mayor || menor;
+    // rebaja de cada forma de pago = normal − precio final (0 si no se cargó)
+    var rebaja = function (v, base) { var n = numPrecio_(v); return n && base && n < base ? r2_(base - n) : 0; };
+    var dp = rebaja(x.pronto, menor), dc = rebaja(x.efectivo_credito, menor), de = rebaja(x.efectivo_pronto, menor);
+    // al mayor: su precio propio si se cargó; si no, la misma rebaja que al por menor
+    var dm = function (v, d) { return numPrecio_(v) ? rebaja(v, baseMay) : d; };
+    m[code] = { code: code, producto: String(x.producto), menor: menor, mayor: mayor,
       pronto: numPrecio_(x.pronto), efectivo_credito: numPrecio_(x.efectivo_credito), efectivo_pronto: numPrecio_(x.efectivo_pronto),
-      desc_pronto: rebaja(x.pronto), desc_efectivo_credito: rebaja(x.efectivo_credito), desc_efectivo_pronto: rebaja(x.efectivo_pronto),
+      mayor_pronto: numPrecio_(x.mayor_pronto), mayor_efectivo_credito: numPrecio_(x.mayor_efectivo_credito), mayor_efectivo_pronto: numPrecio_(x.mayor_efectivo_pronto),
+      desc_pronto: dp, desc_efectivo_credito: dc, desc_efectivo_pronto: de,
+      mayor_desc_pronto: dm(x.mayor_pronto, dp), mayor_desc_efectivo_credito: dm(x.mayor_efectivo_credito, dc), mayor_desc_efectivo_pronto: dm(x.mayor_efectivo_pronto, de),
       tipo: String(x.tipo || ''), linea: String(x.linea || ''), beneficio: String(x.beneficio || ''), cabello: String(x.cabello || ''),
       unidades_caja: Number(x.unidades_caja) || 0, imagen: String(x.imagen || ''), _fila: x._fila, _crudo: x };
   });
@@ -521,9 +531,10 @@ function ponerPrecios_(items, precios, mayor) {
   items.forEach(function (it) {
     var pr = precios[it.code] || {};
     it.precio = mayor ? (pr.mayor || pr.menor || 0) : (pr.menor || 0);
-    it.desc_pronto = pr.desc_pronto || 0;
-    it.desc_efectivo_credito = pr.desc_efectivo_credito || 0;
-    it.desc_efectivo_pronto = pr.desc_efectivo_pronto || 0;
+    var pre = mayor ? 'mayor_desc_' : 'desc_';
+    it.desc_pronto = pr[pre + 'pronto'] || 0;
+    it.desc_efectivo_credito = pr[pre + 'efectivo_credito'] || 0;
+    it.desc_efectivo_pronto = pr[pre + 'efectivo_pronto'] || 0;
   });
   return items;
 }
@@ -581,6 +592,7 @@ function accionCatalogo_(p) {
     var pr = precios[code] || {}, s = stock[code];
     var o = { code: code, menor: pr.menor || 0, mayor: pr.mayor || pr.menor || 0, desc_pronto: pr.desc_pronto || 0,
       desc_efectivo_credito: pr.desc_efectivo_credito || 0, desc_efectivo_pronto: pr.desc_efectivo_pronto || 0,
+      mayor_desc_pronto: pr.mayor_desc_pronto || 0, mayor_desc_efectivo_credito: pr.mayor_desc_efectivo_credito || 0, mayor_desc_efectivo_pronto: pr.mayor_desc_efectivo_pronto || 0,
       agotado: !!(s && s.controlado && s.disponible <= 0) };
     if (!esBase_(code) && pr.tipo) o.info = infoProducto_(pr);
     if (ses) { o.controlado = !!(s && s.controlado); o.disponible = s && s.controlado ? Math.max(0, s.disponible) : null; o.en_proceso = s ? s.en_proceso : 0; }
@@ -610,6 +622,7 @@ function accionInventario_(p) {
     var pr = precios[code] || {};
     return { code: code, producto: (precios[code] && precios[code].producto) || codes[code], cargado: s.cargado, aprobado: s.aprobado, en_proceso: s.en_proceso, disponible: s.disponible, controlado: s.controlado,
       menor: pr.menor || 0, mayor: pr.mayor || 0, pronto: pr.pronto || 0, efectivo_credito: pr.efectivo_credito || 0, efectivo_pronto: pr.efectivo_pronto || 0,
+      mayor_pronto: pr.mayor_pronto || 0, mayor_efectivo_credito: pr.mayor_efectivo_credito || 0, mayor_efectivo_pronto: pr.mayor_efectivo_pronto || 0,
       nuevo: !esBase_(code), info: !esBase_(code) && pr.tipo ? infoProducto_(pr) : null };
   }), movimientos: movs.slice(0, Math.min(Math.max(Number(p.limite) || 50, 1), 500)) };
 }
@@ -638,7 +651,7 @@ function accionMovimiento_(p, ses) {
   }
 }
 
-var CAMPOS_PRECIO = ['menor', 'mayor', 'pronto', 'efectivo_credito', 'efectivo_pronto'];
+var CAMPOS_PRECIO = ['menor', 'pronto', 'efectivo_credito', 'efectivo_pronto', 'mayor', 'mayor_pronto', 'mayor_efectivo_credito', 'mayor_efectivo_pronto'];
 /* Valida los 5 precios finales. Devuelve { vals } o { error } */
 function preciosValidos_(p) {
   var vals = {};
@@ -652,6 +665,8 @@ function preciosValidos_(p) {
   if (vals.mayor > vals.menor) return { error: 'El precio al mayor no puede ser más alto que el normal.' };
   var nombres = { pronto: 'pronto pago', efectivo_credito: 'efectivo a crédito', efectivo_pronto: 'efectivo pronto pago' };
   for (var k in nombres) if (vals[k] > vals.menor) return { error: 'El precio de ' + nombres[k] + ' no puede ser más alto que el normal.' };
+  var baseMay = vals.mayor || vals.menor;
+  for (var k2 in nombres) if (vals['mayor_' + k2] > baseMay) return { error: 'Al mayor, el precio de ' + nombres[k2] + ' no puede ser más alto que el normal al mayor.' };
   return { vals: vals };
 }
 
@@ -1052,6 +1067,30 @@ function accionVendedores_() {
   return { ok: true, vendedores: lista };
 }
 
+/* El cliente del catálogo se busca por su teléfono o RIF (exacto, no por nombre) para no
+   tener que escribir sus datos de nuevo. Solo devuelve lo necesario para el pedido. */
+var BUSQ_MAX_MIN = 30;
+function accionBuscarClienteWeb_(p) {
+  var q = soloDigitos_(p.q);
+  if (q.length < 6) return { ok: false, error: 'Escribí tu teléfono o RIF completo.', code: 'corto' };
+  var cache = CacheService.getScriptCache();
+  var n = Number(cache.get('busq_web') || 0);
+  if (n >= BUSQ_MAX_MIN) return { ok: false, error: 'Muchas búsquedas. Probá en un minuto.', code: 'limite' };
+  cache.put('busq_web', String(n + 1), 60);
+  var finTel = function (t) { return t.length >= 7 && (t === q || (q.length >= 10 && t.slice(-10) === q.slice(-10))); };
+  var porTel = false;
+  var c = leer_('Clientes').filter(function (x) {
+    if (String(x.deleted) === '1' || x.deleted === true) return false;
+    if (finTel(soloDigitos_(x.telefono)) || finTel(soloDigitos_(x.telefono2))) { porTel = true; return true; }
+    var rif = soloDigitos_(x.rif_cedula);
+    return rif.length >= 6 && rif === q;
+  })[0];
+  if (!c) return { ok: true, cliente: null };
+  // el teléfono solo se devuelve si lo escribió él (búsqueda por teléfono)
+  return { ok: true, cliente: { id: String(c.id), negocio: String(c.nombre), contacto: String(c.contacto), direccion: String(c.direccion),
+    rif_cedula: String(c.rif_cedula), telefono: porTel ? String(c.telefono) : '', ubicacion: c.latitud !== '' && c.longitud !== '' } };
+}
+
 function accionPedidoWeb_(p) {
   var c = p.cliente || {};
   var datos = { negocio: txt_(c.negocio, 120), contacto: txt_(c.contacto, 120), rif_cedula: txt_(c.rif_cedula || c.rif, 30).toUpperCase(),
@@ -1083,7 +1122,8 @@ function accionPedidoWeb_(p) {
       vendedor_id: String(v.id), vendedor: String(v.nombre), negocio: datos.negocio || datos.contacto, contacto: datos.contacto,
       rif_cedula: datos.rif_cedula, telefono: datos.telefono, direccion: datos.direccion,
       items: JSON.stringify(items.map(function (it) { return { code: it.code, producto: it.producto, cajas: it.cajas, unidades_caja: it.unidades_caja, unidad: it.unidad }; })),
-      tipo_pago: tipo, total_cajas: totalCajas, total: totalPorPago_(items, tipo), nota: txt_(p.nota, 300), estado: 'nuevo' });
+      tipo_pago: tipo, total_cajas: totalCajas, total: totalPorPago_(items, tipo), nota: txt_(p.nota, 300), estado: 'nuevo',
+      cliente_id: txt_(c.cliente_id || c.id, 60), latitud: numeroGps_(c.latitud, -90, 90), longitud: numeroGps_(c.longitud, -180, 180) });
     return { ok: true, id: ref };
   } finally {
     lock.releaseLock();
@@ -1097,7 +1137,8 @@ function webPublico_(w, precios) {
   var cajas = items.reduce(function (a, it) { return a + it.cajas; }, 0);
   ponerPrecios_(items, precios, cajas >= CAJAS_MAYOR);
   return { id: String(w.id), fecha: String(w.fecha), created_at: String(w.created_at), vendedor_id: String(w.vendedor_id), vendedor: String(w.vendedor),
-    cliente: { negocio: String(w.negocio), contacto: String(w.contacto), rif_cedula: String(w.rif_cedula), telefono: String(w.telefono), direccion: String(w.direccion) },
+    cliente: { id: String(w.cliente_id || ''), negocio: String(w.negocio), contacto: String(w.contacto), rif_cedula: String(w.rif_cedula), telefono: String(w.telefono), direccion: String(w.direccion),
+      latitud: w.latitud === '' || w.latitud === undefined ? '' : Number(w.latitud), longitud: w.longitud === '' || w.longitud === undefined ? '' : Number(w.longitud) },
     items: items, tipo_pago: String(w.tipo_pago) || 'credito', total_cajas: cajas, nota: String(w.nota), estado: String(w.estado),
     pedido_id: String(w.pedido_id), atendido_por: String(w.atendido_por), motivo: String(w.motivo) };
 }

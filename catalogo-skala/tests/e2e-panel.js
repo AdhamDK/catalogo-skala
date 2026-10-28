@@ -479,7 +479,7 @@ function servidor() {
   assert.match(await page.innerText("#hojaError"), /mayor no puede/);
   await page.fill('#hoja input[name="mayor"]', "8");
   await page.click("#hojaOk");
-  await page.waitForFunction(() => /Normal 9,50 \$ · Mayor 8,00 \$/.test(document.querySelector('.inv-fila[data-code="BC-09"]')?.textContent || ""));
+  await page.waitForFunction(() => /Menor: Normal 9,50 \$[\s\S]*Mayor: Normal 8,00 \$/.test(document.querySelector('.inv-fila[data-code="BC-09"]')?.textContent || ""));
   assert.equal(gas.tabla("Precios").find((x) => x.code === "BC-09").menor, 9.5);
   // varios productos con el mismo precio (precios finales de cada forma de pago)
   await page.check('.inv-fila[data-code="BC-10"] .inv-check input');
@@ -493,8 +493,18 @@ function servidor() {
   await page.click("#hojaOk");
   assert.match(await page.innerText("#hojaError"), /más alto que el normal/);
   await page.fill('#hoja input[name="efectivo_pronto"]', "23,3");
+  // al mayor, sus 4 precios
+  await page.fill('#hoja input[name="mayor"]', "27");
+  await page.fill('#hoja input[name="mayor_pronto"]', "28");
   await page.click("#hojaOk");
-  await page.waitForFunction(() => /Ef\. pronto 23,30 \$/.test(document.querySelector('.inv-fila[data-code="BC-11"]')?.textContent || ""));
+  assert.match(await page.innerText("#hojaError"), /Al mayor, ningún precio/);
+  await page.fill('#hoja input[name="mayor_pronto"]', "26");
+  await page.fill('#hoja input[name="mayor_efectivo_credito"]', "22");
+  await page.fill('#hoja input[name="mayor_efectivo_pronto"]', "21");
+  await foto("07a1-precios");
+  await page.click("#hojaOk");
+  await page.waitForFunction(() => /Mayor: Normal 27,00 \$ · Pronto 26,00 \$ · Ef\. a crédito 22,00 \$ · Ef\. pronto 21,00 \$/.test(document.querySelector('.inv-fila[data-code="BC-11"]')?.textContent || ""));
+  assert.deepEqual(["BC-10", "BC-11"].map((c) => gas.tabla("Precios").find((x) => x.code === c).mayor_efectivo_pronto), [21, 21]);
   assert.deepEqual(["BC-10", "BC-11"].map((c) => gas.tabla("Precios").find((x) => x.code === c).efectivo_pronto), [23.3, 23.3]);
   // producto nuevo: empieza sin stock
   await page.click("#btnNuevoProd");

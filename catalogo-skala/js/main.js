@@ -177,7 +177,79 @@ function collectCliente() {
     telefono: ($id("fTelefono").value || "").trim(),
     vendedor_id: $id("fVendedor").value || "",
     tipo_pago: (document.querySelector('input[name="pagoWeb"]:checked') || {}).value || "credito",
+    cliente_id: cliente.cliente_id || "",
+    latitud: cliente.latitud ?? "",
+    longitud: cliente.longitud ?? "",
   };
+}
+
+/* -------------------- Seleccionar cliente: buscar (teléfono o RIF) o registrarse -------------------- */
+const clienteListo = () => !!((cliente.negocio || cliente.contacto) && String(cliente.telefono || "").replace(/\D/g, "").length >= 7);
+function pintarCliente() {
+  const listo = clienteListo();
+  const enForm = !$id("cliForm").hidden;
+  const tieneUbic = cliente.latitud !== "" && cliente.latitud != null && cliente.longitud !== "" && cliente.longitud != null;
+  $id("cliElegido").innerHTML = listo && !enForm
+    ? `<div class="cli-elegido">
+        <span class="avatar">${escHTML(inicial(cliente.negocio || cliente.contacto))}</span>
+        <span class="cli-datos"><strong>${escHTML(cliente.negocio || cliente.contacto)}</strong>
+          <span>${escHTML([cliente.telefono, cliente.direccion].filter(Boolean).join(" · "))}${tieneUbic ? " · 📍 ubicación" : ""}</span></span>
+        <button type="button" class="link-cli" data-cli="editar">Editar</button>
+        <button type="button" class="link-cli" data-cli="cambiar">Cambiar</button>
+      </div>`
+    : "";
+  $id("ubicEstado").textContent = tieneUbic ? "📍 Ubicación lista" : "";
+  $id("btnUbic").classList.toggle("lista", tieneUbic);
+  const b = $id("btnCliente");
+  const abierto = !$id("cliPanel").hidden;
+  b.textContent = abierto ? "−" : "+";
+  b.setAttribute("aria-expanded", String(abierto));
+}
+function abrirCliente(modo) {
+  // modo: "buscar" (barra de búsqueda + Nuevo) · "form" (registrarse / editar) · "cerrar"
+  $id("cliPanel").hidden = modo !== "buscar";
+  $id("cliForm").hidden = modo !== "form";
+  if (modo === "buscar") { $id("cliRes").textContent = ""; }
+  pintarCliente();
+}
+async function buscarCliente(q) {
+  const res = $id("cliRes");
+  const dig = String(q || "").replace(/\D/g, "");
+  if (dig.length < 6) { res.textContent = "Escribí tu teléfono o RIF completo."; return; }
+  res.innerHTML = '<span class="spinner-chico" aria-hidden="true"></span> Buscando…';
+  try {
+    const r = await SkalaAPI.api("buscarClienteWeb", { q });
+    if (!r.cliente) {
+      res.innerHTML = "No te encontramos. Tocá <strong>Nuevo · registrarme</strong> para cargar tus datos.";
+      $id("btnCliNuevo").classList.remove("pulso"); void $id("btnCliNuevo").offsetWidth; $id("btnCliNuevo").classList.add("pulso");
+      return;
+    }
+    const c = r.cliente;
+    Object.assign(cliente, { cliente_id: c.id, negocio: c.negocio, contacto: c.contacto, direccion: c.direccion, rif_cedula: c.rif_cedula,
+      telefono: c.telefono || (dig.length >= 7 && !/[a-z]/i.test(q) ? q.trim() : cliente.telefono || ""), latitud: "", longitud: "" });
+    saveCliente();
+    fillCliente();
+    // por RIF no se muestra el teléfono: se pide
+    if (!clienteListo()) { abrirCliente("form"); $id("fTelefono").focus(); res.textContent = ""; }
+    else abrirCliente("cerrar");
+    refreshMessage();
+  } catch (e) {
+    res.textContent = e.message || "No se pudo buscar. Probá de nuevo.";
+  }
+}
+function tomarUbicacion() {
+  const b = $id("btnUbic"), est = $id("ubicEstado");
+  if (!navigator.geolocation) { est.textContent = "Este teléfono no permite tomar la ubicación."; return; }
+  b.disabled = true; b.classList.add("buscando"); est.textContent = "Buscando tu ubicación…";
+  navigator.geolocation.getCurrentPosition((pos) => {
+    b.disabled = false; b.classList.remove("buscando");
+    cliente.latitud = Math.round(pos.coords.latitude * 1e6) / 1e6;
+    cliente.longitud = Math.round(pos.coords.longitude * 1e6) / 1e6;
+    saveCliente(); pintarCliente(); refreshMessage();
+  }, (err) => {
+    b.disabled = false; b.classList.remove("buscando");
+    est.textContent = err.code === 1 ? "Permiso de ubicación negado." : "No se pudo tomar la ubicación.";
+  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
 }
 function fillCliente() {
   $id("fRif").value = cliente.rif_cedula || cliente.rif || "";
@@ -297,8 +369,8 @@ function datosPedidoWeb() {
 /* Recalcula el mensaje y muestra qué datos faltan. */
 function faltantes(c) {
   const f = [];
-  if (!c.negocio && !c.contacto) f.push("Nombre del negocio");
-  if (c.telefono.replace(/\D/g, "").length < 7) f.push("Teléfono");
+  if (!c.negocio && !c.contacto) f.push("Cliente");
+  else if (c.telefono.replace(/\D/g, "").length < 7) f.push("Teléfono del cliente");
   if (!c.vendedor_id) f.push("Vendedor");
   if (!c.tipo_pago) f.push("Forma de pago");
   return f;
@@ -317,6 +389,7 @@ function refreshMessage() {
 function openModal() {
   if (totalCajas() <= 0) return;
   fillCliente();
+  abrirCliente(clienteListo() ? "cerrar" : "buscar");
   pagosAbiertos = false;
   pintarVendedores();
   abrirVendedores(!$id("fVendedor").value);
@@ -513,6 +586,23 @@ document.addEventListener("DOMContentLoaded", () => {
   $id("btnPagos").addEventListener("click", () => abrirPagos());
   $id("pagoElegido").addEventListener("click", (e) => { if (e.target.closest("[data-abrir-pagos]")) abrirPagos(true); });
   $id("btnVendedores").addEventListener("click", () => abrirVendedores());
+  $id("btnCliente").addEventListener("click", () => abrirCliente($id("cliPanel").hidden ? "buscar" : "cerrar"));
+  $id("fCliBuscar").addEventListener("submit", (e) => { e.preventDefault(); buscarCliente($id("cliBuscar").value); });
+  $id("btnCliNuevo").addEventListener("click", () => {
+    // nuevo cliente: datos en blanco (se conserva lo escrito si ya era nuevo)
+    if (cliente.cliente_id) { cliente = { telefono: cliente.telefono }; saveCliente(); fillCliente(); }
+    abrirCliente("form");
+    $id("fNegocio").focus();
+  });
+  $id("btnCliListo").addEventListener("click", () => {
+    if (!clienteListo()) { $id("formWarn").innerHTML = "Para continuar falta: <strong>nombre del negocio y teléfono</strong>"; $id("formWarn").hidden = false; return; }
+    abrirCliente("cerrar");
+  });
+  $id("cliElegido").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-cli]");
+    if (b) abrirCliente(b.dataset.cli === "editar" ? "form" : "buscar");
+  });
+  $id("btnUbic").addEventListener("click", tomarUbicacion);
   $id("fsVendedor").addEventListener("click", (e) => {
     if (e.target.closest("[data-abrir-vend]")) return abrirVendedores(true);
     const b = e.target.closest("[data-vend]");
@@ -532,6 +622,8 @@ document.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       warn.innerHTML = "Para enviar falta: <strong>" + falta.join(" · ") + "</strong>";
       if (falta.includes("Forma de pago")) abrirPagos(true);
+      if (falta.includes("Cliente") && $id("cliForm").hidden) abrirCliente("buscar");
+      if (falta.includes("Teléfono del cliente")) { abrirCliente("form"); $id("fTelefono").focus(); }
       if (falta.includes("Vendedor")) abrirVendedores(true);
       warn.hidden = false;
       warn.scrollIntoView({ block: "center" });

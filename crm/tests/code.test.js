@@ -41,7 +41,7 @@ test("crea 9 hojas; Clientes empieza con las columnas de GPS_CLIENTES; Precios y
   assert.deepEqual(g.tabla("Config").map((x) => x.clave), ["version_apk", "url_apk", "minima_apk", "version_pantallas", "url_pantallas", "notas"]);
   assert.equal(g.tabla("Precios").length, 19);
   assert.deepEqual(g.tabla("Precios")[0], { code: "BC-01", producto: "Babosa", menor: "", mayor: "", pronto: "", efectivo_credito: "", efectivo_pronto: "", updated_at: "", updated_por: "",
-    tipo: "", linea: "", beneficio: "", cabello: "", unidades_caja: "", imagen: "" });
+    tipo: "", linea: "", beneficio: "", cabello: "", unidades_caja: "", imagen: "", mayor_pronto: "", mayor_efectivo_credito: "", mayor_efectivo_pronto: "" });
   g.ctx.prepararHojas(); // no duplica
   assert.equal(g.tabla("Precios").length, 19);
   assert.deepEqual(g.tabla("Clientes").length, 0);
@@ -576,7 +576,8 @@ test("precios: solo gestión los edita; validaciones; catálogo público con pre
   const pub = g.post({ action: "catalogo" });
   assert.equal(pub.ok, true);
   const b = pub.productos.find((x) => x.code === "BC-01");
-  assert.deepEqual(b, { code: "BC-01", menor: 10, mayor: 8, desc_pronto: 1, desc_efectivo_credito: 3, desc_efectivo_pronto: 4, agotado: false });
+  assert.deepEqual(b, { code: "BC-01", menor: 10, mayor: 8, desc_pronto: 1, desc_efectivo_credito: 3, desc_efectivo_pronto: 4,
+    mayor_desc_pronto: 1, mayor_desc_efectivo_credito: 3, mayor_desc_efectivo_pronto: 4, agotado: false }); // sin precios al mayor: misma rebaja
   assert.equal(pub.cajas_mayor, 15);
   assert.deepEqual(pub.pagos.map((x) => x.id), ["credito", "pronto", "efectivo_credito", "efectivo_pronto"]);
   // con sesión trae existencias
@@ -898,4 +899,44 @@ test("producto nuevo: código automático, sale en el catálogo, empieza sin sto
   assert.equal(r.ok, true);
   const inv = g.post({ action: "inventario", token: ta }).productos.find((x) => x.code === "BC-12");
   assert.equal(inv.producto, "Coco Power 2"); assert.equal(inv.nuevo, true); assert.equal(inv.disponible, 10); assert.equal(inv.en_proceso, 1); assert.equal(inv.menor, 30);
+});
+
+test("8 precios: cada forma de pago al por menor y al mayor", () => {
+  const g = preparar();
+  const ta = login(g, "ana", "Ana*2222");
+  let r = g.post({ action: "guardarPrecio", token: ta, code: "BC-02", menor: 29.5, pronto: 28.3, efectivo_credito: 24, efectivo_pronto: 23.3,
+    mayor: 27, mayor_pronto: 26, mayor_efectivo_credito: 22, mayor_efectivo_pronto: 21 });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.match(g.post({ action: "guardarPrecio", token: ta, code: "BC-02", menor: 29.5, mayor: 27, mayor_pronto: 28 }).error, /Al mayor, el precio de pronto pago/);
+  const cat = g.post({ action: "catalogo" }).productos.find((x) => x.code === "BC-02");
+  assert.deepEqual([cat.mayor_desc_pronto, cat.mayor_desc_efectivo_credito, cat.mayor_desc_efectivo_pronto], [1, 5, 6]);
+  const tv = login(g);
+  const t = (tipo, cajas) => pedir(g, tv, { tipo_pago: tipo, dias_credito: 8, items: [{ code: "BC-02", producto: "Banana", cajas }] }).pedido.total;
+  assert.equal(t("efectivo_pronto", 2), 46.6);       // 2 × 23,3
+  assert.equal(t("efectivo_pronto", 15), 15 * 21);   // al mayor: 21
+  assert.equal(t("pronto", 15), 15 * 26);
+  assert.equal(t("credito", 15), 15 * 27);
+  const inv = g.post({ action: "inventario", token: ta }).productos.find((x) => x.code === "BC-02");
+  assert.deepEqual([inv.mayor, inv.mayor_pronto, inv.mayor_efectivo_credito, inv.mayor_efectivo_pronto], [27, 26, 22, 21]);
+});
+
+test("el cliente del catálogo se busca por teléfono o RIF exacto; el pedido web lleva su id y ubicación", () => {
+  const g = preparar();
+  const tv = login(g);
+  pedir(g, tv, { tipo_pago: "pronto" }); // crea a Peluquería Bella (0412-1234567, J-12345678-9)
+  assert.equal(g.post({ action: "buscarClienteWeb", q: "0412" }).code, "corto");
+  assert.equal(g.post({ action: "buscarClienteWeb", q: "bella" }).code, "corto"); // no por nombre
+  let r = g.post({ action: "buscarClienteWeb", q: "0412 123 4567" });
+  assert.equal(r.cliente.negocio, "Peluquería Bella"); assert.equal(r.cliente.ubicacion, true);
+  assert.equal(g.post({ action: "buscarClienteWeb", q: "+58 412-1234567" }).cliente.negocio, "Peluquería Bella");
+  const porRif = g.post({ action: "buscarClienteWeb", q: "J-12345678-9" }).cliente;
+  assert.equal(porRif.negocio, "Peluquería Bella"); assert.equal(porRif.telefono, ""); // por RIF no se muestra el teléfono
+  assert.equal(g.post({ action: "buscarClienteWeb", q: "04149999999" }).cliente, null);
+  const id = r.cliente.id;
+  const w = g.post({ action: "pedidoWeb", ...WEB, vendedor_id: idDe(g, "oscar"), cliente: { ...WEB.cliente, cliente_id: id, latitud: 8.61, longitud: -71.65 } });
+  assert.equal(w.ok, true);
+  const lista = g.post({ action: "pedidosWeb", token: tv }).pedidos;
+  assert.deepEqual([lista[0].cliente.id, lista[0].cliente.latitud, lista[0].cliente.longitud], [id, 8.61, -71.65]);
+  for (let i = 0; i < 30; i++) g.post({ action: "buscarClienteWeb", q: "04149999999" });
+  assert.equal(g.post({ action: "buscarClienteWeb", q: "04149999999" }).code, "limite");
 });

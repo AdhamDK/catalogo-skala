@@ -144,6 +144,7 @@ function mensajeWeb({ ref, cliente = {}, vendedor, items = [], tipo_pago, nota }
     cliente.rif_cedula ? `RIF: ${cliente.rif_cedula}` : null,
     `Teléfono: ${cliente.telefono || "—"}`,
     cliente.direccion ? `Dirección: ${cliente.direccion}` : null,
+    linkMapa(cliente.latitud, cliente.longitud) ? `Ubicación: ${linkMapa(cliente.latitud, cliente.longitud)}` : null,
     vendedor ? `Mi vendedor: ${vendedor}` : null,
     "",
     "*Pedido*",
@@ -264,8 +265,11 @@ function nivelPrecio(totalCajas, excepcion) { return totalCajas >= CAJAS_MAYOR |
 function conPrecios(items, precios, nivel) {
   return (items || []).map((it) => {
     const pr = (precios || {})[it.code] || {};
-    const precio = nivel === "mayor" ? (Number(pr.mayor) || Number(pr.menor) || 0) : (Number(pr.menor) || 0);
-    return { ...it, precio, desc_pronto: Number(pr.desc_pronto) || 0, desc_efectivo_credito: Number(pr.desc_efectivo_credito) || 0, desc_efectivo_pronto: Number(pr.desc_efectivo_pronto) || 0 };
+    const may = nivel === "mayor";
+    const precio = may ? (Number(pr.mayor) || Number(pr.menor) || 0) : (Number(pr.menor) || 0);
+    // al mayor, la rebaja de su propio precio (si no vino, la misma que al por menor)
+    const d = (k) => Number(may && pr["mayor_" + k] !== undefined ? pr["mayor_" + k] : pr[k]) || 0;
+    return { ...it, precio, desc_pronto: d("desc_pronto"), desc_efectivo_credito: d("desc_efectivo_credito"), desc_efectivo_pronto: d("desc_efectivo_pronto") };
   });
 }
 function precioUnitario(it, tipo) {

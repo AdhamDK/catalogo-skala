@@ -924,7 +924,8 @@
     memoria.t = 0;
     if (!p || !memoria.pedidos) return;
     const i = memoria.pedidos.findIndex((x) => x.id === p.id);
-    if (i >= 0) memoria.pedidos[i] = { ...memoria.pedidos[i], ...p };
+    const { historial, ...sinHist } = p;
+    if (i >= 0) memoria.pedidos[i] = { ...memoria.pedidos[i], ...sinHist };
   }
 
   let busquedaPed = "", vendedorPed = "";
@@ -1148,10 +1149,11 @@
         <div class="fila-top"><h2 class="ped-titulo">${esc(c.negocio)}</h2><span class="chip-estado est-web">Pedido web</span></div>
         ${c.contacto && c.contacto !== c.negocio ? `<p class="ped-det">${esc(c.contacto)}</p>` : ""}
         ${c.direccion ? `<p class="ped-det">${esc(c.direccion)}</p>` : ""}
-        <p class="ped-det">${esc(fechaLegible(w.fecha))} · eligió a <strong>${esc(w.vendedor)}</strong></p>
+        <p class="ped-det">${esc(fechaLegible(w.fecha))} · eligió a <strong>${esc(w.vendedor)}</strong>${c.id ? " · cliente ya registrado" : " · cliente nuevo"}</p>
         <div class="botones-contacto">
           ${tel ? `<a class="btn btn-ghost" href="tel:${esc(tel)}">Llamar</a>` : ""}
           ${wa ? `<a class="btn btn-ghost" href="https://wa.me/${wa}" target="_blank" rel="noopener">WhatsApp</a>` : ""}
+          ${linkMapa(c.latitud, c.longitud) ? `<a class="btn btn-ghost" href="${esc(linkMapa(c.latitud, c.longitud))}" target="_blank" rel="noopener">Mapa</a>` : ""}
         </div>
       </section>
       ${estado ? `<p class="aviso-chico">${estado}</p>` : w.puede_tomar
@@ -1175,7 +1177,8 @@
       w.items.forEach((it) => { c2[it.code] = it.cajas; });
       guardarCarrito(c2);
       guardarLS(K_MAYOR, false);
-      fijarCliente({ negocio: c.negocio, contacto: c.contacto, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: "", direccion: c.direccion, latitud: "", longitud: "" });
+      // si el cliente se buscó en el catálogo, ya viene con su id (no se duplica); y con su ubicación si la tomó
+      fijarCliente({ ...(c.id ? { id: c.id } : {}), negocio: c.negocio, contacto: c.contacto, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: "", direccion: c.direccion, latitud: c.latitud ?? "", longitud: c.longitud ?? "" });
       guardarLS(K_WEB, { id: w.id, tipo_pago: w.tipo_pago, nota: w.nota });
       toast(`Tomando ${w.id}: revisá y enviá`);
       ir("#/nuevo");
@@ -1235,7 +1238,7 @@
   async function vPedido(v, id, _q, vigente) {
     // Al instante con lo que ya está en la lista; el historial llega después
     const enLista = (pedidosEnMemoria() || []).find((x) => x.id === id);
-    if (enLista) dibujarPedido(v, { historial: null, ...enLista });
+    if (enLista) dibujarPedido(v, { ...enLista, historial: null }); // el historial siempre llega fresco
     let p;
     try {
       p = (await api("pedido", { pedido_id: id })).pedido;
@@ -1618,32 +1621,43 @@
   /* ---------- Inventario y precios (Administración / Master) ---------- */
   let busquedaInv = "";
   const numTxt = (t) => { const n = Number(String(t ?? "").trim().replace(",", ".")); return isFinite(n) ? n : NaN; };
-  /* Formulario de los 5 precios FINALES (lo que paga el cliente en cada forma de pago) */
+  /* Formulario de los 8 precios FINALES: cada forma de pago al por menor y al mayor */
+  const CAMPOS_P = ["menor", "pronto", "efectivo_credito", "efectivo_pronto", "mayor", "mayor_pronto", "mayor_efectivo_credito", "mayor_efectivo_pronto"];
+  const FORMAS = [["", "Normal (crédito)", 0], ["pronto", "Pronto pago", 1], ["efectivo_credito", "Efectivo a crédito", 2], ["efectivo_pronto", "Efectivo pronto pago", 3]];
   function camposPrecios(x) {
     const val = (k) => (x && x[k] ? String(x[k]).replace(".", ",") : "");
-    const campo = (k, t, ph, est) => `<label class="field"><span>${t}${est ? ` <span class="mini-est">${"★".repeat(est)}${"☆".repeat(3 - est)}</span>` : ""}</span><input name="${k}" inputmode="decimal" autocomplete="off" placeholder="${ph}" value="${val(k)}" /></label>`;
-    return `<p class="modal-sub">Precio <strong>final</strong> por caja en dólares, el que paga el cliente en cada forma de pago. Al mayor (15+ cajas) se le aplica la misma rebaja.</p>
-      <div class="form-grid">${campo("menor", "Normal (crédito) *", "ej. 29,5")}${campo("mayor", "Al mayor (15+ cajas)", "ej. 27")}
-      ${campo("pronto", "Pronto pago", "ej. 28,3", 1)}${campo("efectivo_credito", "Efectivo a crédito", "ej. 24", 2)}${campo("efectivo_pronto", "Efectivo pronto pago", "ej. 23,3", 3)}</div>`;
+    const campo = (k, t, est, req) => `<label class="field"><span>${t}${req ? " *" : ""}${est ? ` <span class="mini-est">${"★".repeat(est)}${"☆".repeat(3 - est)}</span>` : ""}</span><input name="${k}" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${val(k)}" /></label>`;
+    const grupo = (pre, tit, nota) => `<fieldset class="pay grupo-precios"><legend>${tit}</legend>${nota ? `<p class="nota-chica">${nota}</p>` : ""}<div class="form-grid">${FORMAS.map(([k, t, e]) => {
+      const nombre = pre ? (k ? `mayor_${k}` : "mayor") : (k || "menor");
+      return campo(nombre, t, e, !pre && !k);
+    }).join("")}</div></fieldset>`;
+    return `<p class="modal-sub">Precio <strong>final</strong> por caja en dólares, el que paga el cliente en cada forma de pago.</p>
+      ${grupo(false, "Al por menor (menos de 15 cajas)")}
+      ${grupo(true, "Al mayor (15 cajas o más)", "Si dejás uno vacío, se le aplica la misma rebaja que al por menor.")}`;
   }
   function validarPrecios(d) {
     const n = {};
-    for (const k of ["menor", "mayor", "pronto", "efectivo_credito", "efectivo_pronto"]) { n[k] = String(d[k] || "").trim() === "" ? 0 : numTxt(d[k]); if (!(n[k] >= 0)) return "Revisá los montos: solo números (ej. 29,5)."; }
-    if (!n.menor) return "Falta el precio normal.";
-    if (n.mayor > n.menor) return "El precio al mayor no puede ser más alto que el normal.";
-    if (["pronto", "efectivo_credito", "efectivo_pronto"].some((k) => n[k] > n.menor)) return "Ningún precio puede ser más alto que el normal.";
+    for (const k of CAMPOS_P) { n[k] = String(d[k] || "").trim() === "" ? 0 : numTxt(d[k]); if (!(n[k] >= 0)) return "Revisá los montos: solo números (ej. 29,5)."; }
+    if (!n.menor) return "Falta el precio normal al por menor.";
+    if (n.mayor > n.menor) return "El precio normal al mayor no puede ser más alto que al por menor.";
+    if (["pronto", "efectivo_credito", "efectivo_pronto"].some((k) => n[k] > n.menor)) return "Al por menor, ningún precio puede ser más alto que el normal.";
+    const bm = n.mayor || n.menor;
+    if (["mayor_pronto", "mayor_efectivo_credito", "mayor_efectivo_pronto"].some((k) => n[k] > bm)) return "Al mayor, ningún precio puede ser más alto que el normal al mayor.";
     return "";
   }
-  const preciosDe = (d) => Object.fromEntries(["menor", "mayor", "pronto", "efectivo_credito", "efectivo_pronto"].map((k) => [k, String(d[k] || "").trim() === "" ? 0 : numTxt(d[k])]));
+  const preciosDe = (d) => Object.fromEntries(CAMPOS_P.map((k) => [k, String(d[k] || "").trim() === "" ? 0 : numTxt(d[k])]));
 
   async function vInventario(v, _p, _q, vigente) {
     const r = await api("inventario");
     if (!vigente()) return;
     const nombre = (c) => (allProductsMap()[c] || {}).name;
     const prods = r.productos.map((x) => ({ ...x, producto: nombre(x.code) || x.producto }));
-    const precioTxt = (x) => x.menor
-      ? `Normal ${dinero(x.menor)}${x.mayor ? ` · Mayor ${dinero(x.mayor)}` : ""}${x.pronto ? ` · Pronto ${dinero(x.pronto)}` : ""}${x.efectivo_credito ? ` · Ef. crédito ${dinero(x.efectivo_credito)}` : ""}${x.efectivo_pronto ? ` · Ef. pronto ${dinero(x.efectivo_pronto)}` : ""}`
-      : "<em>Sin precio</em>";
+    const linea = (pre, tit, x) => {
+      const v = (k) => x[pre ? (k ? `mayor_${k}` : "mayor") : (k || "menor")];
+      const partes = FORMAS.map(([k, t]) => (v(k) ? `${k ? t.replace("Efectivo", "Ef.").replace(" pago", "") : "Normal"} ${dinero(v(k))}` : "")).filter(Boolean);
+      return partes.length ? `<span class="inv-nivel"><b>${tit}</b> ${partes.join(" · ")}</span>` : "";
+    };
+    const precioTxt = (x) => x.menor ? `${linea(false, "Menor:", x)}${linea(true, "Mayor:", x)}` : "<em>Sin precio</em>";
     const fila = (x) => `<li class="inv-fila${x.controlado && x.disponible <= 0 ? " sin-stock" : ""}" data-code="${esc(x.code)}" data-texto="${esc((x.producto + " " + x.code).toLowerCase())}">
         <div class="inv-top">
           <label class="inv-check"><input type="checkbox" value="${esc(x.code)}" aria-label="Elegir ${esc(x.producto)}" /></label>

@@ -440,3 +440,13 @@ test("Por hacer según el rol; búsqueda; agrupar por día; contadores", () => {
     [["Hoy", 1], ["Ayer", 1], ["Lunes", 1], ["20/10/2026", 1]]);
   assert.deepEqual(core.contadoresVistas(P, "admin", "U2", hoy), { hacer: 2, curso: 2, cobros: 4 });
 });
+
+test("al mayor usa sus propios precios por forma de pago", () => {
+  const pr = { "BC-02": { menor: 29.5, mayor: 27, desc_pronto: 1.2, desc_efectivo_credito: 5.5, desc_efectivo_pronto: 6.2, mayor_desc_pronto: 1, mayor_desc_efectivo_credito: 5, mayor_desc_efectivo_pronto: 6 } };
+  const its = [{ code: "BC-02", cajas: 15 }];
+  assert.equal(core.totalPorPago(core.conPrecios(its, pr, "mayor"), "efectivo_pronto"), 15 * 21);
+  assert.equal(core.totalPorPago(core.conPrecios(its, pr, "menor"), "efectivo_pronto"), r2(15 * 23.3));
+  const m = core.mensajeWeb({ ref: "WEB-1", cliente: { negocio: "X", telefono: "1", latitud: 8.6, longitud: -71.6 }, items: [], tipo_pago: "credito" });
+  assert.match(m, /Ubicación: https:\/\/maps\.google\.com\/\?q=8\.6,-71\.6/);
+});
+const r2 = (n) => Math.round(n * 100) / 100;

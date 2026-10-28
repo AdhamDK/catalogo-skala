@@ -512,3 +512,7 @@ html[data-tema="oscuro"] .etq-nuevo { background: rgba(233, 78, 140, 0.18); colo
 .precios-nuevo { margin: 8px 0; }
 .precios-nuevo summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--enlace); font-weight: 600; }
 #invBarra { position: sticky; }
+.grupo-precios { margin: 0 0 10px; }
+.grupo-precios .nota-chica { margin: 0 0 6px; }
+.inv-precios .inv-nivel { display: block; }
+.inv-precios .inv-nivel b { color: var(--tinta); font-weight: 600; }

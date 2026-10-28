@@ -1240,3 +1240,39 @@ html[data-tema="oscuro"] .avatar { background: #b82a60; }
 .hasta-desc strong { color: #8a5a00; }
 html[data-tema="oscuro"] .hasta-desc { background: rgba(245, 179, 1, 0.12); color: #f7d26a; }
 html[data-tema="oscuro"] .hasta-desc strong { color: #ffd76a; }
+
+/* ---------- Tu pedido: seleccionar cliente ---------- */
+.cli-panel { margin-top: 8px; animation: bajar .18s ease; }
+.cli-buscar { display: flex; gap: 6px; }
+.cli-buscar input { flex: 1; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1px solid var(--borde); border-radius: 12px; background: var(--superficie); color: var(--tinta); font: inherit; font-size: 16px; }
+.cli-buscar .btn { min-height: 44px; padding: 8px 14px; flex: 0 0 auto; }
+.cli-res { margin: 6px 2px; font-size: 0.86rem; color: var(--tinta-suave); min-height: 1em; }
+.cli-res:empty { display: none; }
+.btn-nuevo-cli {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; margin-top: 6px;
+  border: 1px dashed var(--verde-osc); border-radius: 12px; background: var(--verde-suave); color: var(--verde-osc); font: inherit; font-weight: 700; cursor: pointer;
+}
+.btn-nuevo-cli span { font-size: 1.3rem; line-height: 1; }
+.btn-nuevo-cli.pulso { animation: pulso-card .4s ease 2; }
+html[data-tema="oscuro"] .btn-nuevo-cli { color: var(--verde-claro); border-color: var(--verde-claro); }
+.cli-form { margin-top: 8px; animation: bajar .18s ease; }
+.btn-listo-cli { width: 100%; margin-top: 8px; min-height: 44px; }
+.cli-elegido { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 8px; border: 1px solid var(--verde); border-radius: 12px; background: var(--verde-suave); }
+.cli-datos { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.cli-datos span { font-size: 0.78rem; color: var(--tinta-suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-cli { min-height: 44px; min-width: 44px; padding: 0 6px; border: 0; background: none; color: var(--enlace); font: inherit; font-weight: 600; font-size: 0.85rem; cursor: pointer; }
+.dir-con-ubic > label { display: block; }
+.dir-fila { display: flex; gap: 6px; align-items: center; }
+.dir-fila input { flex: 1; min-width: 0; }
+.btn-ubic {
+  flex: 0 0 auto; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 12px;
+  border: 1px solid var(--borde); background: var(--superficie); color: var(--rosa-osc); cursor: pointer;
+}
+.btn-ubic svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.btn-ubic.lista { border-color: var(--verde); background: var(--verde-suave); color: var(--verde-osc); }
+.btn-ubic.buscando svg { animation: girar 1s linear infinite; }
+.ubic-estado { display: block; margin-top: 4px; font-size: 0.8rem; color: var(--verde-osc); min-height: 1em; }
+.ubic-estado:empty { display: none; }
+.spinner-chico { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; border-radius: 50%; border: 2px solid var(--borde); border-top-color: var(--rosa); animation: girar .8s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+.dir-con-ubic > label > span { font-weight: 600; }

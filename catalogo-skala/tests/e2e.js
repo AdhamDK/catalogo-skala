@@ -22,6 +22,7 @@ async function probar(browser, cfg) {
     deviceScaleFactor: 2,
     isMobile: cfg.movil,
     hasTouch: cfg.movil,
+    geolocation: { latitude: 8.6123456, longitude: -71.6543219, accuracy: 12 }, permissions: ["geolocation"],
   });
   // CRM simulado: precios, un agotado y dos vendedores
   const gas = crearGas();
@@ -32,6 +33,7 @@ async function probar(browser, cfg) {
   const precio = (code, menor, mayor, a, b, c) => gas.ctx.accionGuardarPrecio_({ code, menor, mayor, pronto: menor - a, efectivo_credito: menor - b, efectivo_pronto: menor - c }, { nombre: "Prueba" });
   precio("BC-01", 10, 8, 1, 3, 4); precio("KT-01", 20, 18, 2, 6, 8);
   gas.ctx.accionMovimiento_({ code: "BC-08", cajas: 1 }, { nombre: "Prueba" });
+  gas.ctx.guardarCliente_({ negocio: "Barbería Max", contacto: "Max", telefono: "0416-7778899", direccion: "Calle 5" }, { id: "U9" }, { exigirTelefono: true });
   gas.ctx.accionMovimiento_({ code: "BC-08", cajas: -1, tipo: "ajuste", nota: "vendido" }, { nombre: "Prueba" });
   await ctx.route(API, async (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
@@ -228,10 +230,23 @@ async function probar(browser, cfg) {
   await page.waitForFunction(() => document.querySelectorAll("#listaVendedores [data-vend]").length === 2);
   assert.ok(await page.locator("#listaVendedores").isVisible()); // sin vendedor elegido, la lista ya está abierta
   await page.locator("#btnWhatsapp").click();
-  assert.match(await page.innerText("#formWarn"), /Nombre del negocio · Teléfono · Vendedor$/);
+  assert.match(await page.innerText("#formWarn"), /Cliente · Vendedor$/);
+  // Seleccionar cliente: buscar por teléfono (no está) → Nuevo · registrarme
+  assert.ok(await page.locator("#cliPanel").isVisible());
+  await page.fill("#cliBuscar", "0414-5551234");
+  await page.click("#btnCliBuscar");
+  await page.waitForFunction(() => /No te encontramos/.test(document.getElementById("cliRes").textContent));
+  await page.click("#btnCliNuevo");
+  assert.ok(await page.locator("#cliForm").isVisible());
   await page.locator("#btnPagos").click();
   await page.fill("#fNegocio", "Salón Luz");
   await page.fill("#fTelefono", "0414-5551234");
+  // ubicación actual con el botón al lado de Dirección
+  await page.click("#btnUbic");
+  await page.waitForFunction(() => /Ubicación lista/.test(document.getElementById("ubicEstado").textContent));
+  await page.click("#btnCliListo");
+  assert.ok(await page.locator("#cliForm").isHidden());
+  assert.match(await page.innerText("#cliElegido"), /Salón Luz[\s\S]*0414-5551234[\s\S]*ubicación/);
   await page.locator("#listaVendedores [data-vend]", { hasText: "Óscar" }).click();
   assert.ok(await page.locator("#listaVendedores").isHidden());
   assert.match(await page.innerText("#vendElegido"), /Óscar/);
@@ -246,6 +261,7 @@ async function probar(browser, cfg) {
   assert.match(msg, /• 3 × Babosa \(BC-01\) · 6,00 \$ c\/u/);
   assert.match(msg, /Monto: 18,00 \$ \(Efectivo pronto pago\)/);
   assert.match(msg, /Mi vendedor: Óscar/);
+  assert.match(msg, /Ubicación: https:\/\/maps\.google\.com\/\?q=8\.61/);
   assert.match(await page.getAttribute("#btnWhatsapp", "href"), /^https:\/\/wa\.me\/584247042169\?text=/);
   ok("Tu pedido: sumar / quitar, montos por forma de pago, vendedor obligatorio");
   if (cfg.movil) {
@@ -292,6 +308,18 @@ async function probar(browser, cfg) {
   const web = gas.tabla("PedidosWeb")[0];
   assert.ok(web, "no llegó el pedido web");
   assert.equal(web.vendedor, "Óscar"); assert.equal(web.negocio, "Salón Luz"); assert.equal(web.total, 18); assert.equal(web.tipo_pago, "efectivo_pronto");
+  assert.equal(web.latitud, 8.612346); assert.equal(web.cliente_id, "");
+  // un cliente ya registrado se busca por su teléfono y no escribe nada
+  await page.keyboard.press("Escape");
+  await page.click("#btnArmarPedido");
+  await page.click("#btnModoCliente");
+  await page.click('#cliElegido [data-cli="cambiar"]');
+  await page.fill("#cliBuscar", "0416 777 8899");
+  await page.click("#btnCliBuscar");
+  await page.waitForFunction(() => /Barbería Max/.test(document.getElementById("cliElegido").textContent));
+  assert.ok(await page.locator("#cliPanel").isHidden());
+  assert.equal(await page.inputValue("#fNegocio"), "Barbería Max");
+  await page.keyboard.press("Escape");
   ok("enviar: WhatsApp + pedido web en la app del vendedor elegido");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#orderModal").isHidden(), true);
