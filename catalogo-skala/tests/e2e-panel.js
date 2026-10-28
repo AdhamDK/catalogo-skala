@@ -85,6 +85,9 @@ function servidor() {
     await esperarRuta("#/ingresar");
   };
   const revisarDiseno = async (donde) => {
+    // esperar que terminen las animaciones (entrada de página, toques) antes de medir
+    await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {}))));
+    await page.mouse.move(0, 0);
     const r = await page.evaluate(() => {
       const chicos = [...document.querySelectorAll("#vista a.btn, #vista button, .app-nav a, #btnAtras:not([hidden])")]
         .filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0 && (b.height < 44 || b.width < 44); })
@@ -125,7 +128,8 @@ function servidor() {
   assert.equal(await page.locator(".prod").count(), 0); // paso 1: solo buscar o cliente nuevo
   assert.ok(await page.locator("#cBuscar").isVisible());
   assert.ok(await page.locator("#btnClienteNuevo").isVisible());
-  assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Nuevo", "Pedidos", "Clientes", "Más"]);
+  assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Nuevo", "Pedidos", "Clientes"]);
+  assert.ok(await page.locator("#btnMas").isVisible()); // Más está arriba, al lado del nombre
   assert.equal(await page.innerText(".app-nav .badge"), "3");
   await foto("02a-paso1");
   ok("login (error y acierto, ver clave) → Nuevo empieza con Buscar cliente / Cliente nuevo");
@@ -438,7 +442,7 @@ function servidor() {
   /* ---------- Despachador ---------- */
   await ingresar("luis", "Luis5555");
   await esperarRuta("#/inicio");
-  assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Entregas", "Más"]);
+  assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Entregas"]);
   await page.waitForSelector("#iLista .fila-ped");
   assert.match(await page.innerText("#iLista"), /Av\. Bolívar/);
   assert.match(await page.innerText(".carga-hoy"), /Hoy tenés por entregar\s+9 cajas/);
@@ -638,7 +642,7 @@ function servidor() {
   /* ---------- Master ---------- */
   await ingresar("jose", "Skala#2026");
   await esperarRuta("#/inicio");
-  await page.click('.app-nav a[href="#/mas"]');
+  await page.click("#btnMas");
   await esperarRuta("#/mas");
   assert.deepEqual(await page.locator(".menu-mas strong").allInnerTexts(), ["Resumen", "Inventario y precios", "Usuarios", "Ver catálogo"]);
   await page.click('.menu-mas a[href="#/resumen"]');

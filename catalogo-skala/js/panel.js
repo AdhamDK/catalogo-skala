@@ -141,6 +141,9 @@
     $("btnAtras").hidden = !def.atras;
     $("btnAtras").dataset.destino = typeof def.atras === "string" ? def.atras : "";
     $("appQuien").textContent = s ? `${s.usuario.nombre} · ${s.usuario.rol_nombre}` : "";
+    $("btnMas").hidden = !s;
+    $("btnMas").classList.toggle("activa", def.nav === "mas");
+    if (def.nav === "mas") $("btnMas").setAttribute("aria-current", "page"); else $("btnMas").removeAttribute("aria-current");
     pintarNav(def.nav);
     pintarCola();
     const vista = $("vista");
@@ -169,8 +172,8 @@
     const r = rol();
     if (!r) { nav.hidden = true; document.body.classList.remove("con-nav"); return; }
     const items = r === "despachador"
-      ? [["inicio", "Inicio"], ["entregas", "Entregas"], ["mas", "Más"]]
-      : [["inicio", "Inicio"], ["nuevo", "Nuevo"], ["pedidos", "Pedidos"], ["clientes", "Clientes"], ["mas", "Más"]];
+      ? [["inicio", "Inicio"], ["entregas", "Entregas"]]
+      : [["inicio", "Inicio"], ["nuevo", "Nuevo"], ["pedidos", "Pedidos"], ["clientes", "Clientes"]];
     const n = cajasCarrito();
     nav.innerHTML = items.map(([k, t]) =>
       `<a href="#/${k}" class="${k === activa ? "activa" : ""}"${k === activa ? ' aria-current="page"' : ""}>${icono(k)}<span>${t}</span>${k === "nuevo" && n ? `<b class="badge">${n}</b>` : ""}</a>`).join("");

@@ -28,6 +28,13 @@ body.app.con-nav { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
   flex: 1; min-width: 0; margin: 0; font-size: 1.2rem; font-weight: 800; line-height: 1.1;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.app-mas {
+  flex: 0 0 auto; display: inline-grid; place-items: center; width: 44px; height: 44px; margin-right: -4px;
+  border-radius: 12px; color: var(--tinta);
+}
+.app-mas svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.app-mas:active { background: var(--crema-2); }
+.app-mas.activa { color: var(--rosa-osc); background: var(--crema-2); }
 .app-quien { font-size: 0.75rem; color: var(--tinta-suave); text-align: right; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .app-pend { margin: 8px 16px 0; }
 
@@ -449,3 +456,4 @@ html[data-tema="oscuro"] .modo-local { background: rgba(245, 130, 42, 0.15); col
 .aviso-app.obligatoria { background: #fde8f1; }
 body.app-bloqueada #vista, body.app-bloqueada #appNav { pointer-events: none; opacity: .35; }
 html[data-tema="oscuro"] .aviso-app.obligatoria { background: rgba(233, 78, 140, 0.15); }
+.usuarios-lista li .btn { min-height: 44px !important; height: auto; box-sizing: border-box; }
