@@ -34,7 +34,8 @@ function servidor() {
   gas.ctx.crearUsuario("oscar", "Óscar", "vendedor", "Oscar.1234");
   gas.ctx.crearUsuario("luis", "Luis", "despachador", "Luis5555");
   // Precios ($ por caja: menor, mayor, desc. pronto, efectivo crédito, efectivo pronto) e inventario
-  const precio = (code, menor, mayor, a, b, c) => gas.ctx.accionGuardarPrecio_({ code, menor, mayor, desc_pronto: a, desc_efectivo_credito: b, desc_efectivo_pronto: c }, { nombre: "Prueba" });
+  // precios FINALES (normal, mayor, pronto, efectivo crédito, efectivo pronto); a/b/c = rebaja de cada forma de pago
+  const precio = (code, menor, mayor, a, b, c) => gas.ctx.accionGuardarPrecio_({ code, menor, mayor, pronto: menor - a, efectivo_credito: menor - b, efectivo_pronto: menor - c }, { nombre: "Prueba" });
   precio("BC-01", 10, 8, 1, 3, 4); precio("BC-06", 12, 10, 1, 3, 4); precio("KT-01", 20, 18, 2, 6, 8); precio("KT-02", 20, 18, 2, 6, 8);
   gas.ctx.accionMovimiento_({ code: "KT-02", cajas: 6 }, { nombre: "Prueba" });
 
@@ -124,7 +125,7 @@ function servidor() {
   await page.click("#btnLogin");
   await esperarRuta("#/nuevo");
   assert.equal(await titulo(), "Nuevo pedido");
-  assert.deepEqual((await page.locator(".pasos li").allInnerTexts()).map((t) => t.replace(/\s+/g, " ")), ["1 Cliente", "2 Productos", "3 Enviar"]);
+  assert.deepEqual((await page.locator(".pasos li").allInnerTexts()).map((t) => t.replace(/\s+/g, " ")), ["1 Cliente", "✓ Productos", "3 Enviar"]); // los productos ya vienen del catálogo
   assert.equal(await page.locator(".prod").count(), 0); // paso 1: solo buscar o cliente nuevo
   assert.ok(await page.locator("#cBuscar").isVisible());
   assert.ok(await page.locator("#btnClienteNuevo").isVisible());
@@ -132,7 +133,21 @@ function servidor() {
   assert.ok(await page.locator("#btnMas").isVisible()); // Más está arriba, al lado del nombre
   assert.equal(await page.innerText(".app-nav .badge"), "3");
   await foto("02a-paso1");
-  ok("login (error y acierto, ver clave) → Nuevo empieza con Buscar cliente / Cliente nuevo");
+  // Enviar sin cliente: el paso 1 se marca en rojo y el 2 (ya tiene productos) en verde
+  await page.click('.pasos [data-enviar]');
+  await page.waitForSelector('.pasos li[data-paso="1"].falta-anim');
+  assert.ok(await page.locator('.pasos li[data-paso="2"].ok-anim').count());
+  assert.match(await page.innerText("#toast"), /Falta elegir el cliente/);
+  await foto("02a2-falta-cliente");
+  // se puede ir a Productos antes de elegir cliente
+  await page.click('.pasos li[data-paso="2"] a');
+  await esperarRuta("#/nuevo/productos");
+  assert.match(await page.innerText(".cliente-elegido"), /Sin cliente todavía/);
+  await page.click("#nSeguir");
+  await page.waitForSelector('.pasos li[data-paso="1"].falta-anim');
+  await page.click(".cliente-elegido");
+  await esperarRuta("#/nuevo");
+  ok("login (error y acierto, ver clave) → Nuevo: cliente y productos en cualquier orden; Enviar marca lo que falta");
 
   /* ---------- Paso 1: cliente nuevo ---------- */
   await page.fill("#cBuscar", "bella");
@@ -464,11 +479,44 @@ function servidor() {
   assert.match(await page.innerText("#hojaError"), /mayor no puede/);
   await page.fill('#hoja input[name="mayor"]', "8");
   await page.click("#hojaOk");
-  await page.waitForFunction(() => /Menor 9,50 \$ · Mayor 8,00 \$/.test(document.querySelector('.inv-fila[data-code="BC-09"]')?.textContent || ""));
+  await page.waitForFunction(() => /Normal 9,50 \$ · Mayor 8,00 \$/.test(document.querySelector('.inv-fila[data-code="BC-09"]')?.textContent || ""));
   assert.equal(gas.tabla("Precios").find((x) => x.code === "BC-09").menor, 9.5);
+  // varios productos con el mismo precio (precios finales de cada forma de pago)
+  await page.check('.inv-fila[data-code="BC-10"] .inv-check input');
+  await page.check('.inv-fila[data-code="BC-11"] .inv-check input');
+  assert.match(await page.innerText("#invBarra"), /2 elegidos/);
+  await page.click("#btnPreciosVarios");
+  await page.fill('#hoja input[name="menor"]', "29,5");
+  await page.fill('#hoja input[name="pronto"]', "28,3");
+  await page.fill('#hoja input[name="efectivo_credito"]', "24");
+  await page.fill('#hoja input[name="efectivo_pronto"]', "30");
+  await page.click("#hojaOk");
+  assert.match(await page.innerText("#hojaError"), /más alto que el normal/);
+  await page.fill('#hoja input[name="efectivo_pronto"]', "23,3");
+  await page.click("#hojaOk");
+  await page.waitForFunction(() => /Ef\. pronto 23,30 \$/.test(document.querySelector('.inv-fila[data-code="BC-11"]')?.textContent || ""));
+  assert.deepEqual(["BC-10", "BC-11"].map((c) => gas.tabla("Precios").find((x) => x.code === c).efectivo_pronto), [23.3, 23.3]);
+  // producto nuevo: empieza sin stock
+  await page.click("#btnNuevoProd");
+  await page.click("#hojaOk");
+  assert.match(await page.innerText("#hojaError"), /nombre/);
+  await page.fill('#hoja input[name="nombre"]', "Coco Power");
+  await page.fill('#hoja input[name="linea"]', "Nutrición");
+  await page.click('#hoja details.precios-nuevo summary');
+  await page.fill('#hoja input[name="menor"]', "12");
+  await page.click("#hojaOk");
+  await page.waitForSelector('.inv-fila[data-code="BC-12"]');
+  assert.match(await page.innerText('.inv-fila[data-code="BC-12"]'), /Coco Power[\s\S]*Nuevo[\s\S]*0\s+sin stock/);
+  await foto("07a2-producto-nuevo");
   await foto("07a-inventario");
   await revisarDiseno("inventario");
-  ok("inventario: disponible = cargado − aprobado; entrada de mercancía y precios desde el panel");
+  // el producto nuevo sale en el catálogo de los clientes, en gris (sin stock)
+  await page.goto(BASE + "/index.html");
+  await page.waitForSelector('.card[data-card="BC-12"].agotado');
+  assert.match(await page.innerText('.card[data-card="BC-12"]'), /Sin stock[\s\S]*Coco Power[\s\S]*12,00 \$/);
+  await page.goto(BASE + "/panel.html#/inicio");
+  await esperarRuta("#/inicio");
+  ok("inventario: entradas, precios finales a varios productos y producto nuevo (sale en gris sin stock)");
   await salir();
 
   /* ---------- Despachador ---------- */

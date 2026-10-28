@@ -1217,3 +1217,26 @@ html[data-tema="oscuro"] .cart-quitar { color: #ff8a80; }
 .vend-vacio { grid-column: 1 / -1; color: var(--tinta-suave); font-size: 0.88rem; padding: 6px 2px; }
 .avatar { flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--rosa-osc); color: #fff; font-weight: 700; font-size: 0.9rem; }
 html[data-tema="oscuro"] .avatar { background: #b82a60; }
+
+/* ---------- Ampliar foto: aparece creciendo desde la tarjeta y se cierra suave ---------- */
+.zoom-modal { transition: background-color .22s ease; background: rgba(20, 19, 17, 0); }
+.zoom-modal.abierto { background: rgba(20, 19, 17, 0.88); }
+.zoom-modal .zoom-box { opacity: 0; transform: translate(var(--zx, 0), var(--zy, 0)) scale(0.3); transition: transform .26s cubic-bezier(.2, .8, .2, 1), opacity .2s ease; }
+.zoom-modal.abierto .zoom-box { opacity: 1; transform: none; }
+.zoom-modal.cerrando .zoom-box { opacity: 0; transform: translate(var(--zx, 0), var(--zy, 0)) scale(0.3); transition-duration: .2s; }
+
+/* ---------- Sin stock: en gris y sin poder pedir ---------- */
+.card.agotado { opacity: 1; cursor: not-allowed; }
+.card.agotado .card-img img, .card.agotado .card-name, .card.agotado .card-meta, .card.agotado .card-precio { filter: grayscale(1); opacity: .55; }
+.card.agotado .card-badge[data-badge] { background: #6b6760; }
+.card.agotado .qty-btn:disabled, .card.agotado .qty-input:disabled { opacity: .4; cursor: not-allowed; }
+.cart-foto picture { display: block; width: 100%; height: 100%; }
+
+/* ---------- "Hasta X% de descuento al nivel 3" ---------- */
+.hasta-desc {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; min-height: 44px; padding: 6px 12px;
+  border: 1px dashed #e2b23a; border-radius: 12px; background: #fff8e6; color: #6b4a00; font: inherit; font-size: 0.86rem; cursor: pointer;
+}
+.hasta-desc strong { color: #8a5a00; }
+html[data-tema="oscuro"] .hasta-desc { background: rgba(245, 179, 1, 0.12); color: #f7d26a; }
+html[data-tema="oscuro"] .hasta-desc strong { color: #ffd76a; }

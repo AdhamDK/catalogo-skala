@@ -385,19 +385,27 @@
   const K_MAYOR = "skala_precio_mayor"; // excepción: precio al mayor con menos de 15 cajas
   const excepcionMayor = () => !!leerLS(K_MAYOR, false);
   /* Precios y existencias: lo guardado ya, y se actualiza por detrás */
-  async function preciosYStock(alCambiar) {
+  async function preciosYStock(alCambiar, alSumarProductos) {
     const guardado = SkalaAPI.catalogoGuardado();
+    if (guardado) sumarProductosNuevos(guardado.productos);
     const mapa = SkalaAPI.preciosMapa(guardado);
-    SkalaAPI.catalogo().then((d) => { if (d !== guardado && alCambiar) alCambiar(SkalaAPI.preciosMapa(d)); }).catch(() => {});
+    SkalaAPI.catalogo().then((d) => {
+      if (d === guardado) return;
+      // productos nuevos cargados en Inventario: se vuelve a dibujar la página
+      if (sumarProductosNuevos(d.productos) && alSumarProductos) return alSumarProductos();
+      if (alCambiar) alCambiar(SkalaAPI.preciosMapa(d));
+    }).catch(() => {});
     return mapa;
   }
   function vNuevoProductos(v, _p, _q, vigente) {
-    const cli = clienteElegido();
-    if (!cli) return ir("#/nuevo");
+    const cli = clienteElegido(); // puede faltar: el cliente se elige antes o después
+    const g0 = SkalaAPI.catalogoGuardado();
+    if (g0) sumarProductosNuevos(g0.productos);
     const productos = [...BANOS.map((p) => ({ ...p, tipo: "banos" })), ...KITS.map((p) => ({ ...p, tipo: "kits" }))];
     let precios = {};
     v.innerHTML = `${pasos(2)}${avisoWeb()}
-      <a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>
+      ${cli ? `<a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>`
+        : '<a class="cliente-elegido sin-cliente" href="#/nuevo"><span>Para</span><strong>Sin cliente todavía</strong><em>Elegir</em></a>'}
       <div class="buscador"><input type="search" id="nBuscar" placeholder="Buscar producto o código" autocomplete="off" enterkeyhint="search" value="${esc(busquedaNuevo)}" /></div>
       <div class="periodos" id="nFiltros">${[["todos", "Todos"], ["banos", "Baños de crema"], ["kits", "Kits"], ["elegidos", "Elegidos"]].map(([k, t]) =>
         `<button type="button" class="tab${k === filtroNuevo ? " active" : ""}" data-f="${k}">${t}</button>`).join("")}</div>
@@ -405,8 +413,7 @@
       <ul class="grilla-prod" id="nLista">${productos.map((p) => `
         <li class="pcard" data-code="${p.code}" data-tipo="${p.tipo}" data-texto="${esc((p.name + " " + p.code + " " + p.line).toLowerCase())}">
           <button type="button" class="pcard-tap" data-act="plus" aria-label="Sumar una caja de ${esc(p.name)}">
-            <picture><source type="image/webp" srcset="assets/img/web/${p.code}-400.webp" />
-              <img src="assets/img/${p.code}.png" alt="" width="64" height="51" loading="lazy" decoding="async" /></picture>
+            ${fotoHTML(p.code, { ancho: 64, alto: 51 })}
             <strong>${esc(p.name)}</strong>
             <span class="pcard-sub">${p.code} · ${esc(textoUnidades(p))}</span>
             <span class="pcard-precio" data-precio></span>
@@ -505,16 +512,37 @@
     $("nVaciar").addEventListener("click", async () => {
       if (await hoja({ titulo: "¿Vaciar el pedido?", cuerpo: '<p class="modal-sub">Se quitan todos los productos elegidos.</p>', ok: "Vaciar" })) { guardarCarrito({}); guardarLS(K_MAYOR, false); pintar(); }
     });
-    $("nSeguir").addEventListener("click", (e) => { if (!cajasCarrito()) { e.preventDefault(); toast("Elegí al menos un producto."); } });
+    $("nSeguir").addEventListener("click", (e) => { e.preventDefault(); irAEnviar(); });
     enlazarAvisoWeb();
-    return preciosYStock((m) => { if (vigente() && $("nLista") === lista) { precios = m; pintar(); } }).then((m) => { precios = m; pintar(); });
+    return preciosYStock((m) => { if (vigente() && $("nLista") === lista) { precios = m; pintar(); } }, () => { if (vigente() && $("nLista") === lista) render(); })
+      .then((m) => { precios = m; pintar(); });
   }
 
   /* ---------- Nuevo pedido: pasos ---------- */
+  /* Pasos: 1 Cliente y 2 Productos se hacen en el orden que quieras; 3 Enviar pide los dos */
   function pasos(n) {
+    const listo = [!!clienteElegido(), cajasCarrito() > 0];
     const p = [["#/nuevo", "Cliente"], ["#/nuevo/productos", "Productos"], ["#/nuevo/enviar", "Enviar"]];
-    return `<ol class="pasos">${p.map(([h, t], i) => `<li class="${i + 1 === n ? "actual" : i + 1 < n ? "hecho" : ""}">${i + 1 < n
-      ? `<a href="${h}"><b>${i + 1}</b>${t}</a>` : `<span><b>${i + 1}</b>${t}</span>`}</li>`).join("")}</ol>`;
+    return `<ol class="pasos">${p.map(([h, t], i) => {
+      const cls = [i + 1 === n ? "actual" : "", i < 2 && listo[i] ? "hecho" : ""].filter(Boolean).join(" ");
+      return `<li class="${cls}" data-paso="${i + 1}"><a href="${h}"${i === 2 ? " data-enviar" : ""}${i + 1 === n ? ' aria-current="step"' : ""}><b>${i < 2 && listo[i] && i + 1 !== n ? "✓" : i + 1}</b>${t}</a></li>`;
+    }).join("")}</ol>`;
+  }
+  /* Ir a Enviar: si falta el cliente o los productos, se marca en rojo lo que falta y en verde lo que está */
+  function irAEnviar() {
+    const falta = [];
+    if (!clienteElegido()) falta.push(1);
+    if (!cajasCarrito()) falta.push(2);
+    if (!falta.length) return ir("#/nuevo/enviar");
+    document.querySelectorAll(".pasos li[data-paso]").forEach((li) => {
+      const k = Number(li.dataset.paso);
+      if (k === 3) return;
+      li.classList.remove("falta-anim", "ok-anim");
+      void li.offsetWidth;
+      li.classList.add(falta.includes(k) ? "falta-anim" : "ok-anim");
+    });
+    toast(falta.length === 2 ? "Falta elegir el cliente y los productos." : falta[0] === 1 ? "Falta elegir el cliente." : "Falta elegir los productos.");
+    if (navigator.vibrate) try { navigator.vibrate(60); } catch (e) {}
   }
   /* Cliente del pedido en curso (guardado en el teléfono). _listo = ya elegido/confirmado */
   const clienteElegido = () => { const c = leerLS(K_CLIENTE, null); return c && c._listo ? c : null; };
@@ -684,9 +712,13 @@
   /* ---------- Nuevo pedido: 3) enviar (pago, nota o factura) ---------- */
   async function vNuevoEnviar(v) {
     const cli = clienteElegido();
-    if (!cli) return ir("#/nuevo");
     const items = itemsDePedido(carrito(), allProductsMap());
-    if (!items.length) return ir("#/nuevo/productos");
+    if (!cli || !items.length) {
+      // se entró directo sin completar: volver al paso que falta y marcarlo
+      ir(!cli ? "#/nuevo" : "#/nuevo/productos");
+      setTimeout(irAEnviar, 80);
+      return;
+    }
     const total = items.reduce((a, it) => a + it.cajas, 0);
     const unidades = {};
     items.forEach((it) => { if (it.total_unidades) unidades[it.unidad] = (unidades[it.unidad] || 0) + it.total_unidades; });
@@ -732,7 +764,7 @@
       const its = conPrecio();
       const hayPrecio = its.some((it) => it.precio > 0);
       const tipo = pagoSel() || "credito";
-      $("eItems").innerHTML = its.map((it) => `<li class="con-foto"><picture class="item-foto"><source type="image/webp" srcset="assets/img/web/${it.code}-400.webp" /><img src="assets/img/${it.code}.png" alt="" width="36" height="36" loading="lazy" decoding="async" /></picture><span>${it.cajas} × ${esc(it.producto)}${it.total_unidades ? ` <span class="ped-det">${it.total_unidades} ${esc(it.unidad)}</span>` : ""}</span><em>${it.precio ? `${dinero(precioUnitario(it, tipo))} c/u · <strong>${dinero(it.cajas * precioUnitario(it, tipo))}</strong>` : "sin precio"}</em></li>`).join("");
+      $("eItems").innerHTML = its.map((it) => `<li class="con-foto"><span class="item-foto">${fotoHTML(it.code, { ancho: 36, alto: 36 })}</span><span>${it.cajas} × ${esc(it.producto)}${it.total_unidades ? ` <span class="ped-det">${it.total_unidades} ${esc(it.unidad)}</span>` : ""}</span><em>${it.precio ? `${dinero(precioUnitario(it, tipo))} c/u · <strong>${dinero(it.cajas * precioUnitario(it, tipo))}</strong>` : "sin precio"}</em></li>`).join("");
       const nivel = nivelPrecio(total, excepcionMayor());
       $("eNivel").textContent = nivel === "mayor" ? (total >= CAJAS_MAYOR ? "Precio al mayor." : "Precio al mayor por excepción.") : `Precio al por menor (menos de ${CAJAS_MAYOR} cajas).`;
       const sel = pagoSel();
@@ -1585,87 +1617,160 @@
 
   /* ---------- Inventario y precios (Administración / Master) ---------- */
   let busquedaInv = "";
+  const numTxt = (t) => { const n = Number(String(t ?? "").trim().replace(",", ".")); return isFinite(n) ? n : NaN; };
+  /* Formulario de los 5 precios FINALES (lo que paga el cliente en cada forma de pago) */
+  function camposPrecios(x) {
+    const val = (k) => (x && x[k] ? String(x[k]).replace(".", ",") : "");
+    const campo = (k, t, ph, est) => `<label class="field"><span>${t}${est ? ` <span class="mini-est">${"★".repeat(est)}${"☆".repeat(3 - est)}</span>` : ""}</span><input name="${k}" inputmode="decimal" autocomplete="off" placeholder="${ph}" value="${val(k)}" /></label>`;
+    return `<p class="modal-sub">Precio <strong>final</strong> por caja en dólares, el que paga el cliente en cada forma de pago. Al mayor (15+ cajas) se le aplica la misma rebaja.</p>
+      <div class="form-grid">${campo("menor", "Normal (crédito) *", "ej. 29,5")}${campo("mayor", "Al mayor (15+ cajas)", "ej. 27")}
+      ${campo("pronto", "Pronto pago", "ej. 28,3", 1)}${campo("efectivo_credito", "Efectivo a crédito", "ej. 24", 2)}${campo("efectivo_pronto", "Efectivo pronto pago", "ej. 23,3", 3)}</div>`;
+  }
+  function validarPrecios(d) {
+    const n = {};
+    for (const k of ["menor", "mayor", "pronto", "efectivo_credito", "efectivo_pronto"]) { n[k] = String(d[k] || "").trim() === "" ? 0 : numTxt(d[k]); if (!(n[k] >= 0)) return "Revisá los montos: solo números (ej. 29,5)."; }
+    if (!n.menor) return "Falta el precio normal.";
+    if (n.mayor > n.menor) return "El precio al mayor no puede ser más alto que el normal.";
+    if (["pronto", "efectivo_credito", "efectivo_pronto"].some((k) => n[k] > n.menor)) return "Ningún precio puede ser más alto que el normal.";
+    return "";
+  }
+  const preciosDe = (d) => Object.fromEntries(["menor", "mayor", "pronto", "efectivo_credito", "efectivo_pronto"].map((k) => [k, String(d[k] || "").trim() === "" ? 0 : numTxt(d[k])]));
+
   async function vInventario(v, _p, _q, vigente) {
     const r = await api("inventario");
     if (!vigente()) return;
     const nombre = (c) => (allProductsMap()[c] || {}).name;
     const prods = r.productos.map((x) => ({ ...x, producto: nombre(x.code) || x.producto }));
-    const fila = (x) => `<li class="inv-fila" data-code="${esc(x.code)}" data-texto="${esc((x.producto + " " + x.code).toLowerCase())}">
-        <div class="inv-top"><div><strong>${esc(x.producto)}</strong><span class="ped-det">${esc(x.code)}</span></div>
-          <div class="inv-stock${x.controlado && x.disponible <= 0 ? " agotado" : ""}">${x.controlado ? `<strong>${x.disponible}</strong><span>disponibles</span>` : '<span>Sin cargar</span>'}</div></div>
+    const precioTxt = (x) => x.menor
+      ? `Normal ${dinero(x.menor)}${x.mayor ? ` · Mayor ${dinero(x.mayor)}` : ""}${x.pronto ? ` · Pronto ${dinero(x.pronto)}` : ""}${x.efectivo_credito ? ` · Ef. crédito ${dinero(x.efectivo_credito)}` : ""}${x.efectivo_pronto ? ` · Ef. pronto ${dinero(x.efectivo_pronto)}` : ""}`
+      : "<em>Sin precio</em>";
+    const fila = (x) => `<li class="inv-fila${x.controlado && x.disponible <= 0 ? " sin-stock" : ""}" data-code="${esc(x.code)}" data-texto="${esc((x.producto + " " + x.code).toLowerCase())}">
+        <div class="inv-top">
+          <label class="inv-check"><input type="checkbox" value="${esc(x.code)}" aria-label="Elegir ${esc(x.producto)}" /></label>
+          <div class="inv-nombre"><strong>${esc(x.producto)}</strong><span class="ped-det">${esc(x.code)}${x.nuevo ? ' · <span class="etq-nuevo">Nuevo</span>' : ""}</span></div>
+          <div class="inv-stock${x.controlado && x.disponible <= 0 ? " agotado" : ""}">${x.controlado ? `<strong>${x.disponible}</strong><span>${x.disponible <= 0 ? "sin stock" : "disponibles"}</span>` : '<span>Sin cargar</span>'}</div></div>
         <p class="ped-det">${x.controlado ? `Cargado ${x.cargado} · aprobado ${x.aprobado}` : "No se controla hasta la primera entrada"}${x.en_proceso ? ` · en proceso ${x.en_proceso}` : ""}</p>
-        <p class="ped-det inv-precios">${x.menor ? `Menor ${dinero(x.menor)} · Mayor ${dinero(x.mayor || x.menor)} · Pronto −${dinero(x.desc_pronto)} · Ef. créd. −${dinero(x.desc_efectivo_credito)} · Ef. pronto −${dinero(x.desc_efectivo_pronto)}` : "<em>Sin precio</em>"}</p>
-        <div class="inv-botones"><button type="button" class="btn btn-ghost" data-inv="entrada">Entrada / ajuste</button><button type="button" class="btn btn-ghost" data-inv="precio">Precios</button></div>
+        <p class="ped-det inv-precios">${precioTxt(x)}</p>
+        <div class="inv-botones"><button type="button" class="btn btn-ghost" data-inv="entrada">Entrada / ajuste</button><button type="button" class="btn btn-ghost" data-inv="precio">Precios</button>${x.nuevo ? '<button type="button" class="btn btn-ghost" data-inv="editar">Editar</button>' : ""}</div>
       </li>`;
     const sinPrecio = prods.filter((x) => !x.menor).length;
     v.innerHTML = `
+      <button type="button" class="btn btn-primary btn-bloque" id="btnNuevoProd">Nuevo producto</button>
       <div class="buscador"><input type="search" id="invBuscar" placeholder="Buscar producto o código" autocomplete="off" value="${esc(busquedaInv)}" /></div>
-      ${sinPrecio ? `<p class="aviso-chico">${sinPrecio} producto(s) sin precio. Cargalos con <strong>Precios</strong> o en la hoja <em>Precios</em>.</p>` : ""}
+      ${sinPrecio ? `<p class="aviso-chico">${sinPrecio} producto(s) sin precio. Elegí varios con la casilla y tocá <strong>Poner precios</strong>.</p>` : ""}
+      <div class="fila-elegir"><label class="check"><input type="checkbox" id="invTodos" /> Elegir todos los que se ven</label></div>
       <ul class="lista-inv" id="invLista">${prods.map(fila).join("")}</ul>
+      <div class="barra-accion" id="invBarra" hidden><div><strong id="invSel">0 elegidos</strong><span> · mismo precio para todos</span></div><button type="button" class="btn btn-primary" id="btnPreciosVarios">Poner precios</button></div>
       <details class="tarjeta"><summary class="sub-titulo">Últimos movimientos</summary>
-        ${r.movimientos.length ? `<ul class="resumen-items">${r.movimientos.slice(0, 30).map((m) => `<li><span>${esc(nombre(m.code) || m.producto)} <span class="ped-det">${esc(new Date(m.fecha).toLocaleDateString("es-VE"))} · ${esc(m.usuario)}${m.nota ? " · " + esc(m.nota) : ""}</span></span><em>${m.cajas > 0 ? "+" : ""}${m.cajas}</em></li>`).join("")}</ul>` : '<p class="modal-sub">Todavía no hay entradas.</p>'}
+        ${r.movimientos.length ? `<ul class="resumen-items">${r.movimientos.slice(0, 30).map((m) => `<li><span>${esc(nombre(m.code) || m.producto)} <span class="ped-det">${esc(new Date(m.fecha).toLocaleDateString("es-VE"))} · ${esc(m.usuario)}${m.nota ? " · " + esc(m.nota) : ""}</span></span><em>${m.tipo === "alta" ? "alta" : `${m.cajas > 0 ? "+" : ""}${m.cajas}`}</em></li>`).join("")}</ul>` : '<p class="modal-sub">Todavía no hay entradas.</p>'}
       </details>
-      <p class="nota-chica">Disponible = entradas y ajustes − pedidos aprobados (aprobado, en ruta y entregado). Al anular un pedido aprobado la mercancía vuelve.</p>`;
+      <p class="nota-chica">Disponible = entradas y ajustes − pedidos aprobados. Los productos sin stock salen en gris en el catálogo y no se pueden pedir. Un producto nuevo empieza sin stock hasta su primera entrada.</p>`;
     const filtrar = () => { const q = busquedaInv.trim().toLowerCase(); v.querySelectorAll(".inv-fila").forEach((li) => { li.hidden = !!q && !li.dataset.texto.includes(q); }); };
     filtrar();
+    const elegidos = () => [...v.querySelectorAll(".inv-check input:checked")].map((c) => c.value);
+    const pintarSel = () => {
+      const n = elegidos().length;
+      $("invBarra").hidden = !n;
+      $("invSel").textContent = `${n} elegido${n === 1 ? "" : "s"}`;
+      v.querySelectorAll(".inv-fila").forEach((li) => li.classList.toggle("elegida", li.querySelector(".inv-check input").checked));
+    };
     $("invBuscar").addEventListener("input", (e) => { busquedaInv = e.target.value; filtrar(); });
+    $("invLista").addEventListener("change", pintarSel);
+    $("invTodos").addEventListener("change", (e) => {
+      v.querySelectorAll(".inv-fila:not([hidden]) .inv-check input").forEach((c) => (c.checked = e.target.checked));
+      pintarSel();
+    });
+    const guardarPrecios = async (codes, titulo, previo) => {
+      const d = await hoja({ titulo, cuerpo: camposPrecios(previo), ok: "Guardar precios", validar: validarPrecios });
+      if (!d) return false;
+      try {
+        const res = await api("guardarPrecio", { codes, ...preciosDe(d) });
+        toast(res.guardados > 1 ? `Precios guardados en ${res.guardados} productos` : "Precios guardados");
+        SkalaAPI.catalogo(true).catch(() => {});
+        render();
+        return true;
+      } catch (e2) { toast(e2.message); return false; }
+    };
+    $("btnPreciosVarios").addEventListener("click", () => {
+      const codes = elegidos();
+      if (codes.length) guardarPrecios(codes, `Precios para ${codes.length} producto${codes.length === 1 ? "" : "s"}`);
+    });
+    $("btnNuevoProd").addEventListener("click", () => formProducto(null));
     $("invLista").addEventListener("click", async (e) => {
       const b = e.target.closest("[data-inv]");
       if (!b) return;
       const x = prods.find((p) => p.code === b.closest(".inv-fila").dataset.code);
-      const num = (t) => { const n = Number(String(t ?? "").trim().replace(",", ".")); return isFinite(n) ? n : NaN; };
-      if (b.dataset.inv === "entrada") {
-        const d = await hoja({
-          titulo: `${x.producto} · inventario`,
-          cuerpo: `<p class="modal-sub">${x.controlado ? `Disponible ahora: <strong>${x.disponible}</strong> cajas.` : "Primera carga: desde aquí se empieza a controlar el stock."}</p>
-            <fieldset class="pay"><legend>Tipo</legend>
-              <label class="pay-opt"><input type="radio" name="tipo" value="entrada" checked /> Entrada de mercancía</label>
-              <label class="pay-opt"><input type="radio" name="tipo" value="ajuste" /> Ajuste (conteo, rotura…) — puede ser negativo</label></fieldset>
-            <label class="field field-full"><span>Cajas *</span><input name="cajas" id="hCajas" inputmode="numeric" autocomplete="off" placeholder="ej. 20 (ajuste: -2)" /></label>
-            <label class="field field-full"><span>Nota</span><input name="nota" maxlength="200" autocomplete="off" placeholder="Factura del proveedor, motivo del ajuste…" /></label>`,
-          ok: "Guardar",
-          validar: (d2) => {
-            const n = Math.round(num(d2.cajas));
-            if (!n) return "Indicá la cantidad de cajas.";
-            if (d2.tipo === "entrada" && n < 0) return "Una entrada debe ser mayor que 0. Para restar elegí Ajuste.";
-            if (d2.tipo === "ajuste" && !d2.nota.trim()) return "Escribí el motivo del ajuste.";
-            return "";
-          },
-        });
-        if (!d) return;
-        try {
-          const res = await api("movimiento", { code: x.code, producto: x.producto, cajas: Math.round(num(d.cajas)), tipo: d.tipo, nota: d.nota.trim() });
-          toast(`${x.producto}: ${res.disponible} disponibles`);
-          SkalaAPI.catalogo(true).catch(() => {});
-          render();
-        } catch (e2) { toast(e2.message); }
-        return;
-      }
-      const val = (k) => (x[k] ? String(x[k]).replace(".", ",") : "");
-      const campo = (k, t, ph) => `<label class="field"><span>${t}</span><input name="${k}" inputmode="decimal" autocomplete="off" placeholder="${ph}" value="${val(k)}" /></label>`;
+      if (b.dataset.inv === "precio") return guardarPrecios([x.code], `Precios · ${x.producto}`, x);
+      if (b.dataset.inv === "editar") return formProducto(x);
       const d = await hoja({
-        titulo: `Precios · ${x.producto}`,
-        cuerpo: `<p class="modal-sub">En dólares por caja. Los descuentos se restan del precio menor o mayor según cómo pague.</p>
-          <div class="form-grid">${campo("menor", "Al por menor *", "menos de 15 cajas")}${campo("mayor", "Al mayor", "15 cajas o más")}
-          ${campo("desc_pronto", "Desc. pronto pago", "0")}${campo("desc_efectivo_credito", "Desc. efectivo a crédito", "0")}${campo("desc_efectivo_pronto", "Desc. efectivo pronto pago", "0")}</div>`,
-        ok: "Guardar precios",
+        titulo: `${x.producto} · inventario`,
+        cuerpo: `<p class="modal-sub">${x.controlado ? `Disponible ahora: <strong>${x.disponible}</strong> cajas.` : "Primera carga: desde aquí se empieza a controlar el stock."}</p>
+          <fieldset class="pay"><legend>Tipo</legend>
+            <label class="pay-opt"><input type="radio" name="tipo" value="entrada" checked /> Entrada de mercancía</label>
+            <label class="pay-opt"><input type="radio" name="tipo" value="ajuste" /> Ajuste (conteo, rotura…) — puede ser negativo</label></fieldset>
+          <label class="field field-full"><span>Cajas *</span><input name="cajas" id="hCajas" inputmode="numeric" autocomplete="off" placeholder="ej. 20 (ajuste: -2)" /></label>
+          <label class="field field-full"><span>Nota</span><input name="nota" maxlength="200" autocomplete="off" placeholder="Factura del proveedor, motivo del ajuste…" /></label>`,
+        ok: "Guardar",
         validar: (d2) => {
-          const n = Object.fromEntries(Object.entries(d2).map(([k, t]) => [k, t.trim() === "" ? 0 : num(t)]));
-          if (Object.values(n).some((y) => !(y >= 0))) return "Revisá los montos: solo números (ej. 12,50).";
-          if (!n.menor) return "Falta el precio al por menor.";
-          if (n.mayor > n.menor) return "El precio al mayor no puede ser más alto que al por menor.";
+          const n = Math.round(numTxt(d2.cajas));
+          if (!n) return "Indicá la cantidad de cajas.";
+          if (d2.tipo === "entrada" && n < 0) return "Una entrada debe ser mayor que 0. Para restar elegí Ajuste.";
+          if (d2.tipo === "ajuste" && !d2.nota.trim()) return "Escribí el motivo del ajuste.";
           return "";
         },
       });
       if (!d) return;
       try {
-        const datos = Object.fromEntries(Object.entries(d).map(([k, t]) => [k, t.trim() === "" ? 0 : num(t)]));
-        await api("guardarPrecio", { code: x.code, producto: x.producto, ...datos });
-        toast(`Precios de ${x.producto} guardados`);
+        const res = await api("movimiento", { code: x.code, producto: x.producto, cajas: Math.round(numTxt(d.cajas)), tipo: d.tipo, nota: d.nota.trim() });
+        toast(`${x.producto}: ${res.disponible} disponibles`);
         SkalaAPI.catalogo(true).catch(() => {});
         render();
       } catch (e2) { toast(e2.message); }
     });
+  }
+
+  /* Producto nuevo (o editar uno nuevo): sale en el catálogo y en el panel */
+  async function formProducto(x) {
+    const i = (x && x.info) || {};
+    const val = (k) => esc(i[k] ?? "");
+    const lineas = [...new Set([...BANOS, ...KITS].map((p) => p.line))].sort();
+    const d = await hoja({
+      titulo: x ? `Editar ${x.producto}` : "Nuevo producto",
+      cuerpo: `<fieldset class="pay"><legend>Tipo</legend>
+          <label class="pay-opt"><input type="radio" name="tipo" value="banos"${i.tipo !== "kits" ? " checked" : ""} /> Baño de crema (caja x unidades)</label>
+          <label class="pay-opt"><input type="radio" name="tipo" value="kits"${i.tipo === "kits" ? " checked" : ""} /> Kit shampoo + acondicionador (caja x dúos)</label></fieldset>
+        <div class="form-grid">
+          <label class="field field-full"><span>Nombre *</span><input name="nombre" maxlength="80" autocomplete="off" placeholder="ej. Coco Power" value="${val("nombre")}" /></label>
+          <label class="field"><span>Línea</span><input name="linea" maxlength="40" autocomplete="off" list="lineasProd" placeholder="ej. Nutrición" value="${val("linea")}" /></label>
+          <datalist id="lineasProd">${lineas.map((l) => `<option value="${esc(l)}">`).join("")}</datalist>
+          <label class="field"><span>Tipo de cabello</span><input name="cabello" maxlength="20" autocomplete="off" placeholder="1A–4C" value="${val("cabello")}" /></label>
+          <label class="field"><span>Unidades por caja</span><input name="unidades_caja" inputmode="numeric" autocomplete="off" placeholder="6" value="${val("unidades")}" /></label>
+          <label class="field"><span>Código (opcional)</span><input name="code" maxlength="20" autocomplete="off" autocapitalize="characters" placeholder="automático" value="${esc(x ? x.code : "")}"${x ? " readonly" : ""} /></label>
+          <label class="field field-full"><span>Beneficio (texto del catálogo)</span><input name="beneficio" maxlength="200" autocomplete="off" placeholder="ej. Nutrición intensa con coco" value="${val("beneficio")}" /></label>
+          <label class="field field-full"><span>Foto (enlace https, opcional)</span><input name="imagen" maxlength="400" inputmode="url" autocomplete="off" placeholder="https://…" value="${val("imagen")}" /></label>
+        </div>
+        ${x ? "" : `<details class="precios-nuevo"><summary>Precios (opcional, se pueden poner después)</summary>${camposPrecios(null)}</details>`}
+        <p class="nota-chica">${x ? "" : "Empieza <strong>sin stock</strong>: en el catálogo sale en gris hasta cargar su primera entrada. "}Sin foto se muestra un dibujo con el nombre.</p>`,
+      ok: x ? "Guardar cambios" : "Crear producto",
+      validar: (d2) => {
+        if (!d2.nombre.trim()) return "Escribí el nombre del producto.";
+        if (d2.imagen.trim() && !/^https:\/\//.test(d2.imagen.trim())) return "La foto debe ser un enlace que empiece con https://";
+        if (d2.unidades_caja.trim() && !(Number(d2.unidades_caja) >= 1)) return "Revisá las unidades por caja.";
+        if (!x && String(d2.menor || "").trim()) return validarPrecios(d2);
+        return "";
+      },
+    });
+    if (!d) return;
+    try {
+      const datos = { code: d.code.trim(), editar: !!x, nombre: d.nombre.trim(), tipo: d.tipo, linea: d.linea.trim(), cabello: d.cabello.trim(),
+        unidades_caja: d.unidades_caja.trim() || 6, beneficio: d.beneficio.trim(), imagen: d.imagen.trim() };
+      if (!x && String(d.menor || "").trim()) Object.assign(datos, preciosDe(d));
+      const res = await api("guardarProducto", datos);
+      toast(x ? "Producto actualizado" : `Producto ${res.producto.code} creado (sin stock)`);
+      const cat = await SkalaAPI.catalogo(true).catch(() => null);
+      if (cat) sumarProductosNuevos(cat.productos);
+      render();
+    } catch (e2) { toast(e2.message); }
   }
 
   /* ---------- Usuarios (Master) ---------- */
@@ -1805,6 +1910,8 @@
     $("btnSubirPend").addEventListener("click", () => subirCola(true));
     $("vista").addEventListener("click", (e) => {
       if (e.target.closest("[data-reintentar]")) render();
+      const env = e.target.closest("[data-enviar]");
+      if (env) { e.preventDefault(); irAEnviar(); return; }
       const ver = e.target.closest(".ver-clave");
       if (ver) {
         const inp = $(ver.dataset.ver);

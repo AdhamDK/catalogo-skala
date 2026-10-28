@@ -47,3 +47,47 @@ function allProductsMap() {
   [...BANOS, ...KITS].forEach((p) => { m[p.code] = p; });
   return m;
 }
+
+/* -------------------- Productos nuevos (cargados en el panel) --------------------
+   El CRM (acción "catalogo") trae los productos que no están arriba con su "info".
+   Se suman a BANOS / KITS para que salgan en el catálogo y en el panel. */
+function sumarProductosNuevos(productos) {
+  const map = allProductsMap();
+  let cambio = false;
+  (productos || []).forEach((x) => {
+    const i = x && x.info;
+    if (!i || !x.code) return;
+    const lista = i.tipo === "kits" ? KITS : BANOS;
+    const prev = map[x.code];
+    const p = prev || { code: x.code, nuevo: true };
+    const datos = {
+      name: i.nombre || x.code, line: i.linea || (i.tipo === "kits" ? "Kits" : "Nuevo"), benefit: i.beneficio || "",
+      hair: i.cabello || "1A–4C", unidades: Number(i.unidades) || 6, unidad: i.tipo === "kits" ? "dúos" : "unidades", foto: i.imagen || "",
+    };
+    if (!prev || Object.keys(datos).some((k) => p[k] !== datos[k])) { Object.assign(p, datos); cambio = true; }
+    if (!prev) lista.push(p);
+  });
+  return cambio;
+}
+
+/* Foto de un producto: WebP liviano + PNG (los de siempre), enlace propio o dibujo (los nuevos) */
+function fotoVacia(nombre) {
+  const t = String(nombre || "").replace(/[<&>"']/g, "");
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='400' height='317'><rect width='100%' height='100%' fill='#fdf0f5'/>
+    <text x='50%' y='46%' font-family='Arial' font-size='30' font-weight='bold' fill='#e94e8c' text-anchor='middle'>${t}</text>
+    <text x='50%' y='60%' font-family='Arial' font-size='18' fill='#9a9488' text-anchor='middle'>Foto próximamente</text></svg>`;
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+}
+function fotoHTML(code, { ancho = 64, alto = 51, alt = "", grande = false, sizes = "", carga = 'loading="lazy"' } = {}) {
+  const p = allProductsMap()[code] || {};
+  const img = (src) => `<img src="${src}" alt="${alt}" width="${ancho}" height="${alto}" ${carga} decoding="async" />`;
+  if (p.nuevo) return `<picture>${img(p.foto || fotoVacia(p.name || code))}</picture>`;
+  const web = `assets/img/web/${code}`;
+  const set = grande ? `${web}-400.webp 400w, ${web}-800.webp 800w` : `${web}-400.webp`;
+  return `<picture><source type="image/webp" srcset="${set}"${sizes ? ` sizes="${sizes}"` : ""} />${img(`assets/img/${code}.png`)}</picture>`;
+}
+function fotoGrande(code) {
+  const p = allProductsMap()[code] || {};
+  if (p.nuevo) return p.foto || fotoVacia(p.name || code);
+  return `assets/img/web/${code}-800.webp`;
+}

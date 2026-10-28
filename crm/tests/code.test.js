@@ -40,7 +40,8 @@ test("crea 9 hojas; Clientes empieza con las columnas de GPS_CLIENTES; Precios y
   assert.deepEqual(Object.keys(g.hojas).sort(), ["Clientes", "Config", "Historial", "Inventario", "PedidoItems", "Pedidos", "PedidosWeb", "Precios", "Usuarios"]);
   assert.deepEqual(g.tabla("Config").map((x) => x.clave), ["version_apk", "url_apk", "minima_apk", "version_pantallas", "url_pantallas", "notas"]);
   assert.equal(g.tabla("Precios").length, 19);
-  assert.deepEqual(g.tabla("Precios")[0], { code: "BC-01", producto: "Babosa", menor: "", mayor: "", desc_pronto: "", desc_efectivo_credito: "", desc_efectivo_pronto: "", updated_at: "", updated_por: "" });
+  assert.deepEqual(g.tabla("Precios")[0], { code: "BC-01", producto: "Babosa", menor: "", mayor: "", pronto: "", efectivo_credito: "", efectivo_pronto: "", updated_at: "", updated_por: "",
+    tipo: "", linea: "", beneficio: "", cabello: "", unidades_caja: "", imagen: "" });
   g.ctx.prepararHojas(); // no duplica
   assert.equal(g.tabla("Precios").length, 19);
   assert.deepEqual(g.tabla("Clientes").length, 0);
@@ -553,9 +554,10 @@ test("conciliados del período: solo cobros conciliados, cada rol ve lo suyo", (
 /* ---------- Precios e inventario (v3) ---------- */
 function conPrecios(g) {
   const tk = login(g, "ana", "Ana*2222");
-  // Babosa: menor 10, mayor 8, descuentos 1 / 3 / 4 · Kit: menor 20, mayor 18, descuentos 2 / 6 / 8
-  assert.equal(g.post({ action: "guardarPrecio", token: tk, code: "BC-01", menor: "10", mayor: "8", desc_pronto: 1, desc_efectivo_credito: 3, desc_efectivo_pronto: 4 }).ok, true);
-  assert.equal(g.post({ action: "guardarPrecio", token: tk, code: "KT-01", menor: 20, mayor: "18,00", desc_pronto: 2, desc_efectivo_credito: 6, desc_efectivo_pronto: 8 }).ok, true);
+  // Precios FINALES · Babosa: normal 10, mayor 8, pronto 9, efectivo crédito 7, efectivo pronto 6 (rebajas 1 / 3 / 4)
+  // Kit: normal 20, mayor 18, pronto 18, efectivo crédito 14, efectivo pronto 12 (rebajas 2 / 6 / 8)
+  assert.equal(g.post({ action: "guardarPrecio", token: tk, code: "BC-01", menor: "10", mayor: "8", pronto: 9, efectivo_credito: 7, efectivo_pronto: 6 }).ok, true);
+  assert.equal(g.post({ action: "guardarPrecio", token: tk, code: "KT-01", menor: 20, mayor: "18,00", pronto: 18, efectivo_credito: "14", efectivo_pronto: 12 }).ok, true);
   return tk;
 }
 
@@ -566,7 +568,8 @@ test("precios: solo gestión los edita; validaciones; catálogo público con pre
   const ta = conPrecios(g);
   assert.match(g.post({ action: "guardarPrecio", token: ta, code: "BC-02", menor: 5, mayor: 6 }).error, /mayor no puede/);
   assert.match(g.post({ action: "guardarPrecio", token: ta, code: "BC-02", menor: "" }).error, /por menor/);
-  assert.match(g.post({ action: "guardarPrecio", token: ta, code: "BC-02", menor: 5, desc_pronto: -1 }).error, /Revisá/);
+  assert.match(g.post({ action: "guardarPrecio", token: ta, code: "BC-02", menor: 5, pronto: -1 }).error, /Revisá/);
+  assert.match(g.post({ action: "guardarPrecio", token: ta, code: "BC-02", menor: 5, efectivo_pronto: 6 }).error, /efectivo pronto pago no puede ser más alto/);
   const fila = g.tabla("Precios").find((x) => x.code === "BC-01");
   assert.equal(fila.menor, 10); assert.equal(fila.updated_por, "Ana");
   assert.equal(g.tabla("Precios").length, 19); // actualiza la fila, no agrega
@@ -842,4 +845,57 @@ test("Master puede asignar varios roles; validaciones de roles y del último Mas
   assert.match(g.post({ action: "guardarUsuario", token: tj, id: jose, usuario: "jose", nombre: "José", roles: ["admin", "vendedor"] }).error, /Master activo/);
   // sumar Master exige clave de 8
   assert.match(g.post({ action: "guardarUsuario", token: tj, id: luis, usuario: "luis", nombre: "Luis", roles: ["master", "despachador"] }).error, /clave nueva/);
+});
+
+test("precios finales: el de cada forma de pago es el que paga el cliente; varios productos a la vez", () => {
+  const g = preparar();
+  const ta = login(g, "ana", "Ana*2222");
+  // ejemplo del dueño: 29,5 · 28,3 · 24 · 23,3
+  let r = g.post({ action: "guardarPrecio", token: ta, codes: ["BC-02", "BC-03", "bc-04"], menor: "29,5", mayor: 27, pronto: "28,3", efectivo_credito: 24, efectivo_pronto: "23,3" });
+  assert.equal(r.ok, true); assert.equal(r.guardados, 3);
+  const p = g.tabla("Precios").find((x) => x.code === "BC-04");
+  assert.deepEqual([p.menor, p.pronto, p.efectivo_credito, p.efectivo_pronto], [29.5, 28.3, 24, 23.3]);
+  const cat = g.post({ action: "catalogo" }).productos.find((x) => x.code === "BC-03");
+  assert.deepEqual([cat.desc_pronto, cat.desc_efectivo_credito, cat.desc_efectivo_pronto], [1.2, 5.5, 6.2]);
+  const tv = login(g);
+  const items = [{ code: "BC-02", producto: "Banana", cajas: 2 }];
+  const t = (tipo, extra = {}) => pedir(g, tv, { tipo_pago: tipo, items, dias_credito: 8, ...extra }).pedido.total;
+  assert.equal(t("credito"), 59); assert.equal(t("pronto"), 56.6); assert.equal(t("efectivo_credito"), 48); assert.equal(t("efectivo_pronto"), 46.6);
+  // al mayor se aplica la misma rebaja: 27 − 6,2 = 20,8
+  assert.equal(t("efectivo_pronto", { items: [{ code: "BC-02", producto: "Banana", cajas: 15 }] }), r2(15 * 20.8));
+  // editar precios no borra los datos del producto
+  r = g.post({ action: "guardarProducto", token: ta, nombre: "Coco", tipo: "banos", linea: "Nutrición" });
+  g.post({ action: "guardarPrecio", token: ta, code: r.producto.code, menor: 12 });
+  assert.equal(g.tabla("Precios").find((x) => x.code === r.producto.code).linea, "Nutrición");
+});
+const r2 = (n) => Math.round(n * 100) / 100;
+
+test("producto nuevo: código automático, sale en el catálogo, empieza sin stock (gris) hasta cargar entrada", () => {
+  const g = preparar();
+  const ta = login(g, "ana", "Ana*2222");
+  assert.equal(g.post({ action: "guardarProducto", token: login(g), nombre: "X" }).code, "forbidden");
+  assert.match(g.post({ action: "guardarProducto", token: ta, nombre: "" }).error, /nombre/);
+  assert.match(g.post({ action: "guardarProducto", token: ta, nombre: "X", imagen: "http://x" }).error, /https/);
+  assert.match(g.post({ action: "guardarProducto", token: ta, nombre: "X", code: "BC-01" }).error, /de siempre/);
+  let r = g.post({ action: "guardarProducto", token: ta, nombre: "Coco Power", tipo: "banos", linea: "Nutrición", beneficio: "Nutre", cabello: "2A–4C", unidades_caja: 6, menor: 30, pronto: 28 });
+  assert.equal(r.ok, true, JSON.stringify(r)); assert.equal(r.producto.code, "BC-12");
+  r = g.post({ action: "guardarProducto", token: ta, nombre: "Kit Coco", tipo: "kits" });
+  assert.equal(r.producto.code, "KT-09");
+  assert.match(g.post({ action: "guardarProducto", token: ta, nombre: "Otro", code: "BC-12" }).error, /Ya existe/);
+  const cat = g.post({ action: "catalogo" }).productos;
+  const coco = cat.find((x) => x.code === "BC-12");
+  assert.deepEqual(coco.info, { nombre: "Coco Power", tipo: "banos", linea: "Nutrición", beneficio: "Nutre", cabello: "2A–4C", unidades: 6, imagen: "" });
+  assert.equal(coco.agotado, true); assert.equal(coco.menor, 30); assert.equal(coco.desc_pronto, 2);
+  assert.equal(cat.find((x) => x.code === "BC-01").info, undefined); // los de siempre no traen info
+  // no se puede pedir hasta que haya stock
+  const tv = login(g);
+  assert.match(pedir(g, tv, { tipo_pago: "pronto", items: [{ code: "BC-12", producto: "Coco Power", cajas: 1 }] }).error, /hay 0/);
+  g.post({ action: "movimiento", token: ta, code: "BC-12", cajas: 10 });
+  assert.equal(g.post({ action: "catalogo" }).productos.find((x) => x.code === "BC-12").agotado, false);
+  assert.equal(pedir(g, tv, { tipo_pago: "pronto", items: [{ code: "BC-12", producto: "Coco Power", cajas: 1 }] }).ok, true);
+  // editar
+  r = g.post({ action: "guardarProducto", token: ta, code: "BC-12", editar: true, nombre: "Coco Power 2", tipo: "banos" });
+  assert.equal(r.ok, true);
+  const inv = g.post({ action: "inventario", token: ta }).productos.find((x) => x.code === "BC-12");
+  assert.equal(inv.producto, "Coco Power 2"); assert.equal(inv.nuevo, true); assert.equal(inv.disponible, 10); assert.equal(inv.en_proceso, 1); assert.equal(inv.menor, 30);
 });

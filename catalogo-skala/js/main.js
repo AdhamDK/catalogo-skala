@@ -30,23 +30,10 @@ function savePedido() { guardar(STORAGE_KEY, pedido); }
 function totalCajas() { return Object.values(pedido).reduce((a, b) => a + (b || 0), 0); }
 
 /* -------------------- RENDER -------------------- */
-function placeholder(name) {
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='600' height='400'>
-    <rect width='100%' height='100%' fill='#fdf0f5'/>
-    <text x='50%' y='44%' font-family='Arial' font-size='34' font-weight='bold'
-      fill='#e94e8c' text-anchor='middle'>${name}</text>
-    <text x='50%' y='58%' font-family='Arial' font-size='20' fill='#9a9488'
-      text-anchor='middle'>Foto proximamente</text>
-  </svg>`;
-  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-}
-
 /* Imágenes responsive: WebP livianos (400/800 px) con PNG original de respaldo. */
 const IMG_SIZES = "(min-width: 901px) 270px, (min-width: 561px) 30vw, 46vw";
 
 function cardHTML(p, group, i = 99) {
-  const img = `assets/img/${p.code}.png`;
-  const web = `assets/img/web/${p.code}`;
   const prioridad = i < 4 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
   const q = pedido[p.code] || 0;
   return `
@@ -57,11 +44,7 @@ function cardHTML(p, group, i = 99) {
       <button type="button" class="card-zoom" data-zoom="${p.code}" aria-label="Ampliar imagen de ${p.name}" title="Ampliar imagen">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6"/></svg>
       </button>
-      <picture>
-        <source type="image/webp" srcset="${web}-400.webp 400w, ${web}-800.webp 800w" sizes="${IMG_SIZES}" />
-        <img src="${img}" alt="${p.name}" width="400" height="317" ${prioridad} decoding="async"
-             onerror="this.onerror=null; this.parentNode.querySelectorAll('source').forEach(function(s){s.remove()}); this.src=placeholder('${p.name}');" />
-      </picture>
+      ${fotoHTML(p.code, { ancho: 400, alto: 317, alt: escHTML(p.name), grande: true, sizes: IMG_SIZES, carga: prioridad })}
     </div>
     <div class="card-body">
       <span class="card-line">${p.line}</span>
@@ -109,8 +92,11 @@ function pintarCards() {
     const badge = card.querySelector("[data-badge]");
     const agotado = !!(pr && pr.agotado);
     badge.hidden = !agotado;
-    badge.textContent = agotado ? "Agotado" : "";
-    card.classList.toggle("agotado", agotado && !q);
+    badge.textContent = agotado ? "Sin stock" : "";
+    // sin stock: en gris y no se puede pedir (solo restar si ya estaba en el pedido)
+    card.classList.toggle("agotado", agotado);
+    card.querySelectorAll('[data-act="plus"], .qty-input').forEach((b) => { b.disabled = agotado; });
+    card.setAttribute("aria-disabled", String(agotado));
   });
 }
 
@@ -122,7 +108,8 @@ function applyQty() {
 
 /* -------------------- PEDIDO (acciones) -------------------- */
 function setQty(code, val) {
-  const n = Math.max(0, Math.floor(val || 0));
+  let n = Math.max(0, Math.floor(val || 0));
+  if (PRECIOS[code] && PRECIOS[code].agotado && n > (pedido[code] || 0)) { n = pedido[code] || 0; avisar("Ese producto no tiene stock por ahora."); }
   if (n) pedido[code] = n; else delete pedido[code];
   savePedido();
   marcarCambio();
@@ -189,7 +176,7 @@ function collectCliente() {
     direccion: ($id("fDireccion").value || "").trim(),
     telefono: ($id("fTelefono").value || "").trim(),
     vendedor_id: $id("fVendedor").value || "",
-    tipo_pago: (document.querySelector('input[name="pagoWeb"]:checked') || {}).value || "",
+    tipo_pago: (document.querySelector('input[name="pagoWeb"]:checked') || {}).value || "credito",
   };
 }
 function fillCliente() {
@@ -254,8 +241,9 @@ const iconoPapelera = '<svg viewBox="0 0 24 24" aria-hidden="true"><g class="tap
 function renderCarrito() {
   const its = itemsConPrecio();
   const total = totalCajas();
-  const sel = (document.querySelector('input[name="pagoWeb"]:checked') || {}).value || cliente.tipo_pago || "";
-  const tipo = sel || "credito";
+  // de inicio, el pago normal (Crédito)
+  const sel = (document.querySelector('input[name="pagoWeb"]:checked') || {}).value || cliente.tipo_pago || "credito";
+  const tipo = sel;
   const lista = $id("cartList");
   const escribiendo = document.activeElement && document.activeElement.closest && document.activeElement.closest("#cartList");
   const map = allProductsMap();
@@ -267,8 +255,7 @@ function renderCarrito() {
   if (!escribiendo || its.length !== lista.children.length) {
     lista.innerHTML = its.map((it) => `
     <li class="cart-item" data-item="${it.code}">
-      <picture class="cart-foto"><source type="image/webp" srcset="assets/img/web/${it.code}-400.webp" />
-        <img src="assets/img/${it.code}.png" alt="" width="44" height="44" loading="lazy" decoding="async" /></picture>
+      <span class="cart-foto">${fotoHTML(it.code, { ancho: 44, alto: 44 })}</span>
       <div class="cart-info"><strong>${escHTML(it.producto)}</strong><span>${escHTML(textoUnidadesCorto(map[it.code]))}</span></div>
       <div class="cart-acc">
         <div class="qty qty-chica">
@@ -293,11 +280,11 @@ function renderCarrito() {
       ${hayPrecio ? `<span class="pago-monto"><strong>${dinero(pg.total)}</strong>${pg.ahorro ? `<span>−${dinero(pg.ahorro)}</span>` : ""}</span>` : ""}
     </label>`;
   $id("pagosWeb").innerHTML = opciones.map((pg) => fila(pg, true)).join("");
-  const elegido = opciones.find((pg) => pg.id === sel);
-  const desde = Math.min(...opciones.map((pg) => pg.total));
-  $id("pagoElegido").innerHTML = elegido
-    ? `<button type="button" class="pago-resumen" data-abrir-pagos>${fila(elegido, false).replace(/^<label/, "<span").replace(/<\/label>$/, "</span>")}</button>`
-    : `<button type="button" class="pago-resumen vacio" data-abrir-pagos><span>Elegí cómo pagás${hayPrecio ? ` · desde <strong>${dinero(desde)}</strong>` : ""}</span></button>`;
+  const elegido = opciones.find((pg) => pg.id === sel) || opciones[0];
+  const pct = descuentoMaximo(its);
+  const mejor = opciones[opciones.length - 1];
+  $id("pagoElegido").innerHTML = `<button type="button" class="pago-resumen" data-abrir-pagos>${fila(elegido, false).replace(/^<label/, "<span").replace(/<\/label>$/, "</span>")}</button>
+    ${pct > 0 && elegido.id !== mejor.id ? `<button type="button" class="hasta-desc" data-abrir-pagos><span>Hasta <strong>${pct}%</strong> de descuento al nivel 3</span>${estrellasHTML(3, false)}</button>` : ""}`;
   abrirPagos(pagosAbiertos);
 }
 
@@ -360,20 +347,33 @@ function abrirZoom(code) {
   if (!p) return;
   const m = $id("zoomModal");
   const img = $id("zoomImg");
-  img.onerror = () => { img.onerror = null; img.src = `assets/img/${code}.png`; };
-  img.src = `assets/img/web/${code}-800.webp`;
+  img.onerror = () => { img.onerror = null; img.src = p.nuevo ? fotoVacia(p.name) : `assets/img/${code}.png`; };
+  img.src = fotoGrande(code);
   img.alt = p.name;
   $id("zoomTitulo").textContent = p.name;
   $id("zoomSub").textContent = `${code} · ${textoUnidades(p)} · ${p.hair}`;
   zoomFoco = document.activeElement;
+  // la foto crece desde la tarjeta tocada
+  const desde = document.querySelector(`.card[data-card="${code}"] .card-img`);
+  if (desde) {
+    const r = desde.getBoundingClientRect();
+    m.style.setProperty("--zx", `${r.left + r.width / 2 - innerWidth / 2}px`);
+    m.style.setProperty("--zy", `${r.top + r.height / 2 - innerHeight / 2}px`);
+  }
+  m.classList.remove("cerrando");
   m.hidden = false;
+  void m.offsetWidth;
+  m.classList.add("abierto");
   document.body.classList.add("modal-open");
   $id("zoomCerrar").focus({ preventScroll: true });
 }
 function cerrarZoom() {
   const m = $id("zoomModal");
-  if (!m || m.hidden) return false;
-  m.hidden = true;
+  if (!m || m.hidden || m.classList.contains("cerrando")) return !!(m && !m.hidden);
+  m.classList.remove("abierto");
+  m.classList.add("cerrando");
+  const fin = () => { m.hidden = true; m.classList.remove("cerrando"); };
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) fin(); else setTimeout(fin, 220);
   if ($id("orderModal").hidden) document.body.classList.remove("modal-open");
   if (zoomFoco && zoomFoco.focus) zoomFoco.focus({ preventScroll: true });
   return true;
@@ -400,13 +400,25 @@ function avisar(msg) {
 /* Precios y existencias: lo guardado ya, y se actualiza desde el CRM */
 function cargarPrecios() {
   if (typeof SkalaAPI === "undefined") return;
-  PRECIOS = SkalaAPI.preciosMapa(SkalaAPI.catalogoGuardado());
+  const guardado = SkalaAPI.catalogoGuardado();
+  if (guardado && sumarProductosNuevos(guardado.productos)) renderTodo();
+  PRECIOS = SkalaAPI.preciosMapa(guardado);
   pintarCards(); updateBar();
   SkalaAPI.catalogo().then((d) => {
     PRECIOS = SkalaAPI.preciosMapa(d);
+    if (sumarProductosNuevos(d.productos)) renderTodo();
     pintarCards(); updateBar();
     if (!$id("orderModal").hidden) { renderCarrito(); refreshMessage(); }
   }).catch(() => {});
+}
+
+/* Dibuja las dos grillas respetando el filtro elegido */
+function renderTodo() {
+  const act = document.querySelector("#filterBanos .filter.active");
+  const f = act ? act.dataset.filter : "all";
+  render("gridBanos", f === "all" ? BANOS : BANOS.filter((p) => p.line === f), "Baño de crema 1kg");
+  render("gridKits", KITS, "Kit shampoo + acondicionador");
+  applyQty();
 }
 
 /* -------------------- INICIALIZACIÓN -------------------- */
@@ -452,7 +464,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const card = e.target.closest(".card[data-card]");
     if (card && !e.target.closest(".card-order, a, input, button")) {
       const code = card.dataset.card;
-      if (PRECIOS[code] && PRECIOS[code].agotado) { avisar("Ese producto está agotado por ahora."); return; }
+      if (PRECIOS[code] && PRECIOS[code].agotado) { avisar("Ese producto no tiene stock por ahora."); return; }
       setQty(code, (pedido[code] || 0) + 1);
       card.classList.remove("pulso"); void card.offsetWidth; card.classList.add("pulso");
     }

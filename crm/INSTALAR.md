@@ -83,12 +83,14 @@ vendedor. La lista se muestra al instante con lo guardado y se actualiza por det
 pedido es inmediato y el historial llega después.
 
 ## Precios e inventario
-- **Precios** (hoja `Precios` o panel → Más → *Inventario y precios*), en **$ por caja**:
-  `menor` (menos de 15 cajas), `mayor` (15 cajas o más) y tres **descuentos** que se restan según
-  cómo pague: `desc_pronto` (pronto pago: paga hasta el día siguiente a la entrega),
-  `desc_efectivo_credito` y `desc_efectivo_pronto`.
-  Ejemplo: menor 10 $ con descuentos 1 / 3 / 4 → 10 cajas = Crédito 100 $ · Pronto pago 90 $ ·
-  Efectivo a crédito 70 $ · Efectivo pronto pago 60 $.
+- **Precios** (hoja `Precios` o panel → Más → *Inventario y precios*): el **precio final** en $ por
+  caja que paga el cliente en cada forma de pago: `menor` (normal, crédito), `mayor` (15 cajas o
+  más), `pronto`, `efectivo_credito` y `efectivo_pronto`. Ejemplo: 29,5 · 28,3 · 24 · 23,3.
+  Al precio al mayor se le aplica la misma rebaja (normal − precio de esa forma de pago).
+  Se pueden **elegir varios productos** con la casilla y ponerles los mismos precios.
+- **Producto nuevo** (Inventario y precios → Nuevo producto): nombre, tipo (baño o kit), línea,
+  cabello, unidades por caja, foto (enlace https, opcional) y precios. Sale en el catálogo y en el
+  panel; empieza **sin stock** (en gris, no se puede pedir) hasta cargar su primera entrada.
 - El vendedor puede dar **precio al mayor por excepción** (ej. 10 cajas a precio mayor).
 - Al **marcar cancelado** se elige cómo pagó de verdad (ej. era crédito y pagó en efectivo al
   contado): el total final se recalcula con ese descuento.

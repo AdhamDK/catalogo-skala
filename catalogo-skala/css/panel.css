@@ -485,3 +485,30 @@ html[data-tema="oscuro"] .item-foto { background: #2e2b26; }
 .lista-ped .grupo-tit b { margin-left: 4px; padding: 1px 7px; border-radius: 999px; background: var(--borde); color: var(--tinta); }
 .fila-linea { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .fila-monto { font-size: 1.02rem; white-space: nowrap; }
+
+/* ---------- Pasos del pedido: lo que falta en rojo, lo que está en verde ---------- */
+.pasos .hecho > a { border-color: var(--verde); }
+.pasos li.falta-anim > a { animation: falta .55s ease; border-color: #d93025; color: #b3261e; background: #fdecea; }
+.pasos li.falta-anim b { background: #d93025 !important; color: #fff !important; }
+.pasos li.ok-anim > a { animation: okpaso .55s ease; border-color: var(--verde); background: var(--verde-suave); }
+.pasos li.ok-anim b { background: var(--verde) !important; color: #fff !important; }
+@keyframes falta { 0%, 100% { transform: none; } 20% { transform: translateX(-6px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } }
+@keyframes okpaso { 0% { transform: none; } 40% { transform: scale(1.06); } 100% { transform: none; } }
+html[data-tema="oscuro"] .pasos li.falta-anim > a { background: rgba(217, 48, 37, 0.18); color: #ff8a80; }
+.cliente-elegido.sin-cliente { border-style: dashed; }
+.item-foto picture { display: block; width: 100%; height: 100%; }
+.pcard.sin-stock .pcard-tap picture, .pcard.sin-stock strong, .pcard.sin-stock .pcard-precio { filter: grayscale(1); }
+
+/* ---------- Inventario: elegir varios, producto nuevo ---------- */
+.inv-top { align-items: center; }
+.inv-check { flex: 0 0 auto; display: grid; place-items: center; width: 44px; height: 44px; margin: -8px -4px -8px -10px; }
+.inv-check input { width: 22px; height: 22px; accent-color: var(--verde); }
+.inv-nombre { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.inv-fila.elegida { border-color: var(--verde); background: var(--verde-suave); }
+.inv-fila.sin-stock .inv-nombre strong { color: var(--tinta-suave); }
+.etq-nuevo { padding: 0 6px; border-radius: 999px; background: #fde8f1; color: #9b1f52; font-weight: 700; font-size: 0.72rem; }
+html[data-tema="oscuro"] .etq-nuevo { background: rgba(233, 78, 140, 0.18); color: #f7a8c8; }
+.mini-est { color: #d39a00; letter-spacing: -1px; font-size: 0.8rem; }
+.precios-nuevo { margin: 8px 0; }
+.precios-nuevo summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--enlace); font-weight: 600; }
+#invBarra { position: sticky; }

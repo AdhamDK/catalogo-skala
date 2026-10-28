@@ -92,7 +92,11 @@ var HOJAS = {
   PedidoItems: ['pedido_id', 'code', 'producto', 'cajas', 'unidades_caja', 'unidad', 'total_unidades',
                 'precio', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto'],
   Historial: ['fecha', 'pedido_id', 'usuario', 'accion', 'detalle'],
-  Precios: ['code', 'producto', 'menor', 'mayor', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto', 'updated_at', 'updated_por'],
+  // Precios FINALES en $ por caja: menor (normal), mayor (15+ cajas), pronto, efectivo_credito, efectivo_pronto.
+  // Al mayor se le aplica la misma rebaja (menor − precio de esa forma de pago).
+  // Productos nuevos: datos para el catálogo (tipo banos/kits, línea, beneficio, cabello, unidades, imagen).
+  Precios: ['code', 'producto', 'menor', 'mayor', 'pronto', 'efectivo_credito', 'efectivo_pronto', 'updated_at', 'updated_por',
+            'tipo', 'linea', 'beneficio', 'cabello', 'unidades_caja', 'imagen'],
   // Entradas de mercancía y ajustes (positivo o negativo). Lo aprobado se descuenta solo.
   Inventario: ['fecha', 'code', 'producto', 'cajas', 'tipo', 'nota', 'usuario'],
   // Pedidos que arma el cliente en el catálogo: esperan a que su vendedor los tome
@@ -143,6 +147,7 @@ var ACCIONES = {
   inventario: [accionInventario_, GESTION],
   movimiento: [accionMovimiento_, GESTION],
   guardarPrecio: [accionGuardarPrecio_, GESTION],
+  guardarProducto: [accionGuardarProducto_, GESTION],
   despachadores: [accionDespachadores_, GESTION],
   resumen: [accionResumen_, TOMAN_PEDIDOS],
   usuarios: [accionUsuarios_, ['master']],
@@ -499,8 +504,14 @@ function tablaPrecios_() {
   leer_('Precios').forEach(function (x) {
     var code = String(x.code).trim().toUpperCase();
     if (!code) return;
-    m[code] = { code: code, producto: String(x.producto), menor: numPrecio_(x.menor), mayor: numPrecio_(x.mayor),
-      desc_pronto: numPrecio_(x.desc_pronto), desc_efectivo_credito: numPrecio_(x.desc_efectivo_credito), desc_efectivo_pronto: numPrecio_(x.desc_efectivo_pronto), _fila: x._fila };
+    var menor = numPrecio_(x.menor);
+    // rebaja de cada forma de pago = normal − precio final (0 si no se cargó o es mayor)
+    var rebaja = function (v) { var n = numPrecio_(v); return n && menor && n < menor ? r2_(menor - n) : 0; };
+    m[code] = { code: code, producto: String(x.producto), menor: menor, mayor: numPrecio_(x.mayor),
+      pronto: numPrecio_(x.pronto), efectivo_credito: numPrecio_(x.efectivo_credito), efectivo_pronto: numPrecio_(x.efectivo_pronto),
+      desc_pronto: rebaja(x.pronto), desc_efectivo_credito: rebaja(x.efectivo_credito), desc_efectivo_pronto: rebaja(x.efectivo_pronto),
+      tipo: String(x.tipo || ''), linea: String(x.linea || ''), beneficio: String(x.beneficio || ''), cabello: String(x.cabello || ''),
+      unidades_caja: Number(x.unidades_caja) || 0, imagen: String(x.imagen || ''), _fila: x._fila, _crudo: x };
   });
   return m;
 }
@@ -571,10 +582,18 @@ function accionCatalogo_(p) {
     var o = { code: code, menor: pr.menor || 0, mayor: pr.mayor || pr.menor || 0, desc_pronto: pr.desc_pronto || 0,
       desc_efectivo_credito: pr.desc_efectivo_credito || 0, desc_efectivo_pronto: pr.desc_efectivo_pronto || 0,
       agotado: !!(s && s.controlado && s.disponible <= 0) };
+    if (!esBase_(code) && pr.tipo) o.info = infoProducto_(pr);
     if (ses) { o.controlado = !!(s && s.controlado); o.disponible = s && s.controlado ? Math.max(0, s.disponible) : null; o.en_proceso = s ? s.en_proceso : 0; }
     return o;
   });
   return { ok: true, actualizado: ahora_(), cajas_mayor: CAJAS_MAYOR, pagos: PAGOS.map(function (x) { return { id: x.id, nombre: x.nombre, credito: x.credito, desc: x.desc }; }), productos: productos };
+}
+
+function esBase_(code) { return PRODUCTOS_BASE.some(function (b) { return b[0] === code; }); }
+/* Datos de un producto nuevo para el catálogo (los de siempre están en js/datos.js) */
+function infoProducto_(pr) {
+  return { nombre: pr.producto, tipo: pr.tipo === 'kits' ? 'kits' : 'banos', linea: pr.linea, beneficio: pr.beneficio,
+    cabello: pr.cabello || '1A–4C', unidades: pr.unidades_caja || 6, imagen: /^https:\/\//.test(pr.imagen) ? pr.imagen : '' };
 }
 
 function accionInventario_(p) {
@@ -590,7 +609,8 @@ function accionInventario_(p) {
     var s = stock[code] || { cargado: 0, aprobado: 0, en_proceso: 0, disponible: 0, controlado: false };
     var pr = precios[code] || {};
     return { code: code, producto: (precios[code] && precios[code].producto) || codes[code], cargado: s.cargado, aprobado: s.aprobado, en_proceso: s.en_proceso, disponible: s.disponible, controlado: s.controlado,
-      menor: pr.menor || 0, mayor: pr.mayor || 0, desc_pronto: pr.desc_pronto || 0, desc_efectivo_credito: pr.desc_efectivo_credito || 0, desc_efectivo_pronto: pr.desc_efectivo_pronto || 0 };
+      menor: pr.menor || 0, mayor: pr.mayor || 0, pronto: pr.pronto || 0, efectivo_credito: pr.efectivo_credito || 0, efectivo_pronto: pr.efectivo_pronto || 0,
+      nuevo: !esBase_(code), info: !esBase_(code) && pr.tipo ? infoProducto_(pr) : null };
   }), movimientos: movs.slice(0, Math.min(Math.max(Number(p.limite) || 50, 1), 500)) };
 }
 
@@ -618,28 +638,97 @@ function accionMovimiento_(p, ses) {
   }
 }
 
-function accionGuardarPrecio_(p, ses) {
-  var code = txt_(p.code, 20).toUpperCase();
-  if (!code) return { ok: false, error: 'Elegí el producto.', code: 'producto' };
-  var campos = ['menor', 'mayor', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto'];
+var CAMPOS_PRECIO = ['menor', 'mayor', 'pronto', 'efectivo_credito', 'efectivo_pronto'];
+/* Valida los 5 precios finales. Devuelve { vals } o { error } */
+function preciosValidos_(p) {
   var vals = {};
-  for (var i = 0; i < campos.length; i++) {
-    var v = p[campos[i]];
+  for (var i = 0; i < CAMPOS_PRECIO.length; i++) {
+    var v = p[CAMPOS_PRECIO[i]];
     var n = v === '' || v === undefined || v === null ? 0 : Number(String(v).replace(',', '.'));
-    if (!isFinite(n) || n < 0 || n > 1e7) return { ok: false, error: 'Revisá los montos (números de 0 en adelante).', code: 'precio' };
-    vals[campos[i]] = r2_(n);
+    if (!isFinite(n) || n < 0 || n > 1e7) return { error: 'Revisá los montos (números de 0 en adelante).' };
+    vals[CAMPOS_PRECIO[i]] = r2_(n);
   }
-  if (!vals.menor) return { ok: false, error: 'Falta el precio al por menor.', code: 'precio' };
-  if (vals.mayor > vals.menor) return { ok: false, error: 'El precio al mayor no puede ser más alto que al por menor.', code: 'precio' };
+  if (!vals.menor) return { error: 'Falta el precio normal (al por menor).' };
+  if (vals.mayor > vals.menor) return { error: 'El precio al mayor no puede ser más alto que el normal.' };
+  var nombres = { pronto: 'pronto pago', efectivo_credito: 'efectivo a crédito', efectivo_pronto: 'efectivo pronto pago' };
+  for (var k in nombres) if (vals[k] > vals.menor) return { error: 'El precio de ' + nombres[k] + ' no puede ser más alto que el normal.' };
+  return { vals: vals };
+}
+
+/* Guarda los mismos precios a uno o varios productos (code o codes[]) */
+function accionGuardarPrecio_(p, ses) {
+  var codes = (Array.isArray(p.codes) ? p.codes : [p.code]).map(function (c) { return txt_(c, 20).toUpperCase(); }).filter(Boolean);
+  if (!codes.length) return { ok: false, error: 'Elegí el producto.', code: 'producto' };
+  var v = preciosValidos_(p);
+  if (v.error) return { ok: false, error: v.error, code: 'precio' };
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     var tabla = tablaPrecios_();
     var base = {}; PRODUCTOS_BASE.forEach(function (b) { base[b[0]] = b[1]; });
-    var fila = { code: code, producto: (tabla[code] && tabla[code].producto) || base[code] || txt_(p.producto, 120) || code, updated_at: ahora_(), updated_por: ses.nombre };
-    campos.forEach(function (c) { fila[c] = vals[c]; });
-    if (tabla[code]) actualizar_('Precios', tabla[code]._fila, fila); else agregar_('Precios', fila);
-    return { ok: true, precio: fila };
+    var guardados = codes.map(function (code) {
+      var previa = tabla[code] ? tabla[code]._crudo : {};
+      var fila = {};
+      HOJAS.Precios.forEach(function (c) { fila[c] = previa[c] === undefined ? '' : previa[c]; });
+      fila.code = code;
+      fila.producto = (tabla[code] && tabla[code].producto) || base[code] || txt_(p.producto, 120) || code;
+      CAMPOS_PRECIO.forEach(function (c) { fila[c] = v.vals[c]; });
+      fila.updated_at = ahora_(); fila.updated_por = ses.nombre;
+      if (tabla[code]) actualizar_('Precios', tabla[code]._fila, fila); else agregar_('Precios', fila);
+      return fila;
+    });
+    return { ok: true, precio: guardados[0], guardados: guardados.length };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* Producto nuevo (o editar uno nuevo): sale en el catálogo y en el panel. Empieza sin stock
+   (controlado): aparece en gris hasta que se cargue una entrada de mercancía. */
+function accionGuardarProducto_(p, ses) {
+  var tipo = p.tipo === 'kits' ? 'kits' : 'banos';
+  var nombre = txt_(p.nombre, 80);
+  if (!nombre) return { ok: false, error: 'Falta el nombre del producto.', code: 'producto' };
+  var unidades = Math.floor(Number(p.unidades_caja) || 6);
+  if (unidades < 1 || unidades > 200) return { ok: false, error: 'Revisá las unidades por caja.', code: 'producto' };
+  var imagen = txt_(p.imagen, 400);
+  if (imagen && !/^https:\/\//.test(imagen)) return { ok: false, error: 'La imagen debe ser un enlace que empiece con https://', code: 'producto' };
+  var v = null;
+  if (p.menor !== undefined && p.menor !== '' && p.menor !== null) {
+    v = preciosValidos_(p);
+    if (v.error) return { ok: false, error: v.error, code: 'precio' };
+  }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var tabla = tablaPrecios_();
+    var code = txt_(p.code, 20).toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    if (code && esBase_(code)) return { ok: false, error: 'Ese código es de un producto de siempre: elegí otro.', code: 'producto' };
+    var editar = !!(code && tabla[code] && p.editar);
+    if (code && tabla[code] && !p.editar) return { ok: false, error: 'Ya existe un producto con el código ' + code + '.', code: 'producto' };
+    if (!code) {
+      // siguiente código libre: BC-12, BC-13… o KT-09…
+      var pref = tipo === 'kits' ? 'KT-' : 'BC-';
+      var max = 0;
+      PRODUCTOS_BASE.map(function (b) { return b[0]; }).concat(Object.keys(tabla)).forEach(function (c) {
+        if (c.indexOf(pref) === 0) max = Math.max(max, Number(c.slice(3)) || 0);
+      });
+      code = pref + (max + 1 < 10 ? '0' : '') + (max + 1);
+    }
+    var previa = editar ? tabla[code]._crudo : {};
+    var fila = {};
+    HOJAS.Precios.forEach(function (c) { fila[c] = previa[c] === undefined ? '' : previa[c]; });
+    fila.code = code; fila.producto = nombre; fila.tipo = tipo; fila.linea = txt_(p.linea, 40); fila.beneficio = txt_(p.beneficio, 200);
+    fila.cabello = txt_(p.cabello, 20) || '1A–4C'; fila.unidades_caja = unidades; fila.imagen = imagen;
+    if (v) CAMPOS_PRECIO.forEach(function (c) { fila[c] = v.vals[c]; });
+    fila.updated_at = ahora_(); fila.updated_por = ses.nombre;
+    if (editar) actualizar_('Precios', tabla[code]._fila, fila);
+    else {
+      agregar_('Precios', fila);
+      // alta con 0 cajas: el stock se controla desde el primer día
+      agregar_('Inventario', { fecha: ahora_(), code: code, producto: nombre, cajas: 0, tipo: 'alta', nota: 'Producto nuevo', usuario: ses.nombre });
+    }
+    return { ok: true, producto: { code: code, info: infoProducto_(tablaPrecios_()[code]) } };
   } finally {
     lock.releaseLock();
   }
@@ -1227,7 +1316,7 @@ function prepararHojas() {
       migrados++;
     });
   }
-  var msg = 'Listo: hojas Usuarios, Clientes, Pedidos, PedidoItems, Historial, Precios, Inventario, PedidosWeb y Config.\nCargá los precios en la hoja Precios ($ por caja).' +
+  var msg = 'Listo: hojas Usuarios, Clientes, Pedidos, PedidoItems, Historial, Precios, Inventario, PedidosWeb y Config.\nCargá los precios en la hoja Precios: precio FINAL en $ por caja de cada forma de pago.' +
     (migrados ? '\n' + migrados + ' vendedor(es) pasados a Usuarios (misma clave/PIN; el usuario es su nombre en minúsculas). Podés borrar la hoja Vendedores.' : '') +
     (leer_('Usuarios').some(function (u) { return rolesDe_(u.rol).indexOf('master') !== -1; }) ? '' : '\nAhora creá el usuario Master (menú 2).');
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}

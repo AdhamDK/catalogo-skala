@@ -278,6 +278,11 @@ function totalesPorPago(items) {
   const base = totalPorPago(items, "credito");
   return PAGOS.map((pg) => { const total = totalPorPago(items, pg.id); return { ...pg, total, ahorro: r2(base - total) }; });
 }
+/* "Hasta X% de descuento al nivel 3": cuánto se ahorra con la forma de pago de 3 estrellas */
+function descuentoMaximo(items) {
+  const base = totalPorPago(items, "credito");
+  return base > 0 ? Math.round(((base - totalPorPago(items, "efectivo_pronto")) / base) * 100) : 0;
+}
 const sinPrecio = (items) => (items || []).filter((it) => !(Number(it.precio) > 0)).map((it) => it.code);
 const dinero = (n) => formatoMonto(n, "$").replace(/^\$ (.*)$/, "$1 $");
 
@@ -529,7 +534,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = { itemsDePedido, telefonoWhatsapp, linkMapa, fechaLegible, mensajeGrupo, validarCliente, expiracionToken, nuevoRef,
     nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, coordsDeTexto, estadoCredito, totalCarga,
     monedaDePago, formatoMonto, resumenConciliados,
-    CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, sinPrecio, dinero,
+    CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, descuentoMaximo, sinPrecio, dinero,
     limitePronto, prontoVigente, textoStock, topeStock, puedeBorrar, refWeb, mensajeWeb,
     vistasPedidos, resolverVista, porHacer, urgenciaCobro, pedidosDeVista, buscarPedidos, grupoDia, agruparPorDia, contadoresVistas,
     HORAS_SYNC, debeSincronizar, proximaSync, filtrarPedidosLocal, buscarClientesLocal, respuestaLocal, estadoApp };

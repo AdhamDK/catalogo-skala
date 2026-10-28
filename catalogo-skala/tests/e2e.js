@@ -28,7 +28,8 @@ async function probar(browser, cfg) {
   gas.ctx.prepararHojas();
   gas.ctx.crearUsuario("oscar", "Óscar", "vendedor", "Oscar.1234");
   gas.ctx.crearUsuario("kevin", "Kevin", "vendedor", "Kevin9876");
-  const precio = (code, menor, mayor, a, b, c) => gas.ctx.accionGuardarPrecio_({ code, menor, mayor, desc_pronto: a, desc_efectivo_credito: b, desc_efectivo_pronto: c }, { nombre: "Prueba" });
+  // precios FINALES (normal, mayor, pronto, efectivo crédito, efectivo pronto); a/b/c = rebaja de cada forma de pago
+  const precio = (code, menor, mayor, a, b, c) => gas.ctx.accionGuardarPrecio_({ code, menor, mayor, pronto: menor - a, efectivo_credito: menor - b, efectivo_pronto: menor - c }, { nombre: "Prueba" });
   precio("BC-01", 10, 8, 1, 3, 4); precio("KT-01", 20, 18, 2, 6, 8);
   gas.ctx.accionMovimiento_({ code: "BC-08", cajas: 1 }, { nombre: "Prueba" });
   gas.ctx.accionMovimiento_({ code: "BC-08", cajas: -1, tipo: "ajuste", nota: "vendido" }, { nombre: "Prueba" });
@@ -133,7 +134,9 @@ async function probar(browser, cfg) {
   // --- Precios del CRM y "Agotado" ---
   await page.waitForFunction(() => /10,00 \$/.test(document.querySelector('.card[data-card="BC-01"] [data-precio]')?.textContent || ""));
   assert.match(await page.innerText('.card[data-card="BC-01"] [data-precio]'), /10,00 \$\s*\/ caja/);
-  assert.equal(await page.innerText('.card[data-card="BC-08"] [data-badge]'), "Agotado");
+  assert.equal(await page.innerText('.card[data-card="BC-08"] [data-badge]'), "Sin stock");
+  assert.ok(await page.locator('.card[data-card="BC-08"].agotado').count()); // en gris
+  assert.equal(await page.locator('.card[data-card="BC-08"] .qty-btn[data-act="plus"]').isDisabled(), true);
   if (cfg.viewport.width <= 560) {
     // al menos 4 productos a la vista en un teléfono
     const vistos = await page.evaluate(() => {
@@ -159,12 +162,14 @@ async function probar(browser, cfg) {
   assert.match(await page.getAttribute("#zoomImg", "src"), /BC-02-800\.webp$/);
   assert.equal(await page.locator('.card[data-card="BC-02"].elegido').count(), 0);
   if (process.env.SCREENSHOTS) await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `${cfg.nombre}-zoom.png`) });
+  assert.ok(await page.locator("#zoomModal.abierto").count()); // aparece con animación
   await page.keyboard.press("Escape");
-  assert.ok(await page.locator("#zoomModal").isHidden());
+  assert.ok(await page.locator("#zoomModal.cerrando").count()); // y se cierra con animación
+  await page.waitForSelector("#zoomModal", { state: "hidden" });
   assert.equal(await page.evaluate(() => document.body.classList.contains("modal-open")), false);
   await tocar('.card[data-card="BC-02"] .card-zoom');
   await page.locator("#zoomCerrar").click();
-  assert.ok(await page.locator("#zoomModal").isHidden());
+  await page.waitForSelector("#zoomModal", { state: "hidden" });
   ok("imágenes centradas y completas; botón Ampliar abre y cierra");
 
   // --- Pedido: tocar la tarjeta suma una caja ---
@@ -201,7 +206,9 @@ async function probar(browser, cfg) {
   assert.equal(await page.innerText('#cartList [data-item="KT-01"] .cart-info span'), "Caja x 6 dúos");
   // formas de pago cerradas: botón para desplegar; 3 estrellas en triángulo, la 4ª con Premium
   assert.ok(await page.locator("#pagosWeb").isHidden());
-  assert.match(await page.innerText("#pagoElegido"), /Elegí cómo pagás · desde 24,00 \$/);
+  // de inicio el pago normal, y al lado cuánto puede ahorrar: 40 → 24 = 40%
+  assert.match(await page.innerText("#pagoElegido"), /Crédito[\s\S]*40,00 \$/);
+  assert.match(await page.innerText("#pagoElegido .hasta-desc"), /Hasta 40% de descuento al nivel 3/);
   await page.locator("#btnPagos").click();
   assert.deepEqual(await page.locator("#pagosWeb .pago-monto strong").allInnerTexts(), ["40,00 $", "36,00 $", "28,00 $", "24,00 $"]);
   assert.deepEqual(await page.locator("#pagosWeb .estrellas").evaluateAll((els) => els.map((e) => e.querySelectorAll(".estrella.on").length + "/" + e.querySelectorAll(".estrella").length)), ["0/3", "1/3", "2/3", "3/3"]);
@@ -221,8 +228,8 @@ async function probar(browser, cfg) {
   await page.waitForFunction(() => document.querySelectorAll("#listaVendedores [data-vend]").length === 2);
   assert.ok(await page.locator("#listaVendedores").isVisible()); // sin vendedor elegido, la lista ya está abierta
   await page.locator("#btnWhatsapp").click();
-  assert.match(await page.innerText("#formWarn"), /Nombre del negocio · Teléfono · Vendedor · Forma de pago/);
-  assert.ok(await page.locator("#pagosWeb").isVisible()); // se abre para elegir
+  assert.match(await page.innerText("#formWarn"), /Nombre del negocio · Teléfono · Vendedor$/);
+  await page.locator("#btnPagos").click();
   await page.fill("#fNegocio", "Salón Luz");
   await page.fill("#fTelefono", "0414-5551234");
   await page.locator("#listaVendedores [data-vend]", { hasText: "Óscar" }).click();
@@ -230,6 +237,7 @@ async function probar(browser, cfg) {
   assert.match(await page.innerText("#vendElegido"), /Óscar/);
   await page.locator('#pagosWeb input[value="efectivo_pronto"]').check();
   assert.ok(await page.locator("#pagosWeb").isHidden()); // al elegir se cierra
+  assert.equal(await page.locator("#pagoElegido .hasta-desc").count(), 0); // ya tiene el mayor descuento
   assert.match(await page.innerText("#pagoElegido"), /Efectivo pronto pago[\s\S]*18,00 \$/);
   assert.equal(await page.innerText("#btnPagos"), "Cambiar");
   assert.match(await page.innerText("#cartTotal"), /18,00 \$ Efectivo pronto pago/);
