@@ -195,6 +195,7 @@ function pintarCliente() {
           <span>${escHTML([cliente.telefono, cliente.direccion].filter(Boolean).join(" · "))}${tieneUbic ? " · 📍 ubicación" : ""}</span></span>
         <button type="button" class="link-cli" data-cli="editar">Editar</button>
         <button type="button" class="link-cli" data-cli="cambiar">Cambiar</button>
+        <button type="button" class="cart-quitar" data-cli="quitar" aria-label="Quitar cliente" title="Quitar">${iconoPapelera}</button>
       </div>`
     : "";
   $id("ubicEstado").textContent = tieneUbic ? "📍 Ubicación lista" : "";
@@ -390,7 +391,7 @@ function mostrarEnvio(modo, datos, sinConexion) {
   if (modo === "listo") {
     $id("listoAnim").innerHTML = '<svg viewBox="0 0 52 52" class="check"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-15"/></svg>';
     $id("listoTit").textContent = "¡Listo!";
-    $id("listoSub").innerHTML = `Tu pedido <strong>${escHTML(datos.ref)}</strong> llegó a Skala. Te contactamos pronto.`;
+    $id("listoSub").textContent = "Tu pedido llegó a Skala. Te contactamos pronto.";
     $id("listoPreg").textContent = "¿Deseas también enviarlo por WhatsApp a tu vendedor?";
     lanzarConfeti();
   } else {
@@ -638,7 +639,22 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $id("cliElegido").addEventListener("click", (e) => {
     const b = e.target.closest("[data-cli]");
-    if (b) abrirCliente(b.dataset.cli === "editar" ? "form" : "buscar");
+    if (!b) return;
+    if (b.dataset.cli === "quitar") {
+      // misma animación de la papelera: se sacude y la ficha sale deslizándose
+      const ficha = b.closest(".cli-elegido");
+      if (!ficha || ficha.classList.contains("saliendo")) return;
+      b.classList.add("tirando");
+      ficha.classList.add("saliendo");
+      setTimeout(() => {
+        cliente = { tipo_pago: cliente.tipo_pago };
+        saveCliente(); fillCliente();
+        abrirCliente("cerrar");
+        refreshMessage();
+      }, 320);
+      return;
+    }
+    abrirCliente(b.dataset.cli === "editar" ? "form" : "buscar");
   });
   $id("btnUbic").addEventListener("click", tomarUbicacion);
   /* Enviar (un solo botón) y la ventana de después */

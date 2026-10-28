@@ -1285,6 +1285,7 @@
         ${conPrecio && p.tipo_pago_real && p.tipo_pago_real !== tipoAcordado ? `<p class="monto-ped cambio" id="dMontoReal">Pagó como <strong>${esc(pagoPorId(p.tipo_pago_real).nombre)}</strong>: ${dinero(totalPorPago(p.items, p.tipo_pago_real))}</p>` : ""}
         <dl class="datos">
           <dt>Fecha</dt><dd>${esc(fechaLegible(p.fecha))}</dd>
+          ${p.estado === "entregado" && p.entregado_at ? `<dt>Entregado</dt><dd>${esc(new Date(p.entregado_at).toLocaleDateString("es-VE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" }))}${p.entregado_por ? ` · ${esc(p.entregado_por)}` : ""}</dd>` : ""}
           <dt>Vendedor</dt><dd>${esc(p.vendedor)}</dd>
           ${p.despachador ? `<dt>Despachador</dt><dd>${esc(p.despachador)}</dd>` : ""}
           ${p.documento ? `<dt>Documento</dt><dd>${esc(p.documento)}</dd>` : ""}
@@ -1300,7 +1301,7 @@
       ${p.historial === null ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3>${spin("Cargando historial…")}</section>` : ""}
       ${p.historial && p.historial.length ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3><ol class="historial">${p.historial.map((h) =>
         `<li><strong>${esc({ creado: "Enviado (en proceso)", reasignado: "Despachador cambiado", pendiente: "Vuelto a En proceso", confirmado: "Aprobado",
-          cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", borrado: "Borrado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
+          cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", borrado: "Borrado", entregado: "Entregado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
 
     $("btnReenviar").addEventListener("click", () => enviarAlGrupo(mensajeGrupo(p, c)));
     const bb = $("btnBorrarPed");
@@ -1349,14 +1350,56 @@
       });
       if (!r) return;
       estado = "cancelado"; extra.motivo = r.motivo.trim();
-    } else if (acc === "entregado" || acc === "reabrir") {
+    } else if (acc === "entregado") {
+      // fecha de entrega: hoy, o un día anterior si se olvidó registrarlo
+      const dia = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const hoy = dia(new Date()), ayer = dia(new Date(Date.now() - 86400000));
+      const desde = p.created_at ? dia(new Date(p.created_at)) : "";
       const r = await hoja({
-        titulo: acc === "entregado" ? `¿Marcar ${p.id} como entregado?` : `¿Volver ${p.id} a En proceso?`,
-        cuerpo: `<p class="modal-sub">${acc === "entregado" ? "Confirmá que el cliente recibió el pedido." : "Se quita el despachador y vuelve a Por aprobar."}</p>`,
-        ok: acc === "entregado" ? "Sí, entregado" : "Volver a En proceso",
+        titulo: `¿Marcar ${p.id} como entregado?`,
+        cuerpo: `<p class="modal-sub">Confirmá que el cliente recibió el pedido.</p>
+          <fieldset class="pay"><legend>¿Cuándo se entregó?</legend>
+            <div class="selector-tema dias-entrega">
+              <button type="button" data-dia="${hoy}" aria-pressed="true">Hoy</button>
+              ${!desde || ayer >= desde ? `<button type="button" data-dia="${ayer}" aria-pressed="false">Ayer</button>` : ""}
+              <button type="button" data-dia="otro" aria-pressed="false">Otro día</button>
+            </div>
+            <label class="field field-full" id="hFechaWrap" hidden><span>Fecha de entrega</span>
+              <input type="date" id="hFecha" max="${hoy}"${desde ? ` min="${desde}"` : ""} value="${hoy}" /></label>
+          </fieldset>
+          <input type="hidden" name="fecha_entrega" id="hFechaElegida" value="${hoy}" />`,
+        ok: "Sí, entregado",
+        alAbrir: (form) => {
+          const elegida = form.querySelector("#hFechaElegida"), fecha = form.querySelector("#hFecha");
+          form.querySelector(".dias-entrega").addEventListener("click", (e) => {
+            const b = e.target.closest("[data-dia]");
+            if (!b) return;
+            form.querySelectorAll(".dias-entrega [data-dia]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+            const otro = b.dataset.dia === "otro";
+            form.querySelector("#hFechaWrap").hidden = !otro;
+            elegida.value = otro ? fecha.value : b.dataset.dia;
+            if (otro) fecha.focus();
+          });
+          fecha.addEventListener("input", () => { elegida.value = fecha.value; });
+        },
+        validar: (d) => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(d.fecha_entrega || "")) return "Elegí la fecha de entrega.";
+          if (d.fecha_entrega > hoy) return "La fecha no puede ser futura.";
+          if (desde && d.fecha_entrega < desde) return "La fecha no puede ser anterior al pedido.";
+          return "";
+        },
       });
       if (!r) return;
-      estado = acc === "entregado" ? "entregado" : "pendiente";
+      estado = "entregado";
+      extra.fecha_entrega = r.fecha_entrega;
+    } else if (acc === "reabrir") {
+      const r = await hoja({
+        titulo: `¿Volver ${p.id} a En proceso?`,
+        cuerpo: '<p class="modal-sub">Se quita el despachador y vuelve a Por aprobar.</p>',
+        ok: "Volver a En proceso",
+      });
+      if (!r) return;
+      estado = "pendiente";
     }
     const btn = document.querySelector(`[data-acc="${acc}"]`);
     if (btn) { btn.disabled = true; btn.classList.add("ocupado"); }

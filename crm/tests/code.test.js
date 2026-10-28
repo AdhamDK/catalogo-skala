@@ -1009,3 +1009,25 @@ test("pedido web sin vendedor: lo ven todos los vendedores; el cliente lo asigna
   assert.equal(g.tabla("PedidosWeb")[0].vendedor, "Óscar");
   assert.equal(g.post({ action: "asignarVendedorWeb", id: "WEB-NOEXISTE", vendedor_id: oscar }).code, "not_found");
 });
+
+test("marcar entregado con otra fecha (se olvidó registrarlo): no futura ni antes del pedido", () => {
+  const g = preparar();
+  const ta = login(g, "ana", "Ana*2222");
+  const p = pedir(g, login(g), { tipo_pago: "credito", dias_credito: 15 }).pedido; // creado 25/10 14:30 Caracas
+  g.post({ action: "estado", token: ta, pedido_id: p.id, estado: "confirmado", despachador_id: idDe(g, "luis") });
+  g.setAhora("2026-10-27T15:00:00Z");
+  const tl = login(g, "luis", "Luis5555");
+  assert.equal(g.post({ action: "estado", token: tl, pedido_id: p.id, estado: "entregado", fecha_entrega: "2026-10-28" }).code, "fecha");
+  assert.equal(g.post({ action: "estado", token: tl, pedido_id: p.id, estado: "entregado", fecha_entrega: "2026-10-24" }).code, "fecha");
+  assert.equal(g.post({ action: "estado", token: tl, pedido_id: p.id, estado: "entregado", fecha_entrega: "26/10/2026" }).code, "fecha");
+  const r = g.post({ action: "estado", token: tl, pedido_id: p.id, estado: "entregado", fecha_entrega: "2026-10-26" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.pedido.entregado_at, "2026-10-26T16:00:00.000Z");
+  assert.match(g.tabla("Historial").at(-1).detalle, /Entregado el 26\/10\/2026/);
+  // hoy = la hora actual
+  const p2 = pedir(g, login(g), { tipo_pago: "pronto" }).pedido;
+  g.post({ action: "estado", token: login(g, "ana", "Ana*2222"), pedido_id: p2.id, estado: "confirmado", despachador_id: idDe(g, "luis") });
+  const r2 = g.post({ action: "estado", token: tl, pedido_id: p2.id, estado: "entregado", fecha_entrega: "2026-10-27" });
+  assert.equal(r2.ok, true, JSON.stringify(r2));
+  assert.equal(r2.pedido.entregado_at, "2026-10-27T15:00:00.000Z");
+});

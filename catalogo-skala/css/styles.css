@@ -1338,3 +1338,6 @@ html[data-tema="oscuro"] .es-listo #listoTit { color: var(--verde-claro); }
 .lista-vend-wa { grid-template-columns: minmax(0, 1fr); }
 .lista-vend-wa li { min-width: 0; }
 .vend-wa strong { text-align: left; }
+.cli-elegido.saliendo { animation: salir .32s ease forwards; }
+.cli-elegido .cart-quitar { flex: 0 0 44px; }
+.cli-elegido .link-cli { padding: 0 4px; }

@@ -1040,6 +1040,19 @@ function accionEstado_(p, ses) {
 
     var t = ahora_();
     var detalle = '';
+    // Entregado en otra fecha (se olvidó registrar): día elegido, no futuro ni antes del pedido
+    var fechaEntrega = '';
+    if (nuevo === 'entregado' && p.fecha_entrega) {
+      var fe = String(p.fecha_entrega).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!fe) return { ok: false, error: 'Fecha de entrega inválida.', code: 'fecha' };
+      var hoyTxt = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+      var pedTxt = Utilities.formatDate(new Date(String(ped.created_at)), TZ, 'yyyy-MM-dd');
+      var dia = fe[0];
+      if (dia > hoyTxt) return { ok: false, error: 'La fecha de entrega no puede ser futura.', code: 'fecha' };
+      if (dia < pedTxt) return { ok: false, error: 'La fecha de entrega no puede ser anterior al pedido.', code: 'fecha' };
+      // hoy = ahora; otro día = 12:00 de ese día en Caracas (UTC−4)
+      fechaEntrega = dia === hoyTxt ? '' : new Date(dia + 'T16:00:00Z').toISOString();
+    }
     // Aprobar aparta la mercancía: tiene que alcanzar el stock
     if (nuevo === 'confirmado' && !reasignar && String(ped.estado) === 'pendiente') {
       var todos = leer_('Pedidos'), its = leer_('PedidoItems');
@@ -1062,7 +1075,11 @@ function accionEstado_(p, ses) {
       ped.estado_at = t;
       ped.estado_por = ses.nombre;
       ped.motivo = nuevo === 'cancelado' ? motivo : '';
-      if (nuevo === 'entregado') { ped.entregado_por = ses.nombre; ped.entregado_at = t; }
+      if (nuevo === 'entregado') {
+        ped.entregado_por = ses.nombre;
+        ped.entregado_at = fechaEntrega || t;
+        if (fechaEntrega) detalle = 'Entregado el ' + Utilities.formatDate(new Date(fechaEntrega), TZ, 'dd/MM/yyyy');
+      }
       if (nuevo === 'pendiente') { ped.despachador_id = ''; ped.despachador = ''; ped.confirmado_por = ''; ped.confirmado_at = ''; }
       if (nuevo === 'cancelado') detalle = motivo;
     }

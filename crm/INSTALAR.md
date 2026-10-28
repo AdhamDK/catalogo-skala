@@ -55,6 +55,8 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
 - **Despachador**: en Inicio ve "Hoy tenés por entregar N cajas". En **Entregas** elige pedidos →
   **Ver total de carga** (cajas por producto para cargar). Abre cada pedido → *Salió en ruta* →
   *Entregado* (con Llamar, WhatsApp y Mapa).
+- **Fecha de entrega**: al marcar *Entregado* se elige **Hoy**, **Ayer** u **Otro día** (no puede ser
+  futura ni anterior al pedido). Sirve cuando se entregó antes y se olvidó registrarlo.
 - **Cobro**: el vendedor, con el pedido entregado y pagado, toca **Marcar cancelado (pagado)** y
   escribe el **monto y la moneda** (USD o Bs). Administración lo ve en **Por conciliar**, verifica el
   dinero y toca **Conciliar pago** (puede corregir el monto), o **Pago no recibido** (vuelve a Por cobrar).

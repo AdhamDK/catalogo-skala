@@ -311,7 +311,7 @@ async function probar(browser, cfg) {
   await page.locator("#btnEnviarPedido").click();
   await page.waitForSelector("#listoModal.es-listo:not([hidden])");
   assert.equal(await page.innerText("#listoTit"), "¡Listo!");
-  assert.match(await page.innerText("#listoSub"), /Tu pedido WEB-[A-Z2-9]{6} llegó a Skala/);
+  assert.match(await page.innerText("#listoSub"), /^Tu pedido llegó a Skala/);
   assert.equal(await page.innerText("#listoPreg"), "¿Deseas también enviarlo por WhatsApp a tu vendedor?");
   assert.ok((await page.locator("#confeti i").count()) > 20);
   if (process.env.SCREENSHOTS) { await page.waitForTimeout(500); await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `${cfg.nombre}-listo.png`) }); }
@@ -342,6 +342,12 @@ async function probar(browser, cfg) {
   assert.ok(await page.locator("#cliPanel").isHidden());
   assert.equal(await page.inputValue("#fNegocio"), "Barbería Max");
   ok("cliente registrado: se busca por teléfono");
+  await page.click('#cliElegido [data-cli="quitar"]');
+  assert.ok(await page.locator("#cliElegido .cli-elegido.saliendo").count());
+  await page.waitForFunction(() => !/Barbería Max/.test(document.getElementById("cliElegido").textContent));
+  assert.equal(await page.inputValue("#fNegocio"), "");
+  assert.ok(await page.locator("#btnCliente").isVisible());
+  ok("cliente elegido: se quita con la papelera");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#orderModal").isHidden(), true);
   assert.equal(await page.evaluate(() => document.body.classList.contains("modal-open")), false);

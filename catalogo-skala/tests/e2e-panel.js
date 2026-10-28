@@ -565,9 +565,14 @@ function servidor() {
   await page.click('[data-acc="en_ruta"]');
   await page.waitForFunction(() => /En ruta/.test(document.querySelector(".chip-estado")?.textContent || ""));
   await page.click('[data-acc="entregado"]');
+  assert.equal(await page.locator('.dias-entrega [aria-pressed="true"]').innerText(), "Hoy");
+  await page.click('.dias-entrega [data-dia="otro"]');
+  assert.ok(await page.locator("#hFecha").isVisible());
+  await page.click('.dias-entrega button:first-child');
   await page.click("#hojaOk");
   await page.waitForFunction(() => /Entregado/.test(document.querySelector(".chip-estado")?.textContent || ""));
   assert.equal(gas.tabla("Pedidos")[0].entregado_por, "Luis");
+  assert.match(await page.innerText(".datos"), /Entregado[\s\S]*Luis/);
   // un despachador no puede entrar a Nuevo pedido
   await page.goto(BASE + "/panel.html#/nuevo");
   await esperarRuta("#/inicio");
