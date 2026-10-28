@@ -930,7 +930,7 @@
 
   let busquedaPed = "", vendedorPed = "";
   async function vPedidos(v, _p, query, vigente) {
-    if (enEntregas()) return vListaClasica(v, _p, query, vigente);
+    if (enEntregas()) return vEntregas(v, query, vigente);
     const rp = rolPedidos();
     const { vistas, vista, sub } = resolverVista(rp, query.get("tab"), query.get("ver"));
     const PERIODOS = [[1, "Hoy"], [7, "7 días"], [30, "30 días"], [90, "90 días"]];
@@ -1041,62 +1041,120 @@
     }
   }
 
-  /* Entregas del despachador (lista simple con elegir carga) */
-  async function vListaClasica(v, _p, query, vigente) {
-    const entregas = enEntregas();
-    const tabs = pestanasPanel(entregas ? "despachador" : rolPedidos()).filter((t) => t.estados || t.filtro || t.web);
-    const tab = tabs.find((t) => t.id === query.get("tab")) || tabs[0];
-    const base = entregas ? "#/entregas" : "#/pedidos";
-    const conCarga = tab.id === "curso" && (entregas || gestion());
-    const PERIODOS = [[1, "Hoy"], [7, "7 días"], [30, "30 días"], [90, "90 días"]];
-    const dias = tab.periodo ? (PERIODOS.find(([d]) => d === Number(query.get("dias"))) || [30])[0] : 60;
+  /* ---------- Mis entregas (despachador): tarjetas grandes con llamar / WhatsApp / mapa y la acción a mano ---------- */
+  const ICO_ENT = {
+    tel: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
+    wa: '<path d="M4 20l1.3-4A8 8 0 1 1 8 18.7z"/><path d="M9 9.5c.3 2 2.5 4.2 4.5 4.5l1-1.2 1.7.8c-.3 1-1.2 1.6-2.2 1.4-2.7-.5-5.1-2.9-5.6-5.6-.2-1 .4-1.9 1.4-2.2l.8 1.7z"/>',
+    mapa: '<path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>',
+    ruta: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19a2 2 0 1 0 0-.01M17 19a2 2 0 1 0 0-.01"/>',
+    ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  };
+  const diaLocal = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const icoEnt = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICO_ENT[n]}</svg>`;
+  function tarjetaEntrega(p, conCheck) {
+    const c = p.cliente_datos || {};
+    const tel = telLink(c.telefono), wa = telefonoWhatsapp(c.telefono), mapa = linkMapa(c.latitud, c.longitud);
+    const acc = accionesPedido(roles(), yo().id, p).find((a) => a === "en_ruta" || a === "entregado");
+    const cajas = Number(p.total_cajas) || 0;
+    return `<li class="ent-card est-borde-${esc(p.estado)}" data-id="${esc(p.id)}">
+      ${conCheck ? `<label class="ent-check"><input type="checkbox" value="${esc(p.id)}" aria-label="Elegir ${esc(p.negocio)} para la carga" /></label>` : ""}
+      <a class="fila-ped ent-info" href="#/pedido/${encodeURIComponent(p.id)}">
+        <span class="ent-cajas"><strong>${cajas}</strong>caja${cajas === 1 ? "" : "s"}</span>
+        <span class="ent-txt">
+          <strong class="ent-neg">${esc(p.negocio)}</strong>
+          ${c.direccion ? `<span class="ent-dir">${icoEnt("mapa")}${esc(c.direccion)}</span>` : '<span class="ent-dir sin">Sin dirección</span>'}
+          <span class="ped-det">${esc(p.id)}${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}</span>
+        </span>
+      </a>
+      ${p.estado === "entregado" ? "" : `<div class="ent-botones">
+        ${tel ? `<a class="ent-ico" href="tel:${esc(tel)}" aria-label="Llamar a ${esc(p.negocio)}" title="Llamar">${icoEnt("tel")}<span>Llamar</span></a>` : ""}
+        ${wa ? `<a class="ent-ico ent-wa" href="https://wa.me/${wa}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(p.negocio)}" title="WhatsApp">${icoEnt("wa")}<span>WhatsApp</span></a>` : ""}
+        ${mapa ? `<a class="ent-ico ent-mapa" href="${esc(mapa)}" target="_blank" rel="noopener" aria-label="Ver en el mapa" title="Mapa">${icoEnt("mapa")}<span>Mapa</span></a>` : ""}
+        ${acc ? `<button type="button" class="btn btn-primary ent-acc${acc === "entregado" ? " es-entregar" : ""}" data-ent="${acc}">${icoEnt(acc === "entregado" ? "ok" : "ruta")}${acc === "entregado" ? "Entregado" : "Salió en ruta"}</button>` : ""}
+      </div>`}
+    </li>`;
+  }
+
+  async function vEntregas(v, query, vigente) {
+    const tab = query.get("tab") === "entregado" ? "entregado" : "curso";
     v.innerHTML = `
-      <div class="periodos" role="tablist">${tabs.map((t) => `<a role="tab" class="tab${t.id === tab.id ? " active" : ""}" aria-selected="${t.id === tab.id}" href="${base}?tab=${t.id}">${esc(t.nombre)}</a>`).join("")}</div>
-      ${tab.periodo ? `<div class="periodos periodos-chicos" aria-label="Período">${PERIODOS.map(([d, t]) => `<a class="tab${d === dias ? " active" : ""}"${d === dias ? ' aria-current="true"' : ""} href="${base}?tab=${tab.id}&dias=${d}">${t}</a>`).join("")}</div>
-      <div id="pResumen"></div>` : ""}
-      <div class="modal-sub" id="pInfo">${spin()}</div>
-      ${conCarga ? '<div class="fila-elegir" id="pElegir" hidden><label class="check"><input type="checkbox" id="pTodos" /> Elegir todos</label></div>' : ""}
-      <ul class="lista-ped" id="pLista"></ul>
-      ${conCarga ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}`;
-    if (tab.web) {
-      const rw = await api("pedidosWeb");
-      if (!vigente()) return;
-      $("pInfo").textContent = rw.pedidos.length ? `${rw.pedidos.length} pedido(s) que armaron los clientes en el catálogo` : "";
-      $("pLista").innerHTML = rw.pedidos.length ? rw.pedidos.map(filaWeb).join("") : '<li class="vacio-panel">No hay pedidos web esperando.</li>';
-      return;
-    }
-    const filtro = tab.filtro ? { [tab.filtro]: true } : { estados: tab.estados };
-    const r = await api("pedidos", { ...filtro, dias });
-    if (!vigente()) return;
-    let lista = r.pedidos;
-    // Entregas: con varios roles, solo los pedidos asignados a este usuario
-    if (entregas) lista = lista.filter((p) => String(p.despachador_id) === String(yo().id));
-    if (tab.filtro === "conciliados") {
-      lista = lista.slice().sort((a, b) => String(b.conciliado_at).localeCompare(String(a.conciliado_at)));
-      $("pResumen").innerHTML = resumenConciliadosHtml(resumenConciliados(lista), dias);
-    }
-    if (tab.filtro === "por_cobrar") {
-      // primero lo más atrasado
-      const peso = (p) => { const ec = estadoCredito(p); return ec && ec.vence ? (ec.nivel === "al_dia" || ec.nivel === "proximo" ? ec.dias : -ec.dias) : 9999; };
-      lista = lista.slice().sort((a, b) => peso(a) - peso(b));
-    }
-    const vencidos = lista.filter((p) => { const b = bandera(p); return b && (b.clase === "vencido" || b.clase === "muy_vencido"); }).length;
-    $("pInfo").textContent = lista.length ? `${lista.length} pedido(s)${tab.filtro === "por_cobrar" && vencidos ? ` · ${vencidos} vencido(s)` : ""}${conCarga ? " · elegí pedidos para ver el total a cargar" : ""}` : "";
-    $("pLista").innerHTML = lista.length ? lista.map((p) => filaPedido(p, conCarga)).join("") : '<li class="vacio-panel">No hay pedidos en esta lista.</li>';
-    if (!conCarga || !lista.length) return;
-    $("pElegir").hidden = false;
-    const elegidos = () => [...v.querySelectorAll('.check-ped input:checked')].map((c) => c.value);
+      <div class="periodos tabs-ped tabs-ent" role="tablist">
+        <a role="tab" class="tab${tab === "curso" ? " active" : ""}" aria-selected="${tab === "curso"}" href="#/entregas?tab=curso">Por entregar<b class="cuenta" data-cuenta="curso"></b></a>
+        <a role="tab" class="tab${tab === "entregado" ? " active" : ""}" aria-selected="${tab === "entregado"}" href="#/entregas?tab=entregado">Entregados</a>
+      </div>
+      <div id="eResumen"></div>
+      <div id="pLista" class="ent-lista">${spin()}</div>
+      ${tab === "curso" ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}`;
+    const lista0 = $("pLista");
+    let mias = [];
+    const elegidos = () => [...v.querySelectorAll(".ent-check input:checked")].map((c) => c.value);
     const pintarSel = () => {
+      const b = $("pBarra"); if (!b) return;
       const ids = elegidos();
-      const t = totalCarga(lista.filter((p) => ids.includes(p.id)));
-      $("pBarra").hidden = !ids.length;
+      const t = totalCarga(mias.filter((p) => ids.includes(p.id)));
+      b.hidden = !ids.length;
       $("pSel").textContent = `${ids.length} pedido${ids.length === 1 ? "" : "s"}`;
       $("pSelCajas").textContent = ` · ${t.cajas} caja${t.cajas === 1 ? "" : "s"}`;
-      $("pTodos").checked = ids.length === lista.length;
+      const todos = $("pTodos"); if (todos) todos.checked = ids.length > 0 && ids.length === v.querySelectorAll(".ent-check input").length;
     };
-    $("pLista").addEventListener("change", pintarSel);
-    $("pTodos").addEventListener("change", () => { v.querySelectorAll(".check-ped input").forEach((c) => (c.checked = $("pTodos").checked)); pintarSel(); });
-    $("btnVerCarga").addEventListener("click", () => { sessionStorage.setItem(K_CARGA, JSON.stringify(elegidos())); ir("#/carga"); });
+    const pintar = (todos) => {
+      if (!document.body.contains(lista0)) return;
+      const antes = new Set(elegidos());
+      const propios = (todos || []).filter((p) => String(p.despachador_id) === String(yo().id));
+      const porCargar = propios.filter((p) => p.estado === "confirmado");
+      const enRuta = propios.filter((p) => p.estado === "en_ruta");
+      const cuenta = v.querySelector('[data-cuenta="curso"]');
+      if (cuenta) cuenta.textContent = porCargar.length + enRuta.length ? String(porCargar.length + enRuta.length) : "";
+      const sumaCajas = (l) => l.reduce((a, p) => a + (Number(p.total_cajas) || 0), 0);
+      if (tab === "curso") {
+        mias = porCargar.concat(enRuta);
+        $("eResumen").innerHTML = mias.length ? `<section class="ent-resumen">
+            <div><strong>${sumaCajas(mias)}</strong><span>cajas por entregar</span></div>
+            <div><strong>${porCargar.length}</strong><span>por cargar</span></div>
+            <div><strong>${enRuta.length}</strong><span>en ruta</span></div>
+          </section>` : "";
+        if (!mias.length) { lista0.innerHTML = '<p class="vacio-panel ent-vacio">No tenés entregas pendientes.</p>'; pintarSel(); return; }
+        lista0.innerHTML = `
+          ${porCargar.length ? `<div class="ent-grupo"><h3 class="ent-tit">Por cargar <b>${porCargar.length}</b></h3>
+            <label class="ent-todos"><input type="checkbox" id="pTodos" /> Elegir todos</label></div>
+            <p class="ent-ayuda">Marcá los pedidos que vas a llevar y tocá <strong>Ver total de carga</strong>.</p>
+            <ul class="lista-ped">${porCargar.map((p) => tarjetaEntrega(p, true)).join("")}</ul>` : ""}
+          ${enRuta.length ? `<div class="ent-grupo"><h3 class="ent-tit">En ruta <b>${enRuta.length}</b></h3></div>
+            <ul class="lista-ped">${enRuta.map((p) => tarjetaEntrega(p, false)).join("")}</ul>` : ""}`;
+        v.querySelectorAll(".ent-check input").forEach((c) => { c.checked = antes.has(c.value); });
+        pintarSel();
+      } else {
+        const hechos = propios.filter((p) => p.estado === "entregado")
+          .sort((a, b) => String(b.entregado_at || b.fecha).localeCompare(String(a.entregado_at || a.fecha)))
+          .map((p) => ({ ...p, _dia: diaLocal(p.entregado_at || p.created_at) }));
+        $("eResumen").innerHTML = "";
+        if (!hechos.length) { lista0.innerHTML = '<p class="vacio-panel ent-vacio">Todavía no hay entregas registradas.</p>'; return; }
+        const grupos = agruparPorDia(hechos.map((p) => ({ ...p, fecha: p._dia })));
+        lista0.innerHTML = grupos.map((g) => `<div class="ent-grupo"><h3 class="ent-tit">${esc(g.titulo)} <b>${g.pedidos.length}</b></h3><span class="ent-suma">${sumaCajas(g.pedidos)} cajas</span></div>
+          <ul class="lista-ped">${g.pedidos.map((p) => tarjetaEntrega(p, false)).join("")}</ul>`).join("");
+      }
+    };
+    lista0.addEventListener("change", (e) => {
+      if (e.target.id === "pTodos") v.querySelectorAll(".ent-check input").forEach((c) => (c.checked = e.target.checked));
+      pintarSel();
+    });
+    lista0.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-ent]");
+      if (!b) return;
+      const p = mias.find((x) => x.id === b.closest(".ent-card").dataset.id);
+      if (p) await accionPedido(p, b.dataset.ent, b);
+    });
+    const bc = $("btnVerCarga");
+    if (bc) bc.addEventListener("click", () => { sessionStorage.setItem(K_CARGA, JSON.stringify(elegidos())); ir("#/carga"); });
+    const enMem = pedidosEnMemoria();
+    if (enMem) pintar(enMem);
+    if (enMem && Date.now() - memoria.t < 20000) return;
+    try {
+      const m = await refrescarPedidos();
+      if (vigente()) pintar(m.pedidos);
+    } catch (e) {
+      if (!enMem && vigente()) lista0.innerHTML = `<p class="aviso-error">${esc(e.message)}</p>`;
+    }
   }
 
   /* Totales de lo conciliado en el período (dinero por moneda, pedidos, cajas, por vendedor y por pago) */
@@ -1324,7 +1382,7 @@
     v.querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", () => accionPedido(p, b.dataset.acc)));
   }
 
-  async function accionPedido(p, acc) {
+  async function accionPedido(p, acc, boton) {
     if (["cobrar", "conciliar", "rechazar", "desconciliar"].includes(acc)) return accionCobro(p, acc);
     let estado = acc, extra = {};
     if (acc === "confirmar" || acc === "reasignar") {
@@ -1401,7 +1459,7 @@
       if (!r) return;
       estado = "pendiente";
     }
-    const btn = document.querySelector(`[data-acc="${acc}"]`);
+    const btn = boton || document.querySelector(`[data-acc="${acc}"]`);
     if (btn) { btn.disabled = true; btn.classList.add("ocupado"); }
     try {
       const r = await api("estado", { pedido_id: p.id, estado, ...extra });

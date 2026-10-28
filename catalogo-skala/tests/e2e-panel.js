@@ -557,13 +557,21 @@ function servidor() {
   ok("despachador: hoy tenés N cajas, elegir pedidos → total de carga por producto y compartir");
   await page.click("#btnAtras");
   await esperarRuta("#/entregas");
+  // la barra: nombre y luego el menú en la esquina
+  assert.ok(await page.evaluate(() => document.getElementById("appQuien").nextElementSibling.id === "btnMas"));
+  // en la tarjeta: Llamar, WhatsApp, Mapa y "Salió en ruta" sin entrar al pedido
+  assert.deepEqual(await page.locator(".ent-card .ent-ico span").allInnerTexts(), ["Llamar", "WhatsApp", "Mapa"]);
+  await page.click('.ent-card [data-ent="en_ruta"]');
+  await page.waitForFunction(() => /En ruta/.test(document.querySelector(".ent-lista")?.textContent || "") && document.querySelector('.ent-card [data-ent="entregado"]'));
+  assert.equal(gas.tabla("Pedidos")[0].estado, "en_ruta");
+  assert.equal(await page.locator(".ent-check").count(), 0); // en ruta ya no se elige para cargar
+  await foto("07e-en-ruta");
+  await revisarDiseno("entregas en ruta");
   await page.click("#pLista .fila-ped");
   await esperarRuta("#/pedido/");
-  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Salió en ruta", "Entregado"]);
+  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Entregado"]);
   assert.ok(await page.locator('.botones-contacto a:has-text("Mapa")').count());
   await foto("08-entrega");
-  await page.click('[data-acc="en_ruta"]');
-  await page.waitForFunction(() => /En ruta/.test(document.querySelector(".chip-estado")?.textContent || ""));
   await page.click('[data-acc="entregado"]');
   assert.equal(await page.locator('.dias-entrega [aria-pressed="true"]').innerText(), "Hoy");
   await page.click('.dias-entrega [data-dia="otro"]');
@@ -576,6 +584,10 @@ function servidor() {
   // un despachador no puede entrar a Nuevo pedido
   await page.goto(BASE + "/panel.html#/nuevo");
   await esperarRuta("#/inicio");
+  await page.goto(BASE + "/panel.html#/entregas?tab=entregado");
+  await page.waitForSelector(".ent-lista .ent-card");
+  assert.match(await page.innerText(".ent-lista"), /HOY\s*1[\s\S]*9 cajas[\s\S]*Peluquería Bella/i);
+  await foto("08b-entregados");
   ok("despachador: entregas con mapa, en ruta → entregado; Nuevo pedido bloqueado");
   await salir();
 
