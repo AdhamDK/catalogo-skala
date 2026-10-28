@@ -21,7 +21,9 @@ body.app.con-nav { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
 }
 .app-atras svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .app-atras:not([hidden]) + .app-logo { display: none; }
-.app-logo { border-radius: 8px; flex: 0 0 auto; }
+.app-logo { flex: 0 0 auto; display: inline-grid; place-items: center; width: 44px; height: 44px; margin-left: -6px; border-radius: 12px; }
+.app-logo img { display: block; border-radius: 8px; }
+.app-logo:active { background: var(--crema-2); }
 .app-titulo {
   flex: 1; min-width: 0; margin: 0; font-size: 1.2rem; font-weight: 800; line-height: 1.1;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

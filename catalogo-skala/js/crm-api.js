@@ -7,6 +7,10 @@
 /* ⚠️ URL de la App web de Apps Script (termina en /exec). */
 const CRM_API_URL = "https://script.google.com/macros/s/AKfycbzEr3zjJi1dZwHjr2TP7_XAkAIltSlcm5QIg58UCNIrSgaqPWLCRXfl8qNZMni35rhIJA/exec";
 
+/* Página pública de productos (Netlify). La app Android la abre en el navegador;
+   vacío = el logo del panel no lleva a ningún lado dentro de la app. Ej.: "https://skala-venezuela.netlify.app/" */
+const CATALOGO_URL = "";
+
 const SkalaAPI = (function () {
   const API = (typeof window !== "undefined" && window.SKALA_CRM_URL) || CRM_API_URL;
   const K_SESION = "skala_sesion_v2";

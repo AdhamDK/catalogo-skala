@@ -263,6 +263,14 @@ function servidor() {
   await page.click("#btnAtras");
   await esperarRuta("#/pedidos");
   ok("inicio con cifras de hoy, lista de pedidos, detalle con historial y botón atrás");
+  // El logo de arriba lleva a la página de productos (la que ven los clientes)
+  await page.click("#lnkCatalogo");
+  await page.waitForURL(/index\.html$/);
+  await page.waitForSelector("#gridBanos .card");
+  assert.equal(await page.innerText("#btnCuenta"), "Óscar"); // sigue con la sesión
+  await page.goto(BASE + "/panel.html#/pedidos");
+  await esperarRuta("#/pedidos");
+  ok("logo de arriba → página de productos de los clientes");
 
   /* ---------- Clientes ---------- */
   await page.click('.app-nav a[href="#/clientes"]');

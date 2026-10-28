@@ -1620,6 +1620,10 @@
     window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); eventoInstalar = e; });
     if (APP) {
       document.documentElement.classList.add("en-app");
+      // En la app el catálogo no viene adentro: se abre la página pública en el navegador
+      const lc = $("lnkCatalogo");
+      if (CATALOGO_URL) { lc.href = CATALOGO_URL; lc.target = "_blank"; lc.rel = "noopener"; }
+      else { lc.removeAttribute("href"); lc.removeAttribute("title"); lc.setAttribute("aria-hidden", "true"); lc.tabIndex = -1; }
       // la app nativa necesita la sesión para actualizar los datos con la app cerrada
       try { const s0 = sesion(); if (s0) APP.guardarToken(s0.token); } catch (e) {}
     }

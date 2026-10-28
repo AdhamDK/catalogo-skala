@@ -59,6 +59,7 @@ const TIPOS = { ".html": "text/html", ".js": "text/javascript", ".css": "text/cs
     await page.goto(BASE + "/panel.html");
     await esperarRuta("#/ingresar");
     assert.equal(await page.locator('a[href="index.html"]').count(), 0); // sin catálogo en la app
+    assert.equal(await page.getAttribute("#lnkCatalogo", "href"), null); // sin dirección pública cargada, el logo no navega
     await page.fill("#lUsuario", "oscar");
     await page.fill("#lClave", "Oscar.1234");
     await page.click("#btnLogin");
