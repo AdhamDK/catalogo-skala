@@ -51,7 +51,10 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
 - **Vendedor**: **Nuevo** → 1) **Buscar cliente** o **Cliente nuevo** (si existe, ficha con ✏️
   para corregir datos) → 2) productos con + / − → 3) **¿Nota de entrega o factura?** (factura pide
   RIF), pago y nota → **Enviar pedido** → **Enviar al grupo**.
-- **Administración**: **Inicio / Pedidos → Por aprobar** → abrir el pedido → **Aprobar** (elige despachador) o **Anular** (con motivo).
+- **Administración**: **Pedidos → Por hacer → Por aprobar**: tocar las tarjetas elige varios y
+  **Aprobar N** los aprueba juntos con un mismo despachador (si a uno le falta stock, queda y avisa).
+  La flecha de cada tarjeta muestra productos, montos y cliente, con su botón **Aprobar**.
+  Desde el pedido completo también se puede **Anular** (con motivo).
 - **Despachador**: en Inicio ve "Hoy tenés por entregar N cajas". **Entregas** muestra arriba cajas
   por entregar, por cargar y en ruta. En *Por cargar* toca las tarjetas de los pedidos que lleva →
   **Ver total de carga** (cajas por producto). Al marcar todo lo cargado sale **¡Completo!** y

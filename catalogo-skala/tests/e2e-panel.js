@@ -447,20 +447,40 @@ function servidor() {
   await esperarRuta("#/inicio");
   await page.waitForSelector("#iLista .fila-ped");
   assert.equal(await page.locator("#iLista .fila-ped").count(), 2);
-  await page.locator("#iLista .fila-ped").last().click();
+  // Pedidos → Por hacer: tarjetas para aprobar (tocar elige, la flecha muestra los detalles)
+  await page.goto(BASE + "/panel.html#/pedidos?tab=hacer");
+  await esperarRuta("#/pedidos");
+  await page.waitForSelector(".apr-card");
+  assert.equal(await page.locator(".apr-card").count(), 2);
+  const p1 = `.apr-card[data-id="${gas.tabla("Pedidos")[0].id}"]`;
+  assert.ok(await page.locator("#aBarra").isHidden());
+  await page.click(`${p1} [data-ap-tap]`);
+  assert.match(await page.innerText("#aBarra"), /1 pedido · 9 cajas/);
+  await page.click("#aTodos");
+  assert.match(await page.innerText("#aBarra"), /2 pedidos/);
+  assert.equal(await page.innerText("#btnAprobarVarios"), "Aprobar 2");
+  await foto("06c-aprobar-varios");
+  await revisarDiseno("aprobar varios");
+  await page.click("#aTodos");
+  assert.ok(await page.locator("#aBarra").isHidden());
+  await page.click(`${p1} [data-ap-ver]`);
+  assert.match(await page.innerText(`${p1} .ent-detalle`), /5\s+Kit Aguacate[\s\S]*Peluquería Bella/);
+  await page.click(`${p1} .ent-detalle a[href^="#/pedido/"]`);
   await esperarRuta("#/pedido/");
   assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Aprobar", "Anular pedido"]);
-  await page.click('[data-acc="confirmar"]');
+  await page.click("#btnAtras");
+  await page.waitForSelector(`${p1}.abierta [data-ap="confirmar"]`); // vuelve con los detalles abiertos
+  await page.click(`${p1} [data-ap="confirmar"]`);
   await page.waitForSelector("#hoja:not([hidden])");
   await page.click("#hojaOk");
   assert.match(await page.innerText("#hojaError"), /Elegí un despachador/);
   await page.selectOption("#hDesp", { label: "Luis" });
   await foto("07-confirmar");
   await page.click("#hojaOk");
-  await page.waitForFunction(() => /Aprobado · Preparando despacho/.test(document.querySelector(".chip-estado")?.textContent || ""));
-  assert.match(await page.innerText(".datos"), /Despachador\s+Luis/);
+  await page.waitForFunction((s) => !document.querySelector(s), p1);
   assert.equal(gas.tabla("Pedidos")[0].estado, "confirmado");
-  ok("administración aprueba (Aprobado · Preparando despacho) y asigna despachador");
+  assert.equal(gas.tabla("Pedidos")[0].despachador, "Luis");
+  ok("administración aprueba desde los detalles de la tarjeta (Aprobado · Preparando despacho) y asigna despachador");
   await page.goto(BASE + "/panel.html#/inventario");
   await esperarRuta("#/inventario");
   const kt = '.inv-fila[data-code="KT-02"]';
@@ -902,6 +922,35 @@ function servidor() {
   await salir();
   await ingresar("jose", "Skala#2026");
   await esperarRuta("#/inicio");
+
+  // Aprobar varios a la vez: un despachador para todos; el que no tiene stock queda y se avisa
+  {
+    const tv = gas.post({ action: "login", usuario: "oscar", pin: "Oscar.1234" }).token;
+    const ta = gas.post({ action: "login", usuario: "ana", pin: "Ana*2222" }).token;
+    const nuevo = (negocio, code, cajas) => gas.post({ action: "guardarPedido", token: tv, client_ref: "varios-" + negocio, documento: "Nota de entrega", tipo_pago: "pronto",
+      cliente: { negocio, contacto: negocio, telefono: "0414-555" + String(negocio.length).padStart(4, "0"), direccion: "El Vigía" }, items: [{ code, producto: code, cajas, unidades_caja: 6, unidad: "unidades" }] }).pedido;
+    const a = nuevo("Salón Uno", "BC-02", 2), b = nuevo("Salón Dos", "BC-03", 4);
+    assert.ok(a && b);
+    gas.post({ action: "movimiento", token: ta, code: "BC-03", cajas: 1, tipo: "conteo" }); // ya no alcanza para b
+    await page.goto(BASE + "/panel.html#/pedidos?tab=hacer");
+    await esperarRuta("#/pedidos");
+    await page.waitForSelector(`.apr-card[data-id="${b.id}"]`);
+    await page.click(`.apr-card[data-id="${a.id}"] [data-ap-tap]`);
+    await page.click(`.apr-card[data-id="${b.id}"] [data-ap-tap]`);
+    assert.match(await page.innerText("#aBarra"), /2 pedidos · 6 cajas/);
+    await page.click("#btnAprobarVarios");
+    assert.match(await page.innerText("#hoja"), /2 pedidos · 6 cajas/);
+    await page.selectOption("#hDesp", { label: "Luis" });
+    await page.click("#hojaOk");
+    await page.waitForFunction(() => /1 aprobado, 1 sin aprobar/.test(document.getElementById("hojaTitulo")?.textContent || ""));
+    assert.match(await page.innerText("#hojaCuerpo"), /Salón Dos: Sin stock suficiente/);
+    await page.click("#hojaOk");
+    const est = (id) => gas.tabla("Pedidos").find((x) => x.id === id);
+    assert.deepEqual([est(a.id).estado, est(a.id).despachador, est(b.id).estado], ["confirmado", "Luis", "pendiente"]);
+    await page.waitForFunction((id) => !document.querySelector(`.apr-card[data-id="${id}"]`), a.id);
+    assert.ok(await page.locator(`.apr-card[data-id="${b.id}"]`).count());
+    ok("aprobar varios: un despachador para todos; el que no tiene stock queda en Por aprobar con aviso");
+  }
 
   /* ---------- Tema oscuro ---------- */
   const contraste = () => page.evaluate(() => {

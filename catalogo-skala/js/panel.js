@@ -931,6 +931,7 @@
   }
 
   let busquedaPed = "", vendedorPed = "";
+  const abiertasAp = new Set(); // tarjetas por aprobar con los detalles abiertos (se recuerdan al volver)
   async function vPedidos(v, _p, query, vigente) {
     if (enEntregas()) return vEntregas(v, query, vigente);
     const rp = rolPedidos();
@@ -939,6 +940,7 @@
     const esConc = sub && sub.id === "conciliados";
     const dias = esConc ? (PERIODOS.find(([d]) => d === Number(query.get("dias"))) || [30])[0] : 30;
     const conCarga = vista.id === "curso" && gestion();
+    const conAprobar = vista.id === "hacer" && gestion(); // aprobar varios a la vez, o uno desde sus detalles
     const url = (t, ver, d) => `#/pedidos?tab=${t}${ver ? `&ver=${ver}` : ""}${d ? `&dias=${d}` : ""}`;
     v.innerHTML = `
       <div class="buscador buscador-ped"><input type="search" id="pBuscar" placeholder="Buscar cliente, número o teléfono" autocomplete="off" enterkeyhint="search" value="${esc(busquedaPed)}" /></div>
@@ -950,7 +952,8 @@
       <div class="modal-sub" id="pInfo"></div>
       ${conCarga ? '<div class="fila-elegir" id="pElegir" hidden><label class="check"><input type="checkbox" id="pTodos" /> Elegir todos (en despacho)</label></div>' : ""}
       <ul class="lista-ped" id="pLista"></ul>
-      ${conCarga ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}`;
+      ${conCarga ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}
+      ${conAprobar ? '<div class="barra-accion" id="aBarra" hidden><div><strong id="aSel">0 pedidos</strong><span id="aSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnAprobarVarios">Aprobar</button></div>' : ""}`;
 
     let conciliadosServidor = null; // la lista de conciliados del período la da el servidor (puede ser vieja)
     let visibles = [];
@@ -986,7 +989,15 @@
           .concat(porHacer(todos, rp, yo().id).map((s) => ({ ...s, pedidos: filtrar(s.pedidos) })));
         visibles = [].concat(...secciones.filter((s) => !s.web).map((s) => s.pedidos));
         const total = secciones.reduce((a, s) => a + s.pedidos.length, 0);
-        html = secciones.filter((s) => s.pedidos.length).map((s) => `<li class="grupo-tit" data-seccion="${s.id}">${esc(s.titulo)} <b>${s.pedidos.length}</b></li>${s.web ? s.pedidos.map(filaWeb).join("") : filasDe(s.pedidos, false)}`).join("");
+        html = secciones.filter((s) => s.pedidos.length).map((s) => {
+          const aprobar = conAprobar && s.id === "aprobar";
+          const tit = `<li class="grupo-tit${aprobar ? " grupo-aprobar" : ""}" data-seccion="${s.id}"><span>${esc(s.titulo)} <b>${s.pedidos.length}</b></span>${aprobar ? '<button type="button" class="ent-todos" id="aTodos" aria-pressed="false">Elegir todos</button>' : ""}</li>`;
+          const filas = s.web ? s.pedidos.map(filaWeb).join("")
+            : aprobar ? `<li class="ent-ayuda-li">Tocá los pedidos para aprobar varios juntos, o abrí la flecha y aprobá uno.</li>${s.pedidos.map((p) => tarjetaAprobar(p, abiertasAp.has(p.id))).join("")}`
+            : filasDe(s.pedidos, false);
+          return tit + filas;
+        }).join("");
+        porAprobar = conAprobar ? ((secciones.find((x) => x.id === "aprobar") || {}).pedidos || []) : [];
         info = total ? "" : "";
         if (!total) html = `<li class="vacio-panel">${busquedaPed || vendedorPed ? "Nada con ese filtro." : "Nada pendiente por ahora."}</li>`;
       } else {
@@ -1004,6 +1015,7 @@
       }
       $("pInfo").textContent = info;
       $("pLista").innerHTML = html;
+      if (conAprobar) pintarAprobar();
       if (conCarga) { $("pElegir").hidden = !visibles.some((p) => ["confirmado", "en_ruta"].includes(p.estado)); pintarSel(); }
     };
     const elegidos = () => [...v.querySelectorAll(".check-ped input:checked")].map((x) => x.value);
@@ -1021,6 +1033,71 @@
       $("pLista").addEventListener("change", pintarSel);
       $("pTodos").addEventListener("change", () => { v.querySelectorAll(".check-ped input").forEach((x) => (x.checked = $("pTodos").checked)); pintarSel(); });
       $("btnVerCarga").addEventListener("click", () => { sessionStorage.setItem(K_CARGA, JSON.stringify(elegidos())); ir("#/carga"); });
+    }
+    // Aprobar: tocar la tarjeta la elige; la flecha despliega los detalles (con su botón Aprobar)
+    let porAprobar = [];
+    const selAp = new Set();
+    const elegidosAp = () => porAprobar.filter((p) => selAp.has(p.id));
+    function pintarAprobar() {
+      v.querySelectorAll(".apr-card").forEach((li) => {
+        const on = selAp.has(li.dataset.id);
+        li.classList.toggle("elegida", on);
+        li.querySelector("[data-ap-tap]").setAttribute("aria-pressed", String(on));
+      });
+      const ps = elegidosAp();
+      const cajas = ps.reduce((a, p) => a + (Number(p.total_cajas) || 0), 0);
+      $("aBarra").hidden = !ps.length;
+      $("aSel").textContent = `${ps.length} pedido${ps.length === 1 ? "" : "s"}`;
+      $("aSelCajas").textContent = ` · ${cajas} caja${cajas === 1 ? "" : "s"}`;
+      $("btnAprobarVarios").textContent = ps.length > 1 ? `Aprobar ${ps.length}` : "Aprobar";
+      const t = $("aTodos");
+      if (t) { const all = ps.length > 0 && ps.length === porAprobar.length; t.setAttribute("aria-pressed", String(all)); t.textContent = all ? "Quitar todos" : "Elegir todos"; }
+    }
+    if (conAprobar) {
+      $("pLista").addEventListener("click", async (e) => {
+        if (e.target.closest("#aTodos")) {
+          const all = porAprobar.length && porAprobar.every((p) => selAp.has(p.id));
+          porAprobar.forEach((p) => (all ? selAp.delete(p.id) : selAp.add(p.id)));
+          return pintarAprobar();
+        }
+        const li = e.target.closest(".apr-card");
+        if (!li) return;
+        const id = li.dataset.id;
+        if (e.target.closest("[data-ap-ver]")) {
+          const on = !li.classList.contains("abierta");
+          li.classList.toggle("abierta", on);
+          li.querySelector(".ent-detalle").hidden = !on;
+          li.querySelector("[data-ap-ver]").setAttribute("aria-expanded", String(on));
+          if (on) abiertasAp.add(id); else abiertasAp.delete(id);
+          return;
+        }
+        if (e.target.closest("[data-ap-tap]")) {
+          if (selAp.has(id)) selAp.delete(id); else selAp.add(id);
+          return pintarAprobar();
+        }
+        const b = e.target.closest("[data-ap]");
+        const p = porAprobar.find((x) => x.id === id);
+        if (b && p) { selAp.delete(id); await accionPedido(p, b.dataset.ap, b); }
+      });
+      $("btnAprobarVarios").addEventListener("click", async () => {
+        const ps = elegidosAp();
+        if (!ps.length) return;
+        if (ps.length === 1) return accionPedido(ps[0], "confirmar", $("btnAprobarVarios"));
+        const despachador = await elegirDespachador(`Aprobar ${ps.length} pedidos`,
+          `${ps.length} pedidos · ${ps.reduce((a, p) => a + (Number(p.total_cajas) || 0), 0)} cajas · pasan a <strong>Aprobado · Preparando despacho</strong>`);
+        if (!despachador) return;
+        const btn = $("btnAprobarVarios");
+        btn.disabled = true; btn.classList.add("ocupado");
+        let ok = 0; const fallos = [];
+        for (const p of ps) {
+          try { const r = await api("estado", { pedido_id: p.id, estado: "confirmado", despachador_id: despachador }); guardarEnMemoria(r.pedido); ok++; selAp.delete(p.id); }
+          catch (e2) { fallos.push(`${p.negocio}: ${e2.message}`); }
+        }
+        btn.disabled = false; btn.classList.remove("ocupado");
+        if (fallos.length) await hoja({ titulo: ok ? `${ok} aprobado${ok === 1 ? "" : "s"}, ${fallos.length} sin aprobar` : "No se aprobaron", cuerpo: `<ul class="resumen-items">${fallos.map((f) => `<li><span>${esc(f)}</span></li>`).join("")}</ul>`, ok: "Entendido" });
+        else toast(`${ok} pedidos aprobados`);
+        render();
+      });
     }
     let tBus = null;
     $("pBuscar").addEventListener("input", (e) => { clearTimeout(tBus); tBus = setTimeout(() => { busquedaPed = e.target.value; pintar(); }, 120); });
@@ -1054,6 +1131,55 @@
   };
   const diaLocal = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
   const icoEnt = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICO_ENT[n]}</svg>`;
+  /* Tarjeta para aprobar (Administración): tocar la elige; la flecha despliega productos, cliente y el botón Aprobar */
+  function tarjetaAprobar(p, abierta) {
+    const c = p.cliente_datos || {};
+    const cajas = Number(p.total_cajas) || 0;
+    const items = Array.isArray(p.items) ? p.items : [];
+    const acc = accionesPedido(roles(), yo().id, p);
+    const tipo = p.tipo_pago || tipoPagoDe(p.pago);
+    const pago = (pagoPorId(tipo) || {}).nombre || p.pago || "";
+    return `<li class="ent-card apr-card est-borde-pendiente elegible${abierta ? " abierta" : ""}" data-id="${esc(p.id)}">
+      <div class="ent-cab">
+        <button type="button" class="ent-info" data-ap-tap aria-pressed="false" aria-label="Elegir ${esc(p.negocio)} para aprobar">
+          <span class="ent-cajas"><strong>${cajas}</strong>caja${cajas === 1 ? "" : "s"}</span>
+          <span class="ent-txt">
+            <strong class="ent-neg">${esc(p.negocio)}</strong>
+            <span class="ped-det">${esc(p.vendedor)} · ${esc(fechaLegible(p.fecha))}</span>
+            <span class="ped-det">${esc(p.id)}${pago ? ` · ${esc(pago)}` : ""}</span>
+            ${montoFila(p)}
+          </span>
+        </button>
+        <button type="button" class="ent-flecha" data-ap-ver aria-expanded="${!!abierta}" aria-label="Ver detalles de ${esc(p.negocio)}" title="Detalles">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </div>
+      <div class="ent-detalle"${abierta ? "" : " hidden"}>
+        <ul class="ent-items">${items.map((it) => `<li><b>${Number(it.cajas) || 0}</b><span>${esc(it.producto)} <span class="ped-det">${esc(it.code)}${it.total_unidades ? ` · ${it.total_unidades} ${esc(it.unidad)}` : ""}</span></span>${vende() && Number(it.precio) > 0 ? `<em class="ent-precio">${dinero(it.cajas * precioUnitario(it, tipo))}</em>` : ""}</li>`).join("") || '<li class="ped-det">Abrí el pedido para ver los productos.</li>'}</ul>
+        <p class="ent-dir-full"><span class="ped-det">Cliente</span><br>${esc(p.cliente && p.cliente !== p.negocio ? `${p.negocio} · ${p.cliente}` : p.negocio)}${c.direccion ? `<br>${esc(c.direccion)}` : ""}${p.nota ? `<br><span class="ped-det">Nota: ${esc(p.nota)}</span>` : ""}</p>
+        <div class="ent-botones apr-botones">
+          <a class="ent-ico" href="#/pedido/${encodeURIComponent(p.id)}">${icoEnt("ver")}<span>Ver pedido</span></a>
+          ${acc.includes("confirmar") ? `<button type="button" class="btn btn-primary ent-acc es-entregar" data-ap="confirmar">${icoEnt("ok")}Aprobar</button>` : ""}
+        </div>
+      </div>
+    </li>`;
+  }
+
+  /* Elegir quién despacha (al aprobar uno o varios) */
+  async function elegirDespachador(titulo, sub, actual) {
+    const { despachadores } = await api("despachadores");
+    if (!despachadores.length) { toast("No hay despachadores activos. Crealos en Más → Usuarios."); return ""; }
+    const r = await hoja({
+      titulo,
+      cuerpo: `<p class="modal-sub">${sub}</p>
+        <label class="field field-full"><span>¿Quién lo despacha?</span><select name="despachador_id" id="hDesp"><option value="">Elegí quién lo lleva</option>${despachadores.map((d) =>
+          `<option value="${esc(d.id)}"${d.id === actual ? " selected" : ""}>${esc(d.nombre)}</option>`).join("")}</select></label>`,
+      ok: "Aprobar",
+      validar: (d) => (d.despachador_id ? "" : "Elegí un despachador."),
+    });
+    return r ? r.despachador_id : "";
+  }
+
   /* Tarjeta de entrega: en la vista solo el mapa y la acción; la flecha despliega productos y dirección,
      y "Más detalles" muestra el teléfono para llamar. En "Por cargar", tocar la tarjeta la elige. */
   function tarjetaEntrega(p, elegible, abierta) {
