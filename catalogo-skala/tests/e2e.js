@@ -104,7 +104,7 @@ async function probar(browser, cfg) {
   if (cfg.movil) {
     // Objetivos táctiles >= 44px y texto de inputs >= 16px (iOS no hace zoom)
     const chicos = await page.evaluate(() =>
-      [...document.querySelectorAll(".nav a, .filter, .qty-btn, .qty-input, .btn, .order-clear, .brand, .card-zoom")]
+      [...document.querySelectorAll(".nav a, .filter, .qty-btn, .qty-input, .btn, .order-clear, .brand, .card-zoom, .cart-quitar, .btn-desplegar, .btn-mas-lista, .vend-opt")]
         .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (r.height < 44 || r.width < 44); })
         .map((e) => `${e.className || e.tagName} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`)
     );
@@ -194,22 +194,44 @@ async function probar(browser, cfg) {
   await page.waitForFunction(() => [...document.querySelectorAll("#cartList .cart-foto img")].every((i) => i.complete && i.naturalWidth > 0));
   assert.match(await page.locator("#cartList .cart-foto img").first().evaluate((i) => i.currentSrc), /BC-01-400\.webp$/);
   assert.match(await page.innerText("#cartTotal"), /3 cajas · 40,00 \$/);
+  // renglón: nombre, "Caja x 6 und" y precio (×cajas = monto) al lado del +
+  assert.equal(await page.innerText('#cartList [data-item="BC-01"] .cart-info span'), "Caja x 6 und");
+  assert.match(await page.innerText('#cartList [data-item="BC-01"] .cart-precio'), /10,00 \$ ×2\s*20,00 \$/);
+  assert.equal(await page.innerText('#cartList [data-item="KT-01"] .cart-precio'), "20,00 $");
+  assert.equal(await page.innerText('#cartList [data-item="KT-01"] .cart-info span'), "Caja x 6 dúos");
+  // formas de pago cerradas: botón para desplegar; 3 estrellas en triángulo, la 4ª con Premium
+  assert.ok(await page.locator("#pagosWeb").isHidden());
+  assert.match(await page.innerText("#pagoElegido"), /Elegí cómo pagás · desde 24,00 \$/);
+  await page.locator("#btnPagos").click();
   assert.deepEqual(await page.locator("#pagosWeb .pago-monto strong").allInnerTexts(), ["40,00 $", "36,00 $", "28,00 $", "24,00 $"]);
+  assert.deepEqual(await page.locator("#pagosWeb .estrellas").evaluateAll((els) => els.map((e) => e.querySelectorAll(".estrella.on").length + "/" + e.querySelectorAll(".estrella").length)), ["0/3", "1/3", "2/3", "3/3"]);
+  assert.deepEqual(await page.locator("#pagosWeb .premium").allInnerTexts(), ["PREMIUM"]);
+  await page.locator("#btnPagos").click();
+  assert.ok(await page.locator("#pagosWeb").isHidden());
   await page.locator('#cartList .qty-btn[data-act="plus"][data-code="KT-01"]').click();
   assert.match(await page.innerText("#cartTotal"), /4 cajas · 60,00 \$/);
   assert.equal(await page.inputValue('.card[data-card="KT-01"] .qty-input'), "2");
+  // papelera: animación y se quita
   await page.locator('#cartList [data-quitar="KT-01"]').click();
-  assert.equal(await page.locator("#cartList .cart-item").count(), 1);
+  assert.ok(await page.locator('#cartList [data-item="KT-01"].saliendo').count());
+  await page.waitForFunction(() => document.querySelectorAll("#cartList .cart-item").length === 1);
   await page.locator('#cartList .qty-btn[data-act="plus"][data-code="BC-01"]').click();
   assert.match(await page.innerText("#cartTotal"), /3 cajas · 30,00 \$/);
   // Enviar exige datos mínimos
-  await page.waitForFunction(() => document.querySelectorAll("#fVendedor option").length === 3);
+  await page.waitForFunction(() => document.querySelectorAll("#listaVendedores [data-vend]").length === 2);
+  assert.ok(await page.locator("#listaVendedores").isVisible()); // sin vendedor elegido, la lista ya está abierta
   await page.locator("#btnWhatsapp").click();
-  assert.match(await page.innerText("#formWarn"), /Nombre del negocio · Teléfono · Tu vendedor · Forma de pago/);
+  assert.match(await page.innerText("#formWarn"), /Nombre del negocio · Teléfono · Vendedor · Forma de pago/);
+  assert.ok(await page.locator("#pagosWeb").isVisible()); // se abre para elegir
   await page.fill("#fNegocio", "Salón Luz");
   await page.fill("#fTelefono", "0414-5551234");
-  await page.selectOption("#fVendedor", { label: "Óscar" });
+  await page.locator("#listaVendedores [data-vend]", { hasText: "Óscar" }).click();
+  assert.ok(await page.locator("#listaVendedores").isHidden());
+  assert.match(await page.innerText("#vendElegido"), /Óscar/);
   await page.locator('#pagosWeb input[value="efectivo_pronto"]').check();
+  assert.ok(await page.locator("#pagosWeb").isHidden()); // al elegir se cierra
+  assert.match(await page.innerText("#pagoElegido"), /Efectivo pronto pago[\s\S]*18,00 \$/);
+  assert.equal(await page.innerText("#btnPagos"), "Cambiar");
   assert.match(await page.innerText("#cartTotal"), /18,00 \$ Efectivo pronto pago/);
   const msg = await page.inputValue("#orderText");
   assert.match(msg, /\(WEB-[A-Z2-9]{6}\)/);
@@ -218,13 +240,30 @@ async function probar(browser, cfg) {
   assert.match(msg, /Mi vendedor: Óscar/);
   assert.match(await page.getAttribute("#btnWhatsapp", "href"), /^https:\/\/wa\.me\/584247042169\?text=/);
   ok("Tu pedido: sumar / quitar, montos por forma de pago, vendedor obligatorio");
+  if (cfg.movil) {
+    await page.locator("#btnPagos").click();
+    await page.locator("#btnVendedores").click();
+    const chicosModal = await page.evaluate(() => [...document.querySelectorAll("#orderModal button, #orderModal .btn")]
+      .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (r.height < 43.5 || r.width < 43.5); })
+      .map((e) => `${e.className || e.id} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`));
+    assert.deepEqual(chicosModal, [], "botones del pedido < 44px");
+    const anchoModal = await page.evaluate(() => { const b = document.querySelector("#orderModal .modal-box"); return b.scrollWidth <= b.clientWidth + 1; });
+    assert.ok(anchoModal, "Tu pedido tiene scroll horizontal");
+    if (process.env.SCREENSHOTS) {
+      await page.locator("#orderModal .modal-box").evaluate((b) => { b.scrollTop = 0; });
+      await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `${cfg.nombre}-pedido-abierto.png`) });
+    }
+    await page.locator("#btnPagos").click();
+    await page.locator("#btnVendedores").click();
+    ok("Tu pedido: botones de 44px y sin scroll horizontal");
+  }
 
   // Modal: campos dentro del ancho, inputs >= 16px, botón WhatsApp siempre visible
   const modal = await page.evaluate(() => {
     const box = document.querySelector("#orderModal .modal-box").getBoundingClientRect();
     const fuera = [...document.querySelectorAll("#orderModal input, #orderModal textarea")]
-      .filter((e) => e.type !== "radio" && e.getBoundingClientRect().right > box.right + 1).map((e) => e.id);
-    const fuentes = [...document.querySelectorAll("#orderModal input:not([type=radio]), #orderModal textarea")]
+      .filter((e) => e.type !== "radio" && e.type !== "hidden" && e.getBoundingClientRect().right > box.right + 1).map((e) => e.id);
+    const fuentes = [...document.querySelectorAll("#orderModal input:not([type=radio]):not([type=hidden]), #orderModal textarea")]
       .filter((e) => parseFloat(getComputedStyle(e).fontSize) < 16).map((e) => e.id);
     const wa = document.getElementById("btnWhatsapp").getBoundingClientRect();
     return { fuera, fuentes, waBottom: wa.bottom, waTop: wa.top, vh: innerHeight };

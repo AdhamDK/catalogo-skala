@@ -200,13 +200,28 @@ function fillCliente() {
   $id("fTelefono").value = cliente.telefono || "";
 }
 
-/* Vendedores (para que el cliente elija el suyo) */
+/* Vendedores (para que el cliente elija el suyo): renglón "Elige un vendedor" + lista que se despliega */
 let vendedores = leer(K_VENDEDORES, []) || [];
+const inicial = (n) => String(n || "?").trim().charAt(0).toUpperCase();
 function pintarVendedores() {
-  const sel = $id("fVendedor");
-  const actual = sel.value || cliente.vendedor_id || "";
-  sel.innerHTML = '<option value="">Elegí tu vendedor</option>' +
-    vendedores.map((v) => `<option value="${escHTML(v.id)}"${v.id === actual ? " selected" : ""}>${escHTML(v.nombre)}</option>`).join("");
+  const actual = $id("fVendedor").value || cliente.vendedor_id || "";
+  const v = vendedores.find((x) => x.id === actual);
+  $id("fVendedor").value = v ? v.id : "";
+  $id("vendElegido").innerHTML = v
+    ? `<button type="button" class="vend-elegido" data-abrir-vend><span class="avatar">${escHTML(inicial(v.nombre))}</span><span><strong>${escHTML(v.nombre)}</strong><span>Tu vendedor · tocá para cambiar</span></span></button>`
+    : "";
+  $id("listaVendedores").innerHTML = vendedores.length
+    ? vendedores.map((x) => `<li><button type="button" class="vend-opt${x.id === actual ? " activo" : ""}" data-vend="${escHTML(x.id)}" aria-pressed="${x.id === actual}">
+        <span class="avatar">${escHTML(inicial(x.nombre))}</span><strong>${escHTML(x.nombre)}</strong></button></li>`).join("")
+    : '<li class="vend-vacio">Cargando vendedores…</li>';
+}
+function abrirVendedores(abrir) {
+  const lista = $id("listaVendedores"), b = $id("btnVendedores");
+  const ab = abrir === undefined ? lista.hidden : abrir;
+  lista.hidden = !ab;
+  b.textContent = ab ? "−" : "+";
+  b.setAttribute("aria-expanded", String(ab));
+  b.setAttribute("aria-label", ab ? "Cerrar lista de vendedores" : "Ver lista de vendedores");
 }
 function cargarVendedores() {
   if (typeof SkalaAPI === "undefined") return;
@@ -219,33 +234,71 @@ function cargarVendedores() {
 }
 
 /* -------------------- "Tu pedido" -------------------- */
+/* 3 estrellas en triángulo (doradas según la forma de pago) */
+function estrellasHTML(n, premium) {
+  const est = (on, cls) => `<svg class="estrella ${cls}${on ? " on" : ""}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.7 6.3.9-4.6 4.4 1.1 6.2L12 17l-5.6 3 1.1-6.2-4.6-4.4 6.3-.9z"/></svg>`;
+  return `<span class="estrellas" role="img" aria-label="${n} de 3 estrellas${premium ? ", premium" : ""}">${est(n >= 1, "e1")}${est(n >= 2, "e2")}${est(n >= 3, "e3")}</span>${premium ? '<span class="premium">Premium</span>' : ""}`;
+}
+let pagosAbiertos = false;
+function abrirPagos(abrir) {
+  pagosAbiertos = abrir === undefined ? !pagosAbiertos : abrir;
+  $id("pagosWeb").hidden = !pagosAbiertos;
+  const b = $id("btnPagos");
+  b.setAttribute("aria-expanded", String(pagosAbiertos));
+  const elegido = (document.querySelector('input[name="pagoWeb"]:checked') || {}).value;
+  b.textContent = pagosAbiertos ? "Cerrar" : elegido ? "Cambiar" : "Ver opciones";
+  $id("pagoElegido").hidden = pagosAbiertos;
+}
+const iconoPapelera = '<svg viewBox="0 0 24 24" aria-hidden="true"><g class="tapa"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/></g><path class="tacho" d="M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>';
+
 function renderCarrito() {
   const its = itemsConPrecio();
   const total = totalCajas();
   const sel = (document.querySelector('input[name="pagoWeb"]:checked') || {}).value || cliente.tipo_pago || "";
   const tipo = sel || "credito";
+  const lista = $id("cartList");
   const escribiendo = document.activeElement && document.activeElement.closest && document.activeElement.closest("#cartList");
-  if (!escribiendo || its.length !== $id("cartList").children.length) $id("cartList").innerHTML = its.map((it) => `
-    <li class="cart-item">
+  const map = allProductsMap();
+  const precioTxt = (it) => {
+    if (!it.precio) return "";
+    const u = precioUnitario(it, tipo);
+    return it.cajas >= 2 ? `<span class="pu">${dinero(u)} ×${it.cajas}</span><strong>${dinero(u * it.cajas)}</strong>` : `<strong>${dinero(u)}</strong>`;
+  };
+  if (!escribiendo || its.length !== lista.children.length) {
+    lista.innerHTML = its.map((it) => `
+    <li class="cart-item" data-item="${it.code}">
       <picture class="cart-foto"><source type="image/webp" srcset="assets/img/web/${it.code}-400.webp" />
         <img src="assets/img/${it.code}.png" alt="" width="44" height="44" loading="lazy" decoding="async" /></picture>
-      <div class="cart-info"><strong>${escHTML(it.producto)}</strong>
-        <span>${it.code}${it.total_unidades ? ` · ${it.total_unidades} ${escHTML(it.unidad)}` : ""}${it.precio ? ` · ${dinero(precioUnitario(it, tipo))} c/u` : ""}</span></div>
-      <div class="qty qty-chica">
-        <button type="button" class="qty-btn" data-act="minus" data-code="${it.code}" aria-label="Restar una caja de ${escHTML(it.producto)}">−</button>
-        <input class="qty-input" type="number" min="0" step="1" value="${it.cajas}" data-code="${it.code}" inputmode="numeric" aria-label="Cajas de ${escHTML(it.producto)}" />
-        <button type="button" class="qty-btn" data-act="plus" data-code="${it.code}" aria-label="Sumar una caja de ${escHTML(it.producto)}">+</button>
+      <div class="cart-info"><strong>${escHTML(it.producto)}</strong><span>${escHTML(textoUnidadesCorto(map[it.code]))}</span></div>
+      <div class="cart-acc">
+        <div class="qty qty-chica">
+          <button type="button" class="qty-btn" data-act="minus" data-code="${it.code}" aria-label="Restar una caja de ${escHTML(it.producto)}">−</button>
+          <input class="qty-input" type="number" min="0" step="1" value="${it.cajas}" data-code="${it.code}" inputmode="numeric" aria-label="Cajas de ${escHTML(it.producto)}" />
+          <button type="button" class="qty-btn" data-act="plus" data-code="${it.code}" aria-label="Sumar una caja de ${escHTML(it.producto)}">+</button>
+        </div>
+        <span class="cart-precio" data-precio-item>${precioTxt(it)}</span>
+        <button type="button" class="cart-quitar" data-quitar="${it.code}" aria-label="Quitar ${escHTML(it.producto)} del pedido" title="Quitar">${iconoPapelera}</button>
       </div>
-      <button type="button" class="cart-quitar" data-quitar="${it.code}" aria-label="Quitar ${escHTML(it.producto)}">✕</button>
     </li>`).join("");
+  } else {
+    its.forEach((it) => { const el = lista.querySelector(`[data-item="${it.code}"] [data-precio-item]`); if (el) el.innerHTML = precioTxt(it); });
+  }
   const hayPrecio = its.some((it) => it.precio > 0);
   $id("cartNivel").textContent = total >= CAJAS_MAYOR ? `Precio al mayor (${total} cajas).` : `Precio al por menor · desde ${CAJAS_MAYOR} cajas tenés precio al mayor (te faltan ${CAJAS_MAYOR - total}).`;
   $id("cartTotal").innerHTML = `<strong>${total} caja${total === 1 ? "" : "s"}</strong>${hayPrecio ? ` · <strong>${dinero(totalPorPago(its, tipo))}</strong> ${escHTML((pagoPorId(tipo) || {}).nombre || "")}` : ""}`;
-  $id("pagosWeb").innerHTML = totalesPorPago(its).map((pg) => `<label class="pay-opt pago-opt">
-      <input type="radio" name="pagoWeb" value="${pg.id}"${pg.id === sel ? " checked" : ""} />
-      <span class="pago-txt"><strong>${escHTML(pg.nombre)}</strong><span>${escHTML(pg.ayuda)}</span></span>
+  const opciones = totalesPorPago(its);
+  const fila = (pg, radio) => `<label class="pay-opt pago-opt${pg.premium ? " es-premium" : ""}">
+      ${radio ? `<input type="radio" name="pagoWeb" value="${pg.id}"${pg.id === sel ? " checked" : ""} />` : ""}
+      <span class="pago-txt"><strong>${escHTML(pg.nombre)}</strong>${estrellasHTML(pg.estrellas, pg.premium)}<span>${escHTML(pg.ayuda)}</span></span>
       ${hayPrecio ? `<span class="pago-monto"><strong>${dinero(pg.total)}</strong>${pg.ahorro ? `<span>−${dinero(pg.ahorro)}</span>` : ""}</span>` : ""}
-    </label>`).join("");
+    </label>`;
+  $id("pagosWeb").innerHTML = opciones.map((pg) => fila(pg, true)).join("");
+  const elegido = opciones.find((pg) => pg.id === sel);
+  const desde = Math.min(...opciones.map((pg) => pg.total));
+  $id("pagoElegido").innerHTML = elegido
+    ? `<button type="button" class="pago-resumen" data-abrir-pagos>${fila(elegido, false).replace(/^<label/, "<span").replace(/<\/label>$/, "</span>")}</button>`
+    : `<button type="button" class="pago-resumen vacio" data-abrir-pagos><span>Elegí cómo pagás${hayPrecio ? ` · desde <strong>${dinero(desde)}</strong>` : ""}</span></button>`;
+  abrirPagos(pagosAbiertos);
 }
 
 function datosPedidoWeb() {
@@ -259,7 +312,7 @@ function faltantes(c) {
   const f = [];
   if (!c.negocio && !c.contacto) f.push("Nombre del negocio");
   if (c.telefono.replace(/\D/g, "").length < 7) f.push("Teléfono");
-  if (!c.vendedor_id) f.push("Tu vendedor");
+  if (!c.vendedor_id) f.push("Vendedor");
   if (!c.tipo_pago) f.push("Forma de pago");
   return f;
 }
@@ -277,7 +330,9 @@ function refreshMessage() {
 function openModal() {
   if (totalCajas() <= 0) return;
   fillCliente();
+  pagosAbiertos = false;
   pintarVendedores();
+  abrirVendedores(!$id("fVendedor").value);
   renderCarrito();
   refreshMessage();
   $id("formWarn").hidden = true;
@@ -385,7 +440,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const zoom = e.target.closest("[data-zoom]");
     if (zoom) { abrirZoom(zoom.dataset.zoom); return; }
     const quitar = e.target.closest("[data-quitar]");
-    if (quitar) { setQty(quitar.dataset.quitar, 0); return; }
+    if (quitar) {
+      const li = quitar.closest(".cart-item");
+      if (!li || li.classList.contains("saliendo")) return;
+      quitar.classList.add("tirando");
+      li.classList.add("saliendo");
+      setTimeout(() => setQty(quitar.dataset.quitar, 0), 320);
+      return;
+    }
     /* Tocar la tarjeta suma una caja */
     const card = e.target.closest(".card[data-card]");
     if (card && !e.target.closest(".card-order, a, input, button")) {
@@ -435,8 +497,19 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!$id("formWarn").hidden && !falta.length) $id("formWarn").hidden = true;
   };
   ["fRif", "fNegocio", "fContacto", "fDireccion", "fTelefono"].forEach((id) => $id(id).addEventListener("input", alCambiar));
-  $id("fVendedor").addEventListener("change", alCambiar);
-  $id("pagosWeb").addEventListener("change", alCambiar);
+  $id("pagosWeb").addEventListener("change", (e) => { alCambiar(e); abrirPagos(false); });
+  $id("btnPagos").addEventListener("click", () => abrirPagos());
+  $id("pagoElegido").addEventListener("click", (e) => { if (e.target.closest("[data-abrir-pagos]")) abrirPagos(true); });
+  $id("btnVendedores").addEventListener("click", () => abrirVendedores());
+  $id("fsVendedor").addEventListener("click", (e) => {
+    if (e.target.closest("[data-abrir-vend]")) return abrirVendedores(true);
+    const b = e.target.closest("[data-vend]");
+    if (!b) return;
+    $id("fVendedor").value = b.dataset.vend;
+    pintarVendedores();
+    abrirVendedores(false);
+    alCambiar();
+  });
 
   /* Enviar: valida, avisa al vendedor (pedido web en su app) y abre WhatsApp */
   $id("btnWhatsapp").addEventListener("click", (e) => {
@@ -446,6 +519,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (falta.length) {
       e.preventDefault();
       warn.innerHTML = "Para enviar falta: <strong>" + falta.join(" · ") + "</strong>";
+      if (falta.includes("Forma de pago")) abrirPagos(true);
+      if (falta.includes("Vendedor")) abrirVendedores(true);
       warn.hidden = false;
       warn.scrollIntoView({ block: "center" });
       return;

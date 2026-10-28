@@ -245,10 +245,10 @@ function resumenConciliados(pedidos) {
    Nivel: Mayor desde 15 cajas o por excepción del vendedor. El descuento sale de cómo paga. */
 const CAJAS_MAYOR = 15;
 const PAGOS = [
-  { id: "credito", nombre: "Crédito", credito: true, desc: "", ayuda: "Transferencia o pago móvil con días" },
-  { id: "pronto", nombre: "Pronto pago", credito: false, desc: "desc_pronto", ayuda: "Paga hasta el día siguiente a la entrega" },
-  { id: "efectivo_credito", nombre: "Efectivo a crédito", credito: true, desc: "desc_efectivo_credito", ayuda: "Dólares en efectivo con días" },
-  { id: "efectivo_pronto", nombre: "Efectivo pronto pago", credito: false, desc: "desc_efectivo_pronto", ayuda: "Efectivo hasta el día siguiente a la entrega" },
+  { id: "credito", nombre: "Crédito", credito: true, desc: "", ayuda: "Transferencia o pago móvil con días", estrellas: 0 },
+  { id: "pronto", nombre: "Pronto pago", credito: false, desc: "desc_pronto", ayuda: "Paga hasta el día siguiente a la entrega", estrellas: 1 },
+  { id: "efectivo_credito", nombre: "Efectivo a crédito", credito: true, desc: "desc_efectivo_credito", ayuda: "Dólares en efectivo con días", estrellas: 2 },
+  { id: "efectivo_pronto", nombre: "Efectivo pronto pago", credito: false, desc: "desc_efectivo_pronto", ayuda: "Efectivo hasta el día siguiente a la entrega", estrellas: 3, premium: true },
 ];
 const pagoPorId = (id) => PAGOS.find((x) => x.id === id) || null;
 function tipoPagoDe(pago) {

@@ -48,6 +48,14 @@ function textoUnidades(p) {
   return "Unidades por caja: información no disponible";
 }
 
+/* Versión corta para listas: "Caja x 6 und" / "Caja x 6 dúos" */
+function textoUnidadesCorto(p) {
+  const u = p && p.unidades;
+  if (!(Number.isFinite(u) && u > 0)) return "";
+  const un = (p && p.unidad) || "unidades";
+  return `Caja x ${u} ${un === "unidades" ? "und" : un}`;
+}
+
 /* Sufijo para el mensaje de pedido: 2 cajas de 6 -> " (12 unidades)". */
 function textoUnidadesPedido(p, cajas) {
   const u = p && p.unidades;
@@ -56,5 +64,5 @@ function textoUnidadesPedido(p, cajas) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { UNIDADES_POR_CAJA_BANO, DUOS_POR_CAJA_KIT, CURVATURAS, tiposDeCabello, iconosCabelloHTML, textoUnidades, textoUnidadesPedido };
+  module.exports = { UNIDADES_POR_CAJA_BANO, DUOS_POR_CAJA_KIT, CURVATURAS, tiposDeCabello, iconosCabelloHTML, textoUnidades, textoUnidadesCorto, textoUnidadesPedido };
 }

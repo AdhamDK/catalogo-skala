@@ -241,14 +241,24 @@
       <ul class="carrito" id="cartList"></ul>
       <p class="cart-total" id="cartTotal"></p>
 
-      <fieldset class="pay pagos" id="fsPagoWeb">
-        <legend>Forma de pago</legend>
-        <div id="pagosWeb"></div>
-      </fieldset>
+      <section class="pagos-web" id="fsPagoWeb" aria-labelledby="pagosWebTit">
+        <div class="pagos-cab">
+          <h4 id="pagosWebTit">Forma de pago</h4>
+          <button type="button" class="btn-desplegar" id="btnPagos" aria-expanded="false" aria-controls="pagosWeb">Ver opciones</button>
+        </div>
+        <div id="pagoElegido"></div>
+        <div id="pagosWeb" class="pagos-lista" hidden></div>
+      </section>
 
-      <label class="field field-full"><span>Tu vendedor *</span>
-        <select id="fVendedor"><option value="">Elegí tu vendedor</option></select>
-      </label>
+      <section class="vendedor-web" id="fsVendedor" aria-labelledby="vendTit">
+        <div class="pagos-cab">
+          <h4 id="vendTit">Elige un vendedor <span class="req">*</span></h4>
+          <button type="button" class="btn-mas-lista" id="btnVendedores" aria-expanded="false" aria-controls="listaVendedores" aria-label="Ver lista de vendedores">+</button>
+        </div>
+        <input type="hidden" id="fVendedor" value="" />
+        <div id="vendElegido"></div>
+        <ul class="lista-vend" id="listaVendedores" hidden></ul>
+      </section>
 
       <div class="form-grid">
         <label class="field"><span>Nombre del negocio *</span>
