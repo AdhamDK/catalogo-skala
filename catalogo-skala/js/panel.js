@@ -1130,7 +1130,7 @@
       <div class="fila-top"><strong>${esc(w.cliente.negocio)}</strong><span class="chip-estado est-web">Pedido web</span></div>
       <div class="ped-det">${esc(w.id)} · ${esc(fechaLegible(w.fecha))}</div>
       <div class="ped-det">${w.total_cajas} caja(s)${monto ? ` · <strong>${esc(dinero(monto))}</strong>` : ""} · ${esc((pagoPorId(w.tipo_pago) || {}).nombre || "")}</div>
-      ${gestion() ? `<div class="ped-det">Para: ${esc(w.vendedor)}</div>` : ""}
+      ${w.vendedor ? (gestion() ? `<div class="ped-det">Para: ${esc(w.vendedor)}</div>` : "") : '<div class="ped-det"><strong>Sin vendedor</strong> · cualquier vendedor lo puede tomar</div>'}
     </a></li>`;
   }
 
@@ -1149,7 +1149,7 @@
         <div class="fila-top"><h2 class="ped-titulo">${esc(c.negocio)}</h2><span class="chip-estado est-web">Pedido web</span></div>
         ${c.contacto && c.contacto !== c.negocio ? `<p class="ped-det">${esc(c.contacto)}</p>` : ""}
         ${c.direccion ? `<p class="ped-det">${esc(c.direccion)}</p>` : ""}
-        <p class="ped-det">${esc(fechaLegible(w.fecha))} · eligió a <strong>${esc(w.vendedor)}</strong>${c.id ? " · cliente ya registrado" : " · cliente nuevo"}</p>
+        <p class="ped-det">${esc(fechaLegible(w.fecha))} · ${w.vendedor ? `eligió a <strong>${esc(w.vendedor)}</strong>` : "<strong>sin vendedor</strong>"}${c.id ? " · cliente ya registrado" : " · cliente nuevo"}</p>
         <div class="botones-contacto">
           ${tel ? `<a class="btn btn-ghost" href="tel:${esc(tel)}">Llamar</a>` : ""}
           ${wa ? `<a class="btn btn-ghost" href="https://wa.me/${wa}" target="_blank" rel="noopener">WhatsApp</a>` : ""}
@@ -1158,7 +1158,7 @@
       </section>
       ${estado ? `<p class="aviso-chico">${estado}</p>` : w.puede_tomar
         ? `<div class="acciones-ped"><button type="button" class="btn btn-primary" id="btnTomarWeb">Tomar y revisar</button><button type="button" class="btn btn-ghost" id="btnDescartarWeb">Descartar</button></div>`
-        : `<p class="aviso-chico">Esperando a que ${esc(w.vendedor)} lo tome. Administración lo ve, pero lo toma su vendedor.</p>`}
+        : `<p class="aviso-chico">${w.vendedor ? `Esperando a que ${esc(w.vendedor)} lo tome.` : "Sin vendedor: lo puede tomar cualquier vendedor."} Administración lo ve, pero lo toma un vendedor.</p>`}
       <section class="tarjeta">
         <h3 class="sub-titulo">Productos</h3>
         <ul class="resumen-items">${w.items.map((it) => `<li><span>${it.cajas} × ${esc(it.producto)} <span class="ped-det">${esc(it.code)}</span></span><em>${it.precio ? dinero(it.cajas * precioUnitario(it, w.tipo_pago)) : ""}</em></li>`).join("")}</ul>
@@ -1824,6 +1824,8 @@
         <span class="clave-wrap"><input id="uClave" type="password" maxlength="64" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Letras y números" />
         <button type="button" class="ver-clave" data-ver="uClave" aria-label="Mostrar clave">Ver</button></span></label>
       <p class="nota-chica">Mínimo 6 caracteres con letras y números (Master: 8). Puede llevar símbolos como * # @ !</p>
+      <label class="field field-full"><span>WhatsApp (para vendedores)</span><input id="uTelefono" type="tel" inputmode="tel" autocomplete="off" placeholder="0424-1234567" value="${esc(u ? u.telefono || "" : "")}" />
+        <span class="nota-chica">Los clientes le mandan su pedido a este número desde el catálogo.</span></label>
       <label class="check"><input type="checkbox" id="uActivo"${!u || u.activo ? " checked" : ""} /> Activo (puede ingresar)</label>
       <p class="form-warn" id="uError" hidden></p>
       <div class="fila-botones"><a class="btn btn-ghost" href="#/usuarios">Cancelar</a><button type="submit" class="btn btn-primary" id="btnGuardarUsuario">Guardar</button></div>
@@ -1837,7 +1839,7 @@
       try {
         const r = await api("guardarUsuario", {
           id: u ? u.id : undefined, usuario: $("uUsuario").value.trim(), nombre: $("uNombre").value.trim(),
-          roles: elegidos, activo: $("uActivo").checked, clave: $("uClave").value || undefined,
+          roles: elegidos, activo: $("uActivo").checked, clave: $("uClave").value || undefined, telefono: $("uTelefono").value.trim(),
         });
         toast(`Usuario ${r.usuario.usuario} guardado`);
         if (r.usuario.id === yo().id) {

@@ -175,7 +175,6 @@ function collectCliente() {
     contacto: ($id("fContacto").value || "").trim(),
     direccion: ($id("fDireccion").value || "").trim(),
     telefono: ($id("fTelefono").value || "").trim(),
-    vendedor_id: $id("fVendedor").value || "",
     tipo_pago: (document.querySelector('input[name="pagoWeb"]:checked') || {}).value || "credito",
     cliente_id: cliente.cliente_id || "",
     latitud: cliente.latitud ?? "",
@@ -259,36 +258,15 @@ function fillCliente() {
   $id("fTelefono").value = cliente.telefono || "";
 }
 
-/* Vendedores (para que el cliente elija el suyo): renglón "Elige un vendedor" + lista que se despliega */
+/* Vendedores (después de enviar, el cliente elige a cuál mandarle el pedido por WhatsApp) */
 let vendedores = leer(K_VENDEDORES, []) || [];
 const inicial = (n) => String(n || "?").trim().charAt(0).toUpperCase();
-function pintarVendedores() {
-  const actual = $id("fVendedor").value || cliente.vendedor_id || "";
-  const v = vendedores.find((x) => x.id === actual);
-  $id("fVendedor").value = v ? v.id : "";
-  $id("vendElegido").innerHTML = v
-    ? `<button type="button" class="vend-elegido" data-abrir-vend><span class="avatar">${escHTML(inicial(v.nombre))}</span><span><strong>${escHTML(v.nombre)}</strong><span>Tu vendedor · tocá para cambiar</span></span></button>`
-    : "";
-  $id("listaVendedores").innerHTML = vendedores.length
-    ? vendedores.map((x) => `<li><button type="button" class="vend-opt${x.id === actual ? " activo" : ""}" data-vend="${escHTML(x.id)}" aria-pressed="${x.id === actual}">
-        <span class="avatar">${escHTML(inicial(x.nombre))}</span><strong>${escHTML(x.nombre)}</strong></button></li>`).join("")
-    : '<li class="vend-vacio">Cargando vendedores…</li>';
-}
-function abrirVendedores(abrir) {
-  const lista = $id("listaVendedores"), b = $id("btnVendedores");
-  const ab = abrir === undefined ? lista.hidden : abrir;
-  lista.hidden = !ab;
-  b.textContent = ab ? "−" : "+";
-  b.setAttribute("aria-expanded", String(ab));
-  b.setAttribute("aria-label", ab ? "Cerrar lista de vendedores" : "Ver lista de vendedores");
-}
 function cargarVendedores() {
   if (typeof SkalaAPI === "undefined") return;
   SkalaAPI.api("vendedores").then((r) => {
     vendedores = r.vendedores || [];
     guardar(K_VENDEDORES, vendedores);
-    pintarVendedores();
-    refreshMessage();
+    if (!$id("listoModal").hidden) pintarListaWa();
   }).catch(() => {});
 }
 
@@ -366,33 +344,107 @@ function datosPedidoWeb() {
   return { ref: refActual(), cliente: c, vendedor: v ? v.nombre : "", vendedor_id: c.vendedor_id, items: itemsConPrecio(), tipo_pago: c.tipo_pago };
 }
 
-/* Recalcula el mensaje y muestra qué datos faltan. */
-function faltantes(c) {
-  const f = [];
-  if (!c.negocio && !c.contacto) f.push("Cliente");
-  else if (c.telefono.replace(/\D/g, "").length < 7) f.push("Teléfono del cliente");
-  if (!c.vendedor_id) f.push("Vendedor");
-  if (!c.tipo_pago) f.push("Forma de pago");
-  return f;
-}
-function refreshMessage() {
+function refreshMessage() { return []; } // (el mensaje se arma al elegir vendedor)
+
+/* -------------------- Enviar -------------------- */
+let envio = null; // { modo: "listo" | "whatsapp", ref, datos, enviados: Set }
+async function enviarPedido() {
   const d = datosPedidoWeb();
-  const msg = mensajeWeb(d);
-  $id("orderText").value = msg;
-  const wa = $id("btnWhatsapp");
-  wa.href = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
-  const falta = faltantes(d.cliente);
-  wa.classList.toggle("is-disabled", falta.length > 0);
-  return falta;
+  if (!d.items.length) return;
+  const btn = $id("btnEnviarPedido");
+  if (clienteListo()) {
+    // con datos: el pedido llega a Skala (y a la app de los vendedores)
+    btn.disabled = true; btn.classList.add("ocupado"); btn.textContent = "Enviando…";
+    try {
+      await SkalaAPI.api("pedidoWeb", { ref: d.ref, cliente: d.cliente, tipo_pago: d.tipo_pago,
+        items: d.items.map((it) => ({ code: it.code, producto: it.producto, cajas: it.cajas, unidades_caja: it.unidades_caja, unidad: it.unidad })) });
+      guardar(K_REF_WEB, { ref: d.ref, enviado: true });
+      mostrarEnvio("listo", d);
+    } catch (e) {
+      if (e && e.code === "limite") { $id("formWarn").textContent = e.message; $id("formWarn").hidden = false; }
+      else mostrarEnvio("whatsapp", d, true); // sin conexión: que lo mande por WhatsApp
+    } finally {
+      btn.disabled = false; btn.classList.remove("ocupado"); btn.textContent = "Enviar pedido";
+    }
+    return;
+  }
+  // sin datos: se coordina con el vendedor por WhatsApp
+  mostrarEnvio("whatsapp", d);
+}
+function pintarListaWa() {
+  const lista = vendedores.map((v) => ({ id: v.id, nombre: v.nombre, wa: v.whatsapp || "" }));
+  lista.push({ id: "", nombre: "No tengo vendedor · escribir a Skala", wa: WHATSAPP_NUMBER, oficina: true });
+  $id("listoVend").innerHTML = lista.map((v, i) => `<li><button type="button" class="vend-wa${envio && envio.enviados.has(i) ? " enviado" : ""}" data-wa="${i}" aria-label="Enviar por WhatsApp a ${escHTML(v.nombre)}">
+      <span class="avatar${v.oficina ? " oficina" : ""}">${v.oficina ? "S" : escHTML(inicial(v.nombre))}</span>
+      <strong>${escHTML(v.nombre)}</strong>
+      <span class="flecha" aria-hidden="true">${envio && envio.enviados.has(i) ? "✓" : '<svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>'}</span>
+    </button></li>`).join("");
+  pintarListaWa.lista = lista;
+}
+function mostrarEnvio(modo, datos, sinConexion) {
+  envio = { modo, ref: datos.ref, datos, enviados: new Set() };
+  const m = $id("listoModal");
+  $id("orderModal").hidden = true;
+  m.classList.toggle("es-listo", modo === "listo");
+  m.classList.toggle("es-wa", modo === "whatsapp");
+  if (modo === "listo") {
+    $id("listoAnim").innerHTML = '<svg viewBox="0 0 52 52" class="check"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-15"/></svg>';
+    $id("listoTit").textContent = "¡Listo!";
+    $id("listoSub").innerHTML = `Tu pedido <strong>${escHTML(datos.ref)}</strong> llegó a Skala. Te contactamos pronto.`;
+    $id("listoPreg").textContent = "¿Deseas también enviarlo por WhatsApp a tu vendedor?";
+    lanzarConfeti();
+  } else {
+    $id("listoAnim").innerHTML = '<svg viewBox="0 0 52 52" class="wa"><circle cx="26" cy="26" r="24"/><path d="M17 36l1.6-5A10 10 0 1 1 22 34.4z"/><path d="M22.5 21.5c.5 2.5 2.5 5 5.5 6.2l1.5-1.5 2.2 1.1-.6 1.9c-4.5.3-9.5-4.4-9.7-8.9l1.9-.6 1 2.3z"/></svg>';
+    $id("listoTit").textContent = "Enviar al vendedor por WhatsApp";
+    $id("listoSub").innerHTML = sinConexion
+      ? "No pudimos conectar con Skala. Mandá tu pedido por WhatsApp y <strong>coordiná los datos necesarios con tu vendedor de confianza</strong>."
+      : "<strong>Coordiná los datos necesarios con tu vendedor de confianza.</strong>";
+    $id("listoPreg").textContent = "Elegí tu vendedor:";
+    $id("confeti").innerHTML = "";
+  }
+  pintarListaWa();
+  cargarVendedores();
+  m.hidden = false;
+  document.body.classList.add("modal-open");
+  m.querySelector(".modal-box").focus({ preventScroll: true });
+}
+function lanzarConfeti() {
+  const c = $id("confeti");
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { c.innerHTML = ""; return; }
+  const colores = ["#7ab648", "#e94e8c", "#f5822a", "#f5b301", "#4a90d9", "#a05bd0"];
+  c.innerHTML = Array.from({ length: 46 }, (_, i) => {
+    const x = Math.round(Math.random() * 100), d = (Math.random() * 0.5).toFixed(2), t = (1.3 + Math.random() * 0.9).toFixed(2), r = Math.round(Math.random() * 360);
+    return `<i style="left:${x}%;background:${colores[i % colores.length]};animation-delay:${d}s;animation-duration:${t}s;transform:rotate(${r}deg)"></i>`;
+  }).join("");
+}
+function enviarWhatsappA(i) {
+  const v = (pintarListaWa.lista || [])[i];
+  if (!v || !envio) return;
+  const msg = mensajeWeb({ ...envio.datos, vendedor: v.oficina ? "" : v.nombre });
+  const numero = v.wa || WHATSAPP_NUMBER;
+  window.open(`https://wa.me/${numero}?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
+  // si el pedido ya llegó a Skala, queda asignado a ese vendedor
+  if (envio.modo === "listo" && v.id) SkalaAPI.enviarSinEsperar("asignarVendedorWeb", { id: envio.ref, vendedor_id: v.id });
+  envio.enviados.add(i);
+  pintarListaWa();
+}
+function cerrarEnvio() {
+  const m = $id("listoModal");
+  if (m.hidden) return false;
+  m.hidden = true;
+  $id("confeti").innerHTML = "";
+  document.body.classList.remove("modal-open");
+  // pedido entregado a Skala: se empieza uno nuevo
+  if (envio && envio.modo === "listo") vaciarPedido();
+  envio = null;
+  return true;
 }
 
 function openModal() {
   if (totalCajas() <= 0) return;
   fillCliente();
-  abrirCliente(clienteListo() ? "cerrar" : "buscar");
+  abrirCliente(clienteListo() ? "cerrar" : "cerrar");
   pagosAbiertos = false;
-  pintarVendedores();
-  abrirVendedores(!$id("fVendedor").value);
   renderCarrito();
   refreshMessage();
   $id("formWarn").hidden = true;
@@ -557,21 +609,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $id("btnClose").addEventListener("click", closeModal);
   $id("orderModal").addEventListener("click", (e) => { if (e.target.id === "orderModal") closeModal(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !cerrarZoom()) closeModal(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !cerrarZoom() && !cerrarEnvio()) closeModal(); });
   $id("zoomModal").addEventListener("click", (e) => { if (e.target.id === "zoomModal" || e.target.closest("#zoomCerrar")) cerrarZoom(); });
-
-  const btnCopy = $id("btnCopy");
-  btnCopy.addEventListener("click", async () => {
-    const ta = $id("orderText");
-    try {
-      await navigator.clipboard.writeText(ta.value);
-      btnCopy.textContent = "¡Copiado!";
-      setTimeout(() => (btnCopy.textContent = "Copiar mensaje"), 1500);
-    } catch (err) {
-      ta.select();
-      document.execCommand("copy");
-    }
-  });
 
   /* Datos del cliente: guardar y refrescar el mensaje en vivo */
   const alCambiar = (e) => {
@@ -585,7 +624,6 @@ document.addEventListener("DOMContentLoaded", () => {
   $id("pagosWeb").addEventListener("change", (e) => { alCambiar(e); abrirPagos(false); });
   $id("btnPagos").addEventListener("click", () => abrirPagos());
   $id("pagoElegido").addEventListener("click", (e) => { if (e.target.closest("[data-abrir-pagos]")) abrirPagos(true); });
-  $id("btnVendedores").addEventListener("click", () => abrirVendedores());
   $id("btnCliente").addEventListener("click", () => abrirCliente($id("cliPanel").hidden ? "buscar" : "cerrar"));
   $id("fCliBuscar").addEventListener("submit", (e) => { e.preventDefault(); buscarCliente($id("cliBuscar").value); });
   $id("btnCliNuevo").addEventListener("click", () => {
@@ -603,40 +641,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (b) abrirCliente(b.dataset.cli === "editar" ? "form" : "buscar");
   });
   $id("btnUbic").addEventListener("click", tomarUbicacion);
-  $id("fsVendedor").addEventListener("click", (e) => {
-    if (e.target.closest("[data-abrir-vend]")) return abrirVendedores(true);
-    const b = e.target.closest("[data-vend]");
-    if (!b) return;
-    $id("fVendedor").value = b.dataset.vend;
-    pintarVendedores();
-    abrirVendedores(false);
-    alCambiar();
-  });
-
-  /* Enviar: valida, avisa al vendedor (pedido web en su app) y abre WhatsApp */
-  $id("btnWhatsapp").addEventListener("click", (e) => {
-    const d = datosPedidoWeb();
-    const falta = faltantes(d.cliente);
-    const warn = $id("formWarn");
-    if (falta.length) {
-      e.preventDefault();
-      warn.innerHTML = "Para enviar falta: <strong>" + falta.join(" · ") + "</strong>";
-      if (falta.includes("Forma de pago")) abrirPagos(true);
-      if (falta.includes("Cliente") && $id("cliForm").hidden) abrirCliente("buscar");
-      if (falta.includes("Teléfono del cliente")) { abrirCliente("form"); $id("fTelefono").focus(); }
-      if (falta.includes("Vendedor")) abrirVendedores(true);
-      warn.hidden = false;
-      warn.scrollIntoView({ block: "center" });
-      return;
-    }
-    warn.hidden = true;
-    if (typeof SkalaAPI !== "undefined") {
-      SkalaAPI.enviarSinEsperar("pedidoWeb", { ref: d.ref, cliente: d.cliente, vendedor_id: d.vendedor_id, tipo_pago: d.tipo_pago,
-        items: d.items.map((it) => ({ code: it.code, producto: it.producto, cajas: it.cajas, unidades_caja: it.unidades_caja, unidad: it.unidad })) });
-    }
-    guardar(K_REF_WEB, { ref: d.ref, enviado: true });
-    avisar(`Pedido ${d.ref} enviado a ${d.vendedor}`);
-  });
+  /* Enviar (un solo botón) y la ventana de después */
+  $id("btnEnviarPedido").addEventListener("click", enviarPedido);
+  $id("listoVend").addEventListener("click", (e) => { const b = e.target.closest("[data-wa]"); if (b) enviarWhatsappA(Number(b.dataset.wa)); });
+  $id("btnListoCerrar").addEventListener("click", cerrarEnvio);
+  $id("listoModal").addEventListener("click", (e) => { if (e.target.id === "listoModal") cerrarEnvio(); });
 
   /* Papelera: borrar toda la selección */
   $id("btnClear").addEventListener("click", vaciarPedido);

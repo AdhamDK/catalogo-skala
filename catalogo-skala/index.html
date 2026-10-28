@@ -236,6 +236,7 @@
   <!-- Modal de pedido: revisar (sumar / quitar), monto según forma de pago, vendedor y datos -->
   <div class="modal" id="orderModal" hidden>
     <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="orderModalTitle" tabindex="-1">
+      <button type="button" class="modal-x" id="btnClose" aria-label="Cerrar">✕</button>
       <h3 id="orderModalTitle">Tu pedido</h3>
       <p class="modal-sub" id="cartNivel">Revisá, sumá o quitá productos.</p>
       <ul class="carrito" id="cartList"></ul>
@@ -252,7 +253,7 @@
 
       <section class="vendedor-web cliente-web" id="fsCliente" aria-labelledby="cliTit">
         <div class="pagos-cab">
-          <h4 id="cliTit">Seleccionar cliente <span class="req">*</span></h4>
+          <h4 id="cliTit">Seleccionar cliente <span class="opc">(opcional)</span></h4>
           <button type="button" class="btn-mas-lista" id="btnCliente" aria-expanded="false" aria-controls="cliPanel" aria-label="Buscar o registrar cliente">+</button>
         </div>
         <div id="cliElegido"></div>
@@ -293,27 +294,24 @@
         </div>
       </section>
 
-      <section class="vendedor-web" id="fsVendedor" aria-labelledby="vendTit">
-        <div class="pagos-cab">
-          <h4 id="vendTit">Seleccionar vendedor <span class="req">*</span></h4>
-          <button type="button" class="btn-mas-lista" id="btnVendedores" aria-expanded="false" aria-controls="listaVendedores" aria-label="Ver lista de vendedores">+</button>
-        </div>
-        <input type="hidden" id="fVendedor" value="" />
-        <div id="vendElegido"></div>
-        <ul class="lista-vend" id="listaVendedores" hidden></ul>
-      </section>
-
-      <details class="ver-mensaje"><summary>Ver el mensaje de WhatsApp</summary>
-        <textarea id="orderText" readonly rows="9" aria-label="Mensaje a enviar"></textarea>
-      </details>
-
       <p class="form-warn" id="formWarn" hidden></p>
 
       <div class="modal-actions">
-        <button class="btn btn-ghost" id="btnCopy">Copiar mensaje</button>
-        <a class="btn btn-primary" id="btnWhatsapp" target="_blank" rel="noopener" aria-disabled="false">Enviar por WhatsApp</a>
-        <button class="btn btn-ghost" id="btnClose">Cerrar</button>
+        <button type="button" class="btn btn-primary btn-enviar" id="btnEnviarPedido">Enviar pedido</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Después de enviar: ¡Listo! (con datos) o enviar al vendedor por WhatsApp (sin datos) -->
+  <div class="modal" id="listoModal" hidden>
+    <div class="modal-box modal-listo" role="dialog" aria-modal="true" aria-labelledby="listoTit" tabindex="-1">
+      <div class="confeti" id="confeti" aria-hidden="true"></div>
+      <div class="listo-anim" id="listoAnim" aria-hidden="true"></div>
+      <h3 id="listoTit"></h3>
+      <p class="modal-sub" id="listoSub"></p>
+      <p class="listo-preg" id="listoPreg"></p>
+      <ul class="lista-vend-wa" id="listoVend"></ul>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost" id="btnListoCerrar">Cerrar</button></div>
     </div>
   </div>
 

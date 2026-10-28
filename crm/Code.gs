@@ -75,7 +75,8 @@ var GESTION = ['master', 'admin'];          // ven y corrigen todo
 var TOMAN_PEDIDOS = ['master', 'admin', 'vendedor'];
 
 var HOJAS = {
-  Usuarios: ['id', 'usuario', 'nombre', 'rol', 'pin_hash', 'activo', 'created_at'],
+  Usuarios: ['id', 'usuario', 'nombre', 'rol', 'pin_hash', 'activo', 'created_at',
+             'telefono'],   // WhatsApp del vendedor: los clientes le mandan su pedido desde el catálogo
   // 10 primeras = GPS_CLIENTES (backend/Code.gs). No cambiar el orden.
   Clientes: ['id', 'nombre', 'rif_cedula', 'direccion', 'latitud', 'longitud', 'telefono',
              'updated_at', 'sync_status', 'deleted',
@@ -143,6 +144,7 @@ var ACCIONES = {
   vendedores: [accionVendedores_, null],      // para que el cliente elija su vendedor
   pedidoWeb: [accionPedidoWeb_, null],        // el cliente envía su pedido desde el catálogo
   buscarClienteWeb: [accionBuscarClienteWeb_, null], // el cliente se busca por su teléfono o RIF
+  asignarVendedorWeb: [accionAsignarVendedorWeb_, null], // elige vendedor después de enviar
   pedidosWeb: [accionPedidosWeb_, TOMAN_PEDIDOS],
   descartarWeb: [accionDescartarWeb_, TOMAN_PEDIDOS],
   borrarPedido: [accionBorrarPedido_, TOMAN_PEDIDOS],
@@ -1081,11 +1083,21 @@ function accionDespachadores_() {
 
 /* -------------------- Pedidos web (los arma el cliente en el catálogo) -------------------- */
 var WEB_MAX_HORA = 5; // por teléfono, para frenar abusos
-function puedeTomarWeb_(ses, w) { return tiene_(ses, 'master') || (tiene_(ses, 'vendedor') && String(w.vendedor_id) === ses.id); }
+/* Lo toma su vendedor (o el Master). Sin vendedor elegido, cualquier vendedor lo puede tomar. */
+function puedeTomarWeb_(ses, w) {
+  return tiene_(ses, 'master') || (tiene_(ses, 'vendedor') && (String(w.vendedor_id) === ses.id || !String(w.vendedor_id || '')));
+}
+/* "0424-7387202" / "+58 424…" → "584247387202" (para wa.me). Vacío si no parece válido. */
+function telWhatsapp_(t) {
+  var d = soloDigitos_(t);
+  if (d.indexOf('58') === 0 && d.length >= 12) d = d.slice(2);
+  if (d.charAt(0) === '0') d = d.slice(1);
+  return d.length === 10 ? '58' + d : '';
+}
 
 function accionVendedores_() {
   var lista = leer_('Usuarios').filter(function (u) { return rolesDe_(u.rol).indexOf('vendedor') !== -1 && activo_(u); })
-    .map(function (u) { return { id: String(u.id), nombre: String(u.nombre) }; });
+    .map(function (u) { return { id: String(u.id), nombre: String(u.nombre), whatsapp: telWhatsapp_(u.telefono) }; });
   lista.sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
   return { ok: true, vendedores: lista };
 }
@@ -1120,8 +1132,12 @@ function accionPedidoWeb_(p) {
   if (soloDigitos_(datos.telefono).length < 7) return { ok: false, error: 'Escribí tu teléfono (para que el vendedor te contacte).', code: 'telefono' };
   var items = limpiarItems_(p.items);
   if (!items.length) return { ok: false, error: 'El pedido no tiene productos.', code: 'empty' };
-  var v = leer_('Usuarios').filter(function (u) { return String(u.id) === String(p.vendedor_id) && rolesDe_(u.rol).indexOf('vendedor') !== -1 && activo_(u); })[0];
-  if (!v) return { ok: false, error: 'Elegí tu vendedor.', code: 'vendedor' };
+  // el vendedor es opcional: el cliente puede elegirlo después (o lo toma cualquier vendedor)
+  var v = null;
+  if (p.vendedor_id) {
+    v = leer_('Usuarios').filter(function (u) { return String(u.id) === String(p.vendedor_id) && rolesDe_(u.rol).indexOf('vendedor') !== -1 && activo_(u); })[0];
+    if (!v) return { ok: false, error: 'Ese vendedor no está disponible.', code: 'vendedor' };
+  }
   var ref = txt_(p.ref, 40).toUpperCase().replace(/[^A-Z0-9-]/g, '');
   if (!/^WEB-[A-Z0-9]{4,12}$/.test(ref)) ref = 'WEB-' + uuid_().replace(/-/g, '').slice(0, 8).toUpperCase();
   var cache = CacheService.getScriptCache();
@@ -1140,7 +1156,7 @@ function accionPedidoWeb_(p) {
     var tipo = pagoPorId_(String(p.tipo_pago || '')) ? String(p.tipo_pago) : 'credito';
     var t = ahora_();
     agregar_('PedidosWeb', { id: ref, fecha: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm'), created_at: t,
-      vendedor_id: String(v.id), vendedor: String(v.nombre), negocio: datos.negocio || datos.contacto, contacto: datos.contacto,
+      vendedor_id: v ? String(v.id) : '', vendedor: v ? String(v.nombre) : '', negocio: datos.negocio || datos.contacto, contacto: datos.contacto,
       rif_cedula: datos.rif_cedula, telefono: datos.telefono, direccion: datos.direccion,
       items: JSON.stringify(items.map(function (it) { return { code: it.code, producto: it.producto, cajas: it.cajas, unidades_caja: it.unidades_caja, unidad: it.unidad }; })),
       tipo_pago: tipo, total_cajas: totalCajas, total: totalPorPago_(items, tipo), nota: txt_(p.nota, 300), estado: 'nuevo',
@@ -1164,13 +1180,32 @@ function webPublico_(w, precios) {
     pedido_id: String(w.pedido_id), atendido_por: String(w.atendido_por), motivo: String(w.motivo) };
 }
 
-/* Vendedor: los suyos. Administración y Master: todos (Administración los ve, pero no los toma). */
+/* Después de enviar, el cliente elige a qué vendedor mandárselo por WhatsApp: queda asignado
+   (solo si todavía no tenía vendedor y nadie lo tomó). */
+function accionAsignarVendedorWeb_(p) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var w = leer_('PedidosWeb').filter(function (x) { return String(x.id) === String(p.id).toUpperCase(); })[0];
+    if (!w) return { ok: false, error: 'Pedido no encontrado.', code: 'not_found' };
+    var v = leer_('Usuarios').filter(function (u) { return String(u.id) === String(p.vendedor_id) && rolesDe_(u.rol).indexOf('vendedor') !== -1 && activo_(u); })[0];
+    if (!v) return { ok: false, error: 'Ese vendedor no está disponible.', code: 'vendedor' };
+    if (String(w.estado) !== 'nuevo' || (String(w.vendedor_id || '') && String(w.vendedor_id) !== String(v.id))) return { ok: true, sin_cambios: true };
+    w.vendedor_id = String(v.id); w.vendedor = String(v.nombre);
+    actualizar_('PedidosWeb', w._fila, w);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* Vendedor: los suyos y los que no tienen vendedor. Administración y Master: todos (Administración los ve, pero no los toma). */
 function accionPedidosWeb_(p, ses) {
   var precios = tablaPrecios_();
   var estado = p.estado === 'todos' ? '' : 'nuevo';
   var lista = leer_('PedidosWeb').filter(function (w) {
     if (estado && String(w.estado) !== estado) return false;
-    return esGestion_(ses) || String(w.vendedor_id) === ses.id;
+    return esGestion_(ses) || String(w.vendedor_id) === ses.id || (tiene_(ses, 'vendedor') && !String(w.vendedor_id || ''));
   });
   lista.sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
   return { ok: true, pedidos: lista.slice(0, 200).map(function (w) { var o = webPublico_(w, precios); o.puede_tomar = puedeTomarWeb_(ses, w); return o; }) };
@@ -1297,6 +1332,7 @@ function accionUsuarios_() {
     var o = usuarioPublico_(u);
     o.activo = activo_(u);
     o.tiene_pin = !!u.pin_hash;
+    o.telefono = String(u.telefono || '');
     return o;
   });
   return { ok: true, usuarios: lista };
@@ -1331,6 +1367,11 @@ function guardarUsuario_(d, ses) {
 
   var u = existente || { id: 'U' + String(usuarios.reduce(function (m, x) { return Math.max(m, Number(String(x.id).replace(/\D/g, '')) || 0); }, 0) + 1), created_at: ahora_() };
   u.usuario = usuario; u.nombre = nombre; u.rol = roles.join(', '); u.activo = activo;
+  if (d.telefono !== undefined) {
+    var telU = txt_(d.telefono, 30);
+    if (telU && soloDigitos_(telU).length < 7) throw new Error('Revisá el teléfono (WhatsApp) del usuario.');
+    u.telefono = telU;
+  }
   if (pin) u.pin_hash = hashPin_(String(u.id), pin);
   if (existente) actualizar_('Usuarios', existente._fila, u); else agregar_('Usuarios', u);
   return u;

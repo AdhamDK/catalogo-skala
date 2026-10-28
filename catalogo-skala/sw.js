@@ -2,7 +2,7 @@
    - Guarda la app del equipo para que abra rápido y sin señal.
    - Nunca guarda las llamadas al CRM (Google): esas siempre van a la red.
    Al cambiar archivos, subir VERSION para que los teléfonos tomen la nueva versión. */
-const VERSION = "skala-equipo-v12";
+const VERSION = "skala-equipo-v13";
 const BASICOS = [
   "panel.html",
   "manifest.webmanifest",

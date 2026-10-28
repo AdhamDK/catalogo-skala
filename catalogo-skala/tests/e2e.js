@@ -33,6 +33,7 @@ async function probar(browser, cfg) {
   const precio = (code, menor, mayor, a, b, c) => gas.ctx.accionGuardarPrecio_({ code, menor, mayor, pronto: menor - a, efectivo_credito: menor - b, efectivo_pronto: menor - c }, { nombre: "Prueba" });
   precio("BC-01", 10, 8, 1, 3, 4); precio("KT-01", 20, 18, 2, 6, 8);
   gas.ctx.accionMovimiento_({ code: "BC-08", cajas: 1 }, { nombre: "Prueba" });
+  gas.ctx.guardarUsuario_({ id: gas.tabla("Usuarios").find((u) => u.usuario === "oscar").id, usuario: "oscar", nombre: "Óscar", roles: ["vendedor"], telefono: "0424-7387202" });
   gas.ctx.guardarCliente_({ negocio: "Barbería Max", contacto: "Max", telefono: "0416-7778899", direccion: "Calle 5" }, { id: "U9" }, { exigirTelefono: true });
   gas.ctx.accionMovimiento_({ code: "BC-08", cajas: -1, tipo: "ajuste", nota: "vendido" }, { nombre: "Prueba" });
   await ctx.route(API, async (route) => {
@@ -40,7 +41,11 @@ async function probar(browser, cfg) {
     await route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(gas.post(body)) });
   });
   await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
-  await ctx.addInitScript((api) => { window.SKALA_CRM_URL = api; }, API);
+  await ctx.addInitScript((api) => {
+    window.SKALA_CRM_URL = api;
+    window.__abiertos = [];
+    window.open = (u) => { window.__abiertos.push(u); return null; }; // WhatsApp: se registra el enlace
+  }, API);
   const page = await ctx.newPage();
   const errores = [];
   page.on("pageerror", (e) => errores.push(e.message));
@@ -226,47 +231,12 @@ async function probar(browser, cfg) {
   await page.waitForFunction(() => document.querySelectorAll("#cartList .cart-item").length === 1);
   await page.locator('#cartList .qty-btn[data-act="plus"][data-code="BC-01"]').click();
   assert.match(await page.innerText("#cartTotal"), /3 cajas · 30,00 \$/);
-  // Enviar exige datos mínimos
-  await page.waitForFunction(() => document.querySelectorAll("#listaVendedores [data-vend]").length === 2);
-  assert.ok(await page.locator("#listaVendedores").isVisible()); // sin vendedor elegido, la lista ya está abierta
-  await page.locator("#btnWhatsapp").click();
-  assert.match(await page.innerText("#formWarn"), /Cliente · Vendedor$/);
-  // Seleccionar cliente: buscar por teléfono (no está) → Nuevo · registrarme
-  assert.ok(await page.locator("#cliPanel").isVisible());
-  await page.fill("#cliBuscar", "0414-5551234");
-  await page.click("#btnCliBuscar");
-  await page.waitForFunction(() => /No te encontramos/.test(document.getElementById("cliRes").textContent));
-  await page.click("#btnCliNuevo");
-  assert.ok(await page.locator("#cliForm").isVisible());
-  await page.locator("#btnPagos").click();
-  await page.fill("#fNegocio", "Salón Luz");
-  await page.fill("#fTelefono", "0414-5551234");
-  // ubicación actual con el botón al lado de Dirección
-  await page.click("#btnUbic");
-  await page.waitForFunction(() => /Ubicación lista/.test(document.getElementById("ubicEstado").textContent));
-  await page.click("#btnCliListo");
-  assert.ok(await page.locator("#cliForm").isHidden());
-  assert.match(await page.innerText("#cliElegido"), /Salón Luz[\s\S]*0414-5551234[\s\S]*ubicación/);
-  await page.locator("#listaVendedores [data-vend]", { hasText: "Óscar" }).click();
-  assert.ok(await page.locator("#listaVendedores").isHidden());
-  assert.match(await page.innerText("#vendElegido"), /Óscar/);
-  await page.locator('#pagosWeb input[value="efectivo_pronto"]').check();
-  assert.ok(await page.locator("#pagosWeb").isHidden()); // al elegir se cierra
-  assert.equal(await page.locator("#pagoElegido .hasta-desc").count(), 0); // ya tiene el mayor descuento
-  assert.match(await page.innerText("#pagoElegido"), /Efectivo pronto pago[\s\S]*18,00 \$/);
-  assert.equal(await page.innerText("#btnPagos"), "Cambiar");
-  assert.match(await page.innerText("#cartTotal"), /18,00 \$ Efectivo pronto pago/);
-  const msg = await page.inputValue("#orderText");
-  assert.match(msg, /\(WEB-[A-Z2-9]{6}\)/);
-  assert.match(msg, /• 3 × Babosa \(BC-01\) · 6,00 \$ c\/u/);
-  assert.match(msg, /Monto: 18,00 \$ \(Efectivo pronto pago\)/);
-  assert.match(msg, /Mi vendedor: Óscar/);
-  assert.match(msg, /Ubicación: https:\/\/maps\.google\.com\/\?q=8\.61/);
-  assert.match(await page.getAttribute("#btnWhatsapp", "href"), /^https:\/\/wa\.me\/584247042169\?text=/);
-  ok("Tu pedido: sumar / quitar, montos por forma de pago, vendedor obligatorio");
+  // Un solo botón: Enviar pedido
+  assert.deepEqual(await page.locator("#orderModal .modal-actions .btn").allInnerTexts(), ["Enviar pedido"]);
+  assert.match(await page.innerText("#cliTit"), /opcional/);
   if (cfg.movil) {
     await page.locator("#btnPagos").click();
-    await page.locator("#btnVendedores").click();
+    await page.locator("#btnCliente").click();
     const chicosModal = await page.evaluate(() => [...document.querySelectorAll("#orderModal button, #orderModal .btn")]
       .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (r.height < 43.5 || r.width < 43.5); })
       .map((e) => `${e.className || e.id} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`));
@@ -278,39 +248,91 @@ async function probar(browser, cfg) {
       await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `${cfg.nombre}-pedido-abierto.png`) });
     }
     await page.locator("#btnPagos").click();
-    await page.locator("#btnVendedores").click();
+    await page.locator("#btnCliente").click();
     ok("Tu pedido: botones de 44px y sin scroll horizontal");
   }
-
-  // Modal: campos dentro del ancho, inputs >= 16px, botón WhatsApp siempre visible
   const modal = await page.evaluate(() => {
     const box = document.querySelector("#orderModal .modal-box").getBoundingClientRect();
-    const fuera = [...document.querySelectorAll("#orderModal input, #orderModal textarea")]
-      .filter((e) => e.type !== "radio" && e.type !== "hidden" && e.getBoundingClientRect().right > box.right + 1).map((e) => e.id);
-    const fuentes = [...document.querySelectorAll("#orderModal input:not([type=radio]):not([type=hidden]), #orderModal textarea")]
+    const fuentes = [...document.querySelectorAll("#orderModal input:not([type=radio]):not([type=hidden])")]
       .filter((e) => parseFloat(getComputedStyle(e).fontSize) < 16).map((e) => e.id);
-    const wa = document.getElementById("btnWhatsapp").getBoundingClientRect();
-    return { fuera, fuentes, waBottom: wa.bottom, waTop: wa.top, vh: innerHeight };
+    const b = document.getElementById("btnEnviarPedido").getBoundingClientRect();
+    return { fuentes, bTop: b.top, bBottom: b.bottom, vh: innerHeight, box: box.width };
   });
-  assert.deepEqual(modal.fuera, [], "campos se salen del modal");
   assert.deepEqual(modal.fuentes, [], "inputs con letra < 16px");
-  assert.ok(modal.waTop >= 0 && modal.waBottom <= modal.vh, "botón WhatsApp no visible al abrir");
-  ok("modal: campos caben, letra 16px, WhatsApp visible");
+  assert.ok(modal.bTop >= 0 && modal.bBottom <= modal.vh, "botón Enviar no visible al abrir");
+  ok("modal: letra 16px y Enviar siempre visible");
 
-  if (process.env.SCREENSHOTS) {
-    await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `${cfg.nombre}-modal.png`) });
-  }
-  // Enviar: abre WhatsApp y el pedido llega a la app del vendedor
-  const [popup] = await Promise.all([ctx.waitForEvent("page"), page.locator("#btnWhatsapp").click()]);
-  await popup.close().catch(() => {});
-  await page.waitForFunction(() => /enviado a Óscar/.test(document.getElementById("toast").textContent));
-  for (let i = 0; i < 50 && !gas.tabla("PedidosWeb").length; i++) await page.waitForTimeout(100);
-  const web = gas.tabla("PedidosWeb")[0];
+  // 1) Sin datos del cliente: ventana para mandarlo al vendedor por WhatsApp
+  await page.locator("#btnEnviarPedido").click();
+  await page.waitForSelector("#listoModal.es-wa:not([hidden])");
+  assert.ok(await page.locator("#orderModal").isHidden());
+  assert.equal(await page.innerText("#listoTit"), "Enviar al vendedor por WhatsApp");
+  assert.match(await page.innerText("#listoSub"), /Coordiná los datos necesarios con tu vendedor de confianza/);
+  await page.waitForFunction(() => document.querySelectorAll("#listoVend [data-wa]").length === 3);
+  assert.deepEqual(await page.locator("#listoVend .vend-wa strong").allInnerTexts(), ["Kevin", "Óscar", "No tengo vendedor · escribir a Skala"]);
+  assert.ok(await page.evaluate(() => { const b = document.querySelector("#listoModal .modal-box"); return b.scrollWidth <= b.clientWidth + 1; }), "ventana de envío con scroll horizontal");
+  if (process.env.SCREENSHOTS) await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `${cfg.nombre}-enviar-wa.png`) });
+  await page.locator("#listoVend .vend-wa", { hasText: "Óscar" }).click(); // la flechita
+  let abiertos = await page.evaluate(() => window.__abiertos);
+  assert.match(abiertos.at(-1), /^https:\/\/wa\.me\/584247387202\?text=/); // al WhatsApp de Óscar
+  const msg1 = decodeURIComponent(abiertos.at(-1).split("text=")[1]);
+  assert.match(msg1, /• 3 × Babosa \(BC-01\) · 10,00 \$ c\/u/);
+  assert.match(msg1, /Mi vendedor: Óscar/);
+  assert.ok(await page.locator("#listoVend .vend-wa.enviado").count());
+  await page.locator("#listoVend .vend-wa", { hasText: "No tengo vendedor" }).click();
+  abiertos = await page.evaluate(() => window.__abiertos);
+  assert.match(abiertos.at(-1), /^https:\/\/wa\.me\/584247042169\?text=/); // a Skala
+  assert.equal(gas.tabla("PedidosWeb").length, 0); // sin datos no se guarda en el sistema
+  await page.click("#btnListoCerrar");
+  assert.ok(await page.locator("#listoModal").isHidden());
+  assert.equal(await page.evaluate(() => document.body.classList.contains("modal-open")), false);
+  assert.match(await page.innerText("#orderTotal"), /^3$/); // el pedido sigue armado
+  ok("sin datos: Enviar → mandarlo por WhatsApp al vendedor elegido (o a Skala)");
+
+  // 2) Con datos del cliente: ¡Listo! con confeti; y opcional por WhatsApp a su vendedor
+  await page.click("#btnArmarPedido");
+  await page.click("#btnModoCliente");
+  await page.locator("#btnCliente").click();
+  await page.fill("#cliBuscar", "0414-5551234");
+  await page.click("#btnCliBuscar");
+  await page.waitForFunction(() => /No te encontramos/.test(document.getElementById("cliRes").textContent));
+  await page.click("#btnCliNuevo");
+  assert.ok(await page.locator("#cliForm").isVisible());
+  await page.fill("#fNegocio", "Salón Luz");
+  await page.fill("#fTelefono", "0414-5551234");
+  await page.click("#btnUbic");
+  await page.waitForFunction(() => /Ubicación lista/.test(document.getElementById("ubicEstado").textContent));
+  await page.click("#btnCliListo");
+  assert.match(await page.innerText("#cliElegido"), /Salón Luz[\s\S]*0414-5551234[\s\S]*ubicación/);
+  await page.locator("#btnPagos").click();
+  await page.locator('#pagosWeb input[value="efectivo_pronto"]').check();
+  assert.equal(await page.locator("#pagoElegido .hasta-desc").count(), 0); // ya tiene el mayor descuento
+  assert.match(await page.innerText("#cartTotal"), /18,00 \$ Efectivo pronto pago/);
+  await page.locator("#btnEnviarPedido").click();
+  await page.waitForSelector("#listoModal.es-listo:not([hidden])");
+  assert.equal(await page.innerText("#listoTit"), "¡Listo!");
+  assert.match(await page.innerText("#listoSub"), /Tu pedido WEB-[A-Z2-9]{6} llegó a Skala/);
+  assert.equal(await page.innerText("#listoPreg"), "¿Deseas también enviarlo por WhatsApp a tu vendedor?");
+  assert.ok((await page.locator("#confeti i").count()) > 20);
+  if (process.env.SCREENSHOTS) { await page.waitForTimeout(500); await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `${cfg.nombre}-listo.png`) }); }
+  let web = gas.tabla("PedidosWeb")[0];
   assert.ok(web, "no llegó el pedido web");
-  assert.equal(web.vendedor, "Óscar"); assert.equal(web.negocio, "Salón Luz"); assert.equal(web.total, 18); assert.equal(web.tipo_pago, "efectivo_pronto");
-  assert.equal(web.latitud, 8.612346); assert.equal(web.cliente_id, "");
-  // un cliente ya registrado se busca por su teléfono y no escribe nada
-  await page.keyboard.press("Escape");
+  assert.equal(web.vendedor, ""); assert.equal(web.negocio, "Salón Luz"); assert.equal(web.total, 18); assert.equal(web.tipo_pago, "efectivo_pronto");
+  assert.equal(web.latitud, 8.612346);
+  await page.locator("#listoVend .vend-wa", { hasText: "Óscar" }).click();
+  abiertos = await page.evaluate(() => window.__abiertos);
+  const msg2 = decodeURIComponent(abiertos.at(-1).split("text=")[1]);
+  assert.match(msg2, /\(WEB-[A-Z2-9]{6}\)/);
+  assert.match(msg2, /Monto: 18,00 \$ \(Efectivo pronto pago\)/);
+  assert.match(msg2, /Ubicación: https:\/\/maps\.google\.com\/\?q=8\.61/);
+  for (let i = 0; i < 50 && !gas.tabla("PedidosWeb")[0].vendedor; i++) await page.waitForTimeout(100);
+  assert.equal(gas.tabla("PedidosWeb")[0].vendedor, "Óscar"); // queda asignado a quien se lo mandó
+  await page.click("#btnListoCerrar");
+  assert.ok(await page.locator("#orderBar.show").count() === 0); // pedido entregado: se vacía
+  ok("con datos: Enviar → ¡Listo! con confeti; por WhatsApp a su vendedor y queda asignado");
+
+  // 3) un cliente ya registrado se busca por su teléfono y no escribe nada
+  await tocar('.card[data-card="BC-01"] .card-name');
   await page.click("#btnArmarPedido");
   await page.click("#btnModoCliente");
   await page.click('#cliElegido [data-cli="cambiar"]');
@@ -319,8 +341,7 @@ async function probar(browser, cfg) {
   await page.waitForFunction(() => /Barbería Max/.test(document.getElementById("cliElegido").textContent));
   assert.ok(await page.locator("#cliPanel").isHidden());
   assert.equal(await page.inputValue("#fNegocio"), "Barbería Max");
-  await page.keyboard.press("Escape");
-  ok("enviar: WhatsApp + pedido web en la app del vendedor elegido");
+  ok("cliente registrado: se busca por teléfono");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#orderModal").isHidden(), true);
   assert.equal(await page.evaluate(() => document.body.classList.contains("modal-open")), false);

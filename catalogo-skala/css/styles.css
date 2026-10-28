@@ -1276,3 +1276,65 @@ html[data-tema="oscuro"] .btn-nuevo-cli { color: var(--verde-claro); border-colo
 .spinner-chico { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; border-radius: 50%; border: 2px solid var(--borde); border-top-color: var(--rosa); animation: girar .8s linear infinite; }
 @keyframes girar { to { transform: rotate(360deg); } }
 .dir-con-ubic > label > span { font-weight: 600; }
+
+/* ============================================================
+   Enviar: un solo botón y la ventana de después (¡Listo! / WhatsApp)
+   ============================================================ */
+.modal-box { position: relative; }
+.modal-x {
+  position: absolute; top: 10px; right: 10px; z-index: 2; width: 44px; height: 44px; border: 0; border-radius: 50%;
+  background: var(--crema-2); color: var(--tinta); font-size: 1.05rem; cursor: pointer;
+}
+html[data-tema="oscuro"] .modal-x { background: rgba(255, 255, 255, 0.08); }
+#orderModalTitle { padding-right: 48px; }
+.opc { font-weight: 500; font-size: 0.8rem; color: var(--tinta-suave); }
+.modal-actions .btn-enviar { flex: 1 1 100%; min-height: 52px; font-size: 1.05rem; }
+.btn.ocupado::before {
+  content: ""; width: 16px; height: 16px; margin-right: 8px; border-radius: 50%;
+  border: 2px solid currentColor; border-top-color: transparent; animation: girar .8s linear infinite;
+}
+
+.modal-listo { text-align: center; overflow: hidden; }
+.modal-listo .modal-actions { text-align: left; }
+.listo-anim { display: grid; place-items: center; margin: 6px 0 4px; }
+.listo-anim svg { width: 84px; height: 84px; }
+.listo-anim .check circle { fill: var(--verde); stroke: none; transform-origin: center; animation: pop .45s cubic-bezier(.2, 1.4, .4, 1) both; }
+.listo-anim .check path { fill: none; stroke: #fff; stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 40; stroke-dashoffset: 40; animation: trazo .45s .3s ease forwards; }
+.listo-anim .wa circle { fill: #25d366; stroke: none; transform-origin: center; animation: pop .45s cubic-bezier(.2, 1.4, .4, 1) both, latido 1.6s .6s ease-in-out infinite; }
+.listo-anim .wa path { fill: none; stroke: #fff; stroke-width: 2.2; stroke-linejoin: round; }
+.listo-anim .wa path + path { fill: #fff; stroke: none; }
+@keyframes pop { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes trazo { to { stroke-dashoffset: 0; } }
+@keyframes latido { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+.modal-listo h3 { margin: 4px 0; font-size: 1.6rem; }
+.es-listo #listoTit { color: var(--verde-osc); font-size: 2rem; }
+html[data-tema="oscuro"] .es-listo #listoTit { color: var(--verde-claro); }
+.listo-preg { margin: 14px 0 8px; font-weight: 700; }
+.lista-vend-wa { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 8px; text-align: left; }
+.vend-wa {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 6px 8px 6px 10px;
+  border: 1px solid var(--borde); border-radius: 14px; background: var(--superficie); color: inherit; font: inherit; cursor: pointer;
+  transition: border-color .15s ease, transform .12s ease;
+}
+.vend-wa:active { transform: scale(0.98); }
+.vend-wa strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vend-wa .flecha { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: #25d366; color: #fff; font-weight: 700; flex: 0 0 auto; }
+.vend-wa .flecha svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.vend-wa.enviado { border-color: var(--verde); background: var(--verde-suave); }
+.vend-wa.enviado .flecha { background: var(--verde-osc); }
+.avatar.oficina { background: var(--verde-osc); }
+@media (hover: hover) and (pointer: fine) { .vend-wa:hover .flecha svg { transform: translateX(2px); transition: transform .15s ease; } }
+
+/* Confeti */
+.confeti { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.confeti i { position: absolute; top: -12px; width: 8px; height: 13px; border-radius: 2px; opacity: 0; animation: caer 1.8s ease-in forwards; }
+.confeti i:nth-child(3n) { width: 6px; height: 6px; border-radius: 50%; }
+@keyframes caer {
+  0% { opacity: 1; transform: translateY(0) rotate(0deg); }
+  100% { opacity: 0; transform: translateY(420px) rotate(540deg); }
+}
+@media (prefers-reduced-motion: reduce) { .listo-anim .check path { stroke-dashoffset: 0 !important; } }
+.btn-mas-lista, .modal-x, .btn-ubic { flex-shrink: 0; }
+.lista-vend-wa { grid-template-columns: minmax(0, 1fr); }
+.lista-vend-wa li { min-width: 0; }
+.vend-wa strong { text-align: left; }

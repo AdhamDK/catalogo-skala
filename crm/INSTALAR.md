@@ -105,10 +105,16 @@ vendedor** y lo envía por WhatsApp. El pedido llega también a la app de ese ve
 (Pedidos → **Web**, y un aviso en Inicio): lo toma, lo revisa o edita y lo envía a
 Administración. Administración los ve, pero no los toma. Se pueden descartar con motivo.
 
-En **Tu pedido** el cliente elige forma de pago, luego **Seleccionar cliente** (se busca por su
-teléfono o RIF exacto, o toca *Nuevo · registrarme*; al lado de Dirección puede tomar su
-ubicación actual) y luego **Seleccionar vendedor**. Si ya estaba registrado, el pedido llega
-enlazado a su ficha (no se duplica) y con su ubicación.
+En **Tu pedido** el cliente elige forma de pago y, si quiere, **Seleccionar cliente** (se busca por
+su teléfono o RIF, o toca *Nuevo · registrarme*; al lado de Dirección puede tomar su ubicación
+actual). Hay un solo botón: **Enviar pedido**.
+- **Con sus datos:** el pedido llega a Skala ("¡Listo!" con confeti) y queda en la pestaña de
+  pedidos web de **todos los vendedores** hasta que uno lo tome. Si además lo manda por WhatsApp
+  a su vendedor (flechita), queda asignado a ese vendedor.
+- **Sin sus datos:** se abre "Enviar al vendedor por WhatsApp": elige su vendedor (o Skala) y
+  coordina los datos por WhatsApp. No se guarda en el sistema.
+El **WhatsApp de cada vendedor** se carga en Más → Usuarios → Editar (si no tiene, se usa el
+número de Skala).
 
 ## Borrar pedidos
 El vendedor puede borrar sus pedidos (ej. uno de prueba) y el Master cualquiera, siempre con

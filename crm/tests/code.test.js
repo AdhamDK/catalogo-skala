@@ -690,7 +690,6 @@ test("pedido web: el cliente elige vendedor; validaciones; límite por teléfono
   const vend = g.post({ action: "vendedores" });
   assert.deepEqual(vend.vendedores.map((v) => v.nombre), ["Kevin", "Óscar"]);
   const oscar = idDe(g, "oscar");
-  assert.equal(g.post({ action: "pedidoWeb", ...WEB }).code, "vendedor");
   assert.equal(g.post({ action: "pedidoWeb", ...WEB, vendedor_id: idDe(g, "ana") }).code, "vendedor"); // solo vendedores
   assert.equal(g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar, cliente: { negocio: "X", telefono: "12" } }).code, "telefono");
   assert.equal(g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar, items: [] }).code, "empty");
@@ -980,4 +979,33 @@ test("un cliente que pide con otro teléfono: el de siempre se conserva y el nue
   g.post({ action: "guardarCliente", token: ta, cliente: { id: c[0].id, negocio: "Tienda Sol", telefono: "0412-5555555", telefono2: "" } });
   c = g.tabla("Clientes");
   assert.deepEqual([c[0].telefono, c[0].telefono2], ["0412-5555555", ""]);
+});
+
+test("pedido web sin vendedor: lo ven todos los vendedores; el cliente lo asigna después al mandarlo por WhatsApp", () => {
+  const g = preparar();
+  conPrecios(g);
+  const tj = login(g, "jose", "Skala#2026");
+  // teléfono (WhatsApp) del vendedor
+  const oscar = idDe(g, "oscar");
+  let r = g.post({ action: "guardarUsuario", token: tj, id: oscar, usuario: "oscar", nombre: "Óscar", roles: ["vendedor"], telefono: "0424-7387202" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.match(g.post({ action: "guardarUsuario", token: tj, id: oscar, usuario: "oscar", nombre: "Óscar", roles: ["vendedor"], telefono: "12" }).error, /teléfono/);
+  assert.equal(g.post({ action: "usuarios", token: tj }).usuarios.find((u) => u.id === oscar).telefono, "0424-7387202");
+  const vend = g.post({ action: "vendedores" }).vendedores;
+  assert.deepEqual(vend.map((v) => [v.nombre, v.whatsapp]), [["Kevin", ""], ["Óscar", "584247387202"]]);
+  // sin vendedor
+  const w = g.post({ action: "pedidoWeb", ...WEB, ref: "WEB-SINV01" });
+  assert.equal(w.ok, true, JSON.stringify(w));
+  const to = login(g), tk = login(g, "kevin", "Kevin9876");
+  assert.equal(g.post({ action: "pedidosWeb", token: tk }).pedidos.length, 1);
+  assert.equal(g.post({ action: "pedidosWeb", token: tk }).pedidos[0].puede_tomar, true);
+  // el cliente lo manda por WhatsApp a Óscar: queda asignado
+  assert.equal(g.post({ action: "asignarVendedorWeb", id: "web-sinv01", vendedor_id: oscar }).ok, true);
+  assert.equal(g.tabla("PedidosWeb")[0].vendedor, "Óscar");
+  assert.equal(g.post({ action: "pedidosWeb", token: tk }).pedidos.length, 0);
+  assert.equal(g.post({ action: "pedidosWeb", token: to }).pedidos.length, 1);
+  // no se le puede cambiar el vendedor una vez asignado
+  assert.equal(g.post({ action: "asignarVendedorWeb", id: "WEB-SINV01", vendedor_id: idDe(g, "kevin") }).sin_cambios, true);
+  assert.equal(g.tabla("PedidosWeb")[0].vendedor, "Óscar");
+  assert.equal(g.post({ action: "asignarVendedorWeb", id: "WEB-NOEXISTE", vendedor_id: oscar }).code, "not_found");
 });
