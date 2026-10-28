@@ -48,6 +48,8 @@ function mensajeGrupo(ped, c) {
   const nombre = [...new Set([c.nombre, c.contacto].filter(Boolean))].join(" · ");
   const tels = [c.telefono, c.telefono2].filter(Boolean).join(" / ");
   const mapa = linkMapa(c.latitud, c.longitud);
+  const tipo = ped.tipo_pago || tipoPagoDe(ped.pago);
+  const conPrecio = (ped.items || []).some((it) => Number(it.precio) > 0);
   const lineas = [
     `*PEDIDO ${ped.id}${estado}*`,
     `${fechaLegible(ped.fecha)} · Vendedor: ${ped.vendedor}`,
@@ -61,9 +63,10 @@ function mensajeGrupo(ped, c) {
     "",
     "*Productos*",
     ...(ped.items || []).map((it) =>
-      `• ${it.cajas} × ${it.producto} (${it.code})${it.total_unidades ? ` = ${it.total_unidades} ${it.unidad}` : ""}`),
+      `• ${it.cajas} × ${it.producto} (${it.code})${it.total_unidades ? ` = ${it.total_unidades} ${it.unidad}` : ""}${conPrecio ? ` · ${dinero(precioUnitario(it, tipo))} c/u` : ""}`),
     "",
     `*Total: ${ped.total_cajas} caja${Number(ped.total_cajas) === 1 ? "" : "s"}*${ped.detalle_unidades ? ` · ${ped.detalle_unidades}` : ""}`,
+    conPrecio ? `*Monto: ${dinero(totalPorPago(ped.items, tipo))}* · precio ${ped.nivel_precio === "mayor" ? "al mayor" : "al por menor"}${ped.excepcion_precio ? " (excepción)" : ""}` : null,
     ped.pago ? `Pago: ${ped.pago}${Number(ped.dias_credito) > 0 ? ` (${ped.dias_credito} días)` : ""}` : null,
     ped.documento ? `Documento: ${ped.documento}` : null,
     ped.nota ? `Nota: ${ped.nota}` : null,
@@ -191,6 +194,66 @@ function resumenConciliados(pedidos) {
   return { pedidos: carga.pedidos, cajas: carga.cajas, montos, por_vendedor: Object.values(vend).sort(orden), por_pago: Object.values(pago).sort(orden), productos: carga.productos };
 }
 
+/* -------------------- Precios (v3) --------------------
+   precios = { code: { menor, mayor, desc_pronto, desc_efectivo_credito, desc_efectivo_pronto } } (acción "catalogo").
+   Nivel: Mayor desde 15 cajas o por excepción del vendedor. El descuento sale de cómo paga. */
+const CAJAS_MAYOR = 15;
+const PAGOS = [
+  { id: "credito", nombre: "Crédito", credito: true, desc: "", ayuda: "Transferencia o pago móvil con días" },
+  { id: "pronto", nombre: "Pronto pago", credito: false, desc: "desc_pronto", ayuda: "Paga hasta el día siguiente a la entrega" },
+  { id: "efectivo_credito", nombre: "Efectivo a crédito", credito: true, desc: "desc_efectivo_credito", ayuda: "Dólares en efectivo con días" },
+  { id: "efectivo_pronto", nombre: "Efectivo pronto pago", credito: false, desc: "desc_efectivo_pronto", ayuda: "Efectivo hasta el día siguiente a la entrega" },
+];
+const pagoPorId = (id) => PAGOS.find((x) => x.id === id) || null;
+function tipoPagoDe(pago) {
+  const t = String(pago || "").toLowerCase();
+  const ef = /efectivo/.test(t), cred = /cr[eé]dito/.test(t);
+  if (ef) return cred ? "efectivo_credito" : "efectivo_pronto";
+  return cred ? "credito" : "pronto";
+}
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+function nivelPrecio(totalCajas, excepcion) { return totalCajas >= CAJAS_MAYOR || excepcion ? "mayor" : "menor"; }
+
+/* Agrega precio y descuentos a los items (copia), según nivel */
+function conPrecios(items, precios, nivel) {
+  return (items || []).map((it) => {
+    const pr = (precios || {})[it.code] || {};
+    const precio = nivel === "mayor" ? (Number(pr.mayor) || Number(pr.menor) || 0) : (Number(pr.menor) || 0);
+    return { ...it, precio, desc_pronto: Number(pr.desc_pronto) || 0, desc_efectivo_credito: Number(pr.desc_efectivo_credito) || 0, desc_efectivo_pronto: Number(pr.desc_efectivo_pronto) || 0 };
+  });
+}
+function precioUnitario(it, tipo) {
+  const pg = pagoPorId(tipo) || PAGOS[0];
+  return r2(Math.max(0, (Number(it.precio) || 0) - (pg.desc ? Number(it[pg.desc]) || 0 : 0)));
+}
+function totalPorPago(items, tipo) { return r2((items || []).reduce((a, it) => a + (Number(it.cajas) || 0) * precioUnitario(it, tipo), 0)); }
+/* Lista para mostrar: total de cada forma de pago y cuánto ahorra frente a Crédito */
+function totalesPorPago(items) {
+  const base = totalPorPago(items, "credito");
+  return PAGOS.map((pg) => { const total = totalPorPago(items, pg.id); return { ...pg, total, ahorro: r2(base - total) }; });
+}
+const sinPrecio = (items) => (items || []).filter((it) => !(Number(it.precio) > 0)).map((it) => it.code);
+const dinero = (n) => formatoMonto(n, "$").replace(/^\$ (.*)$/, "$1 $");
+
+/* Pronto pago: vale hasta el final del día siguiente a la entrega */
+function limitePronto(entregadoAt) {
+  if (!entregadoAt) return null;
+  const d = new Date(entregadoAt);
+  if (isNaN(d)) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 23, 59, 59);
+}
+function prontoVigente(entregadoAt, hoy = new Date()) {
+  const l = limitePronto(entregadoAt);
+  return !l || hoy <= l;
+}
+
+/* Existencias para el vendedor: texto y si se puede sumar más */
+function textoStock(st) {
+  if (!st || !st.controlado || st.disponible == null) return "";
+  return st.disponible <= 0 ? "Agotado" : `Hay ${st.disponible}`;
+}
+function topeStock(st) { return st && st.controlado && st.disponible != null ? Math.max(0, st.disponible) : Infinity; }
+
 function validarCliente(c, opciones = {}) {
   const faltan = [];
   if (!String(c.negocio || c.nombre || c.contacto || "").trim()) faltan.push("Nombre del cliente o del negocio");
@@ -236,5 +299,7 @@ function nuevoRef() {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { itemsDePedido, telefonoWhatsapp, linkMapa, fechaLegible, mensajeGrupo, validarCliente, expiracionToken, nuevoRef,
     nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, coordsDeTexto, estadoCredito, totalCarga,
-    monedaDePago, formatoMonto, resumenConciliados };
+    monedaDePago, formatoMonto, resumenConciliados,
+    CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, sinPrecio, dinero,
+    limitePronto, prontoVigente, textoStock, topeStock };
 }

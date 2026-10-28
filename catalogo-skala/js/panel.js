@@ -53,6 +53,7 @@
     clientes: { titulo: "Clientes", roles: TOMAN, nav: "clientes", render: vClientes },
     cliente: { titulo: "Cliente", roles: TOMAN, nav: "clientes", atras: "#/clientes", render: vCliente },
     resumen: { titulo: "Resumen", roles: TOMAN, nav: "mas", atras: "#/mas", render: vResumen },
+    inventario: { titulo: "Inventario y precios", roles: ["master", "admin"], nav: "mas", atras: "#/mas", render: vInventario },
     usuarios: { titulo: "Usuarios", roles: ["master"], nav: "mas", atras: "#/mas", render: vUsuarios },
     usuario: { titulo: "Usuario", roles: ["master"], nav: "mas", atras: "#/usuarios", render: vUsuario },
     mas: { titulo: "Más", roles: TODOS, nav: "mas", render: vMas },
@@ -125,7 +126,7 @@
   }
 
   /* Hoja modal: devuelve los valores del formulario o null si se cancela */
-  function hoja({ titulo, cuerpo, ok = "Aceptar", validar }) {
+  function hoja({ titulo, cuerpo, ok = "Aceptar", validar, alAbrir }) {
     return new Promise((resolve) => {
       $("hojaTitulo").textContent = titulo;
       $("hojaCuerpo").innerHTML = cuerpo || "";
@@ -134,7 +135,8 @@
       const modal = $("hoja"), form = $("hojaForm");
       modal.hidden = false;
       document.body.classList.add("modal-open");
-      (form.querySelector("select, textarea, input") || form).focus();
+      if (alAbrir) alAbrir(form);
+      (form.querySelector("select, textarea, input:not([type=radio])") || form).focus();
       const fin = (val) => {
         modal.hidden = true;
         document.body.classList.remove("modal-open");
@@ -288,27 +290,40 @@
     $("iLista").innerHTML = destacados.map((p) => filaPedido(p)).join("");
   }
 
-  /* ---------- Nuevo pedido: 2) productos ---------- */
+  /* ---------- Nuevo pedido: 2) productos (cuadrícula: tocar = sumar una caja) ---------- */
   let filtroNuevo = "todos", busquedaNuevo = "";
-  function vNuevoProductos(v) {
+  const K_MAYOR = "skala_precio_mayor"; // excepción: precio al mayor con menos de 15 cajas
+  const excepcionMayor = () => !!leerLS(K_MAYOR, false);
+  /* Precios y existencias: lo guardado ya, y se actualiza por detrás */
+  async function preciosYStock(alCambiar) {
+    const guardado = SkalaAPI.catalogoGuardado();
+    const mapa = SkalaAPI.preciosMapa(guardado);
+    SkalaAPI.catalogo().then((d) => { if (d !== guardado && alCambiar) alCambiar(SkalaAPI.preciosMapa(d)); }).catch(() => {});
+    return mapa;
+  }
+  function vNuevoProductos(v, _p, _q, vigente) {
     const cli = clienteElegido();
     if (!cli) return ir("#/nuevo");
     const productos = [...BANOS.map((p) => ({ ...p, tipo: "banos" })), ...KITS.map((p) => ({ ...p, tipo: "kits" }))];
+    let precios = {};
     v.innerHTML = `${pasos(2)}
       <a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>
       <div class="buscador"><input type="search" id="nBuscar" placeholder="Buscar producto o código" autocomplete="off" enterkeyhint="search" value="${esc(busquedaNuevo)}" /></div>
       <div class="periodos" id="nFiltros">${[["todos", "Todos"], ["banos", "Baños de crema"], ["kits", "Kits"], ["elegidos", "Elegidos"]].map(([k, t]) =>
         `<button type="button" class="tab${k === filtroNuevo ? " active" : ""}" data-f="${k}">${t}</button>`).join("")}</div>
-      <ul class="lista-prod" id="nLista">${productos.map((p) => `
-        <li class="prod" data-code="${p.code}" data-tipo="${p.tipo}" data-texto="${esc((p.name + " " + p.code + " " + p.line).toLowerCase())}">
-          <picture><source type="image/webp" srcset="assets/img/web/${p.code}-400.webp" />
-            <img src="assets/img/${p.code}.png" alt="" width="64" height="51" loading="lazy" decoding="async" /></picture>
-          <div class="prod-info">
+      <p class="nota-chica nivel-aviso" id="nNivel" aria-live="polite"></p>
+      <ul class="grilla-prod" id="nLista">${productos.map((p) => `
+        <li class="pcard" data-code="${p.code}" data-tipo="${p.tipo}" data-texto="${esc((p.name + " " + p.code + " " + p.line).toLowerCase())}">
+          <button type="button" class="pcard-tap" data-act="plus" aria-label="Sumar una caja de ${esc(p.name)}">
+            <picture><source type="image/webp" srcset="assets/img/web/${p.code}-400.webp" />
+              <img src="assets/img/${p.code}.png" alt="" width="64" height="51" loading="lazy" decoding="async" /></picture>
             <strong>${esc(p.name)}</strong>
-            <span>${p.code} · ${esc(textoUnidades(p))}</span>
-            <span class="hair-icons">${iconosCabelloHTML(p.hair)}</span>
-          </div>
-          <div class="qty">
+            <span class="pcard-sub">${p.code} · ${esc(textoUnidades(p))}</span>
+            <span class="pcard-precio" data-precio></span>
+            <span class="pcard-stock" data-stock></span>
+          </button>
+          <b class="pcard-n" aria-hidden="true"></b>
+          <div class="pcard-qty">
             <button type="button" class="qty-btn" data-act="minus" aria-label="Restar una caja de ${esc(p.name)}">−</button>
             <input class="qty-input" type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" aria-label="Cajas de ${esc(p.name)}" />
             <button type="button" class="qty-btn" data-act="plus" aria-label="Sumar una caja de ${esc(p.name)}">+</button>
@@ -324,15 +339,32 @@
     const pintar = () => {
       const c = carrito();
       let total = 0, prods = 0;
-      lista.querySelectorAll(".prod").forEach((li) => {
-        const q = Number(c[li.dataset.code]) || 0;
+      Object.values(c).forEach((n) => { total += Number(n) || 0; });
+      const nivel = nivelPrecio(total, excepcionMayor());
+      let monto = 0, faltaPrecio = false;
+      lista.querySelectorAll(".pcard").forEach((li) => {
+        const code = li.dataset.code;
+        const q = Number(c[code]) || 0;
         const inp = li.querySelector(".qty-input");
         if (document.activeElement !== inp) inp.value = q;
         li.classList.toggle("elegido", q > 0);
-        total += q; if (q) prods++;
+        li.querySelector(".pcard-n").textContent = q ? String(q) : "";
+        const pr = precios[code];
+        const [it] = conPrecios([{ code, cajas: q }], precios, nivel);
+        li.querySelector("[data-precio]").textContent = pr && it.precio ? `${dinero(it.precio)} / caja` : "";
+        const st = textoStock(pr);
+        const tope = topeStock(pr);
+        const sp = li.querySelector("[data-stock]");
+        sp.textContent = st; sp.classList.toggle("agotado", st === "Agotado");
+        li.classList.toggle("sin-stock", tope <= 0 && !q);
+        li.querySelectorAll('[data-act="plus"]').forEach((b) => { b.disabled = q >= tope; });
+        if (q) { prods++; monto += q * it.precio; if (!it.precio) faltaPrecio = true; }
       });
-      $("nTotal").textContent = `${total} caja${total === 1 ? "" : "s"}`;
-      $("nDetalle").textContent = prods ? ` · ${prods} producto${prods === 1 ? "" : "s"}` : " · elegí productos";
+      $("nTotal").textContent = `${total} caja${total === 1 ? "" : "s"}${monto ? " · " + dinero(monto) : ""}`;
+      $("nDetalle").textContent = prods ? ` · ${prods} producto${prods === 1 ? "" : "s"}${faltaPrecio ? " · hay productos sin precio" : ""}` : " · tocá un producto para sumarlo";
+      $("nNivel").textContent = !total ? `Precio al por menor; desde ${CAJAS_MAYOR} cajas, precio al mayor.`
+        : nivel === "mayor" ? (total >= CAJAS_MAYOR ? `Precio al mayor (${total} cajas).` : "Precio al mayor por excepción.")
+        : `Precio al por menor · faltan ${CAJAS_MAYOR - total} caja${CAJAS_MAYOR - total === 1 ? "" : "s"} para el precio al mayor.`;
       $("nSeguir").classList.toggle("is-disabled", !total);
       $("nSeguir").setAttribute("aria-disabled", String(!total));
       $("nVaciar").hidden = !total;
@@ -343,7 +375,7 @@
       const q = busquedaNuevo.trim().toLowerCase();
       const c = carrito();
       let visibles = 0;
-      lista.querySelectorAll(".prod").forEach((li) => {
+      lista.querySelectorAll(".pcard").forEach((li) => {
         const okF = filtroNuevo === "todos" || li.dataset.tipo === filtroNuevo || (filtroNuevo === "elegidos" && Number(c[li.dataset.code]) > 0);
         const ok = okF && (!q || li.dataset.texto.includes(q));
         li.hidden = !ok; if (ok) visibles++;
@@ -352,20 +384,24 @@
     };
     const fijar = (code, n) => {
       const c = carrito();
+      const tope = topeStock(precios[code]);
       n = Math.max(0, Math.min(9999, Math.floor(Number(n) || 0)));
+      if (n > tope) { n = tope; toast(tope ? `Solo hay ${tope} caja${tope === 1 ? "" : "s"} de ${(allProductsMap()[code] || {}).name || code}.` : "Producto agotado."); }
       if (n) c[code] = n; else delete c[code];
       guardarCarrito(c);
       pintar();
     };
     lista.addEventListener("click", (e) => {
-      const b = e.target.closest(".qty-btn");
-      if (!b) return;
-      const code = b.closest(".prod").dataset.code;
+      const b = e.target.closest("[data-act]");
+      if (!b || b.disabled) return;
+      const li = b.closest(".pcard");
+      const code = li.dataset.code;
       const actual = Number(carrito()[code]) || 0;
       fijar(code, actual + (b.dataset.act === "plus" ? 1 : -1));
+      if (b.dataset.act === "plus") { li.classList.remove("pulso"); void li.offsetWidth; li.classList.add("pulso"); }
     });
     lista.addEventListener("input", (e) => {
-      if (e.target.classList.contains("qty-input")) fijar(e.target.closest(".prod").dataset.code, e.target.value);
+      if (e.target.classList.contains("qty-input")) fijar(e.target.closest(".pcard").dataset.code, e.target.value);
     });
     lista.addEventListener("focusout", (e) => { if (e.target.classList.contains("qty-input")) pintar(); });
     $("nBuscar").addEventListener("input", (e) => { busquedaNuevo = e.target.value; filtrar(); });
@@ -377,10 +413,10 @@
       filtrar();
     });
     $("nVaciar").addEventListener("click", async () => {
-      if (await hoja({ titulo: "¿Vaciar el pedido?", cuerpo: '<p class="modal-sub">Se quitan todos los productos elegidos.</p>', ok: "Vaciar" })) { guardarCarrito({}); pintar(); }
+      if (await hoja({ titulo: "¿Vaciar el pedido?", cuerpo: '<p class="modal-sub">Se quitan todos los productos elegidos.</p>', ok: "Vaciar" })) { guardarCarrito({}); guardarLS(K_MAYOR, false); pintar(); }
     });
     $("nSeguir").addEventListener("click", (e) => { if (!cajasCarrito()) { e.preventDefault(); toast("Elegí al menos un producto."); } });
-    pintar();
+    return preciosYStock((m) => { if (vigente() && $("nLista") === lista) { precios = m; pintar(); } }).then((m) => { precios = m; pintar(); });
   }
 
   /* ---------- Nuevo pedido: pasos ---------- */
@@ -553,7 +589,7 @@
   }
 
   /* ---------- Nuevo pedido: 3) enviar (pago, nota o factura) ---------- */
-  function vNuevoEnviar(v) {
+  async function vNuevoEnviar(v) {
     const cli = clienteElegido();
     if (!cli) return ir("#/nuevo");
     const items = itemsDePedido(carrito(), allProductsMap());
@@ -561,12 +597,15 @@
     const total = items.reduce((a, it) => a + it.cajas, 0);
     const unidades = {};
     items.forEach((it) => { if (it.total_unidades) unidades[it.unidad] = (unidades[it.unidad] || 0) + it.total_unidades; });
+    let precios = await preciosYStock((m) => { precios = m; if ($("fEnviar")) pintarPrecios(); });
     v.innerHTML = `${pasos(3)}
       <a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>
       <section class="tarjeta">
         <div class="fila-top"><h3 class="sub-titulo">Productos</h3><a class="link-btn" href="#/nuevo/productos">Cambiar</a></div>
-        <ul class="resumen-items">${items.map((it) => `<li><span>${it.cajas} × ${esc(it.producto)}</span><em>${it.total_unidades ? `${it.total_unidades} ${esc(it.unidad)}` : ""}</em></li>`).join("")}</ul>
+        <ul class="resumen-items" id="eItems"></ul>
         <p class="total-ped"><strong>Total: ${total} caja${total === 1 ? "" : "s"}</strong> · ${Object.entries(unidades).map(([u, n]) => `${n} ${esc(u)}`).join(" + ")}</p>
+        <p class="nota-chica" id="eNivel"></p>
+        ${total < CAJAS_MAYOR ? `<label class="check excepcion"><input type="checkbox" id="eMayor"${excepcionMayor() ? " checked" : ""} /> Dar precio al mayor (excepción para este cliente)</label>` : ""}
       </section>
       <form id="fEnviar" novalidate>
         <fieldset class="pay documento" id="fsDoc"><legend>¿El cliente quiere nota de entrega o factura? *</legend>
@@ -575,9 +614,8 @@
           <label class="field field-full" id="eRifWrap" hidden><span>RIF o cédula para la factura *</span>
             <input id="eRif" type="text" autocomplete="off" autocapitalize="characters" placeholder="J-12345678-9" value="${esc(cli.rif_cedula || "")}" /></label>
         </fieldset>
-        <fieldset class="pay" id="fsPago"><legend>Método de pago</legend>
-          ${["Bolívares · Contado", "Bolívares · Crédito", "Divisas · Contado", "Divisas · Crédito"].map((p) =>
-            `<label class="pay-opt"><input type="radio" name="ePago" value="${p}" /> ${p}</label>`).join("")}
+        <fieldset class="pay pagos" id="fsPago"><legend>Forma de pago *</legend>
+          <div id="ePagos"></div>
           <div id="eCredito" class="dias-credito" hidden>
             <p class="dias-tit">Días de crédito *</p>
             <div class="selector-tema">${[7, 15, 21, 30].map((d) => `<button type="button" data-dias="${d}" aria-pressed="false">${d} días</button>`).join("")}</div>
@@ -593,8 +631,28 @@
       </form>`;
     const doc = () => (document.querySelector('input[name="eDoc"]:checked') || {}).value || "";
     const pagoSel = () => (document.querySelector('input[name="ePago"]:checked') || {}).value || "";
-    const esCredito = () => /crédito/i.test(pagoSel());
-    $("fsPago").addEventListener("change", (e) => { if (e.target.name === "ePago") $("eCredito").hidden = !esCredito(); });
+    const esCredito = () => !!(pagoPorId(pagoSel()) || {}).credito;
+    const conPrecio = () => conPrecios(items, precios, nivelPrecio(total, excepcionMayor()));
+    /* Montos de cada forma de pago (ej. Crédito 100 · Pronto pago 90 · Efectivo a crédito 70 · Efectivo pronto pago 60) */
+    function pintarPrecios() {
+      const its = conPrecio();
+      const hayPrecio = its.some((it) => it.precio > 0);
+      const tipo = pagoSel() || "credito";
+      $("eItems").innerHTML = its.map((it) => `<li><span>${it.cajas} × ${esc(it.producto)}${it.total_unidades ? ` <span class="ped-det">${it.total_unidades} ${esc(it.unidad)}</span>` : ""}</span><em>${it.precio ? `${dinero(precioUnitario(it, tipo))} c/u · <strong>${dinero(it.cajas * precioUnitario(it, tipo))}</strong>` : "sin precio"}</em></li>`).join("");
+      const nivel = nivelPrecio(total, excepcionMayor());
+      $("eNivel").textContent = nivel === "mayor" ? (total >= CAJAS_MAYOR ? "Precio al mayor." : "Precio al mayor por excepción.") : `Precio al por menor (menos de ${CAJAS_MAYOR} cajas).`;
+      const sel = pagoSel();
+      $("ePagos").innerHTML = totalesPorPago(its).map((pg) => `<label class="pay-opt pago-opt">
+          <input type="radio" name="ePago" value="${pg.id}"${pg.id === sel ? " checked" : ""} />
+          <span class="pago-txt"><strong>${esc(pg.nombre)}</strong><span>${esc(pg.ayuda)}</span></span>
+          ${hayPrecio ? `<span class="pago-monto"><strong>${dinero(pg.total)}</strong>${pg.ahorro ? `<span>−${dinero(pg.ahorro)}</span>` : ""}</span>` : ""}
+        </label>`).join("") + (hayPrecio && sinPrecio(its).length ? `<p class="nota-chica">Sin precio cargado: ${esc(sinPrecio(its).join(", "))}.</p>` : "")
+        + (hayPrecio ? "" : '<p class="nota-chica">Todavía no hay precios cargados para estos productos.</p>');
+    }
+    pintarPrecios();
+    $("fsPago").addEventListener("change", (e) => { if (e.target.name === "ePago") { $("eCredito").hidden = !esCredito(); $("fsPago").classList.remove("falta"); pintarPrecios(); } });
+    const may = $("eMayor");
+    if (may) may.addEventListener("change", () => { guardarLS(K_MAYOR, may.checked); pintarPrecios(); });
     $("eCredito").addEventListener("click", (e) => {
       const b = e.target.closest("[data-dias]");
       if (!b) return;
@@ -616,6 +674,7 @@
       const mostrar = (m, el) => { err.textContent = m; err.hidden = false; (el || err).scrollIntoView({ block: "center" }); };
       if (!d) { $("fsDoc").classList.add("falta"); return mostrar("Elegí si el cliente quiere nota de entrega o factura.", $("fsDoc")); }
       if (d === "Factura" && rif.replace(/\D/g, "").length < 6) return mostrar("Para factura hace falta el RIF o la cédula.", $("eRifWrap"));
+      if (!pagoSel()) { $("fsPago").classList.add("falta"); return mostrar("Elegí la forma de pago.", $("fsPago")); }
       const dias = Math.floor(Number($("eDias").value));
       if (esCredito() && !(dias >= 1 && dias <= 180)) return mostrar("Indicá los días de crédito (1 a 180).", $("eCredito"));
       err.hidden = true;
@@ -623,11 +682,13 @@
       if (d === "Factura") cliente.rif_cedula = rif;
       const its = itemsDePedido(carrito(), allProductsMap());
       const datos = { client_ref: nuevoRef(), cliente, items: its, documento: d,
-        pago: pagoSel(), dias_credito: esCredito() ? dias : 0, nota: $("eNota").value.trim() };
+        tipo_pago: pagoSel(), pago: pagoPorId(pagoSel()).nombre, precio_mayor: total < CAJAS_MAYOR && excepcionMayor(),
+        dias_credito: esCredito() ? dias : 0, nota: $("eNota").value.trim() };
       const btn = $("btnEnviar");
       btn.disabled = true; btn.textContent = "Enviando…";
       const terminar = (listo) => {
         guardarCarrito({});
+        guardarLS(K_MAYOR, false);
         borrarLS(K_CLIENTE);
         sessionStorage.setItem(K_LISTO, JSON.stringify(listo));
         ir("#/nuevo/listo");
@@ -815,6 +876,8 @@
     const acciones = accionesPedido(rol(), yo().id, p);
     const principal = ["confirmar", "en_ruta", "entregado", "cobrar", "conciliar"];
     const ec = estadoCredito(p);
+    const conPrecio = rol() !== "despachador" && p.items.some((it) => Number(it.precio) > 0);
+    const tipoAcordado = p.tipo_pago || tipoPagoDe(p.pago);
     v.innerHTML = `
       <section class="tarjeta">
         <div class="fila-top"><h2 class="ped-titulo">${esc(p.negocio)}</h2>${chipEstado(p.estado)}</div>
@@ -831,10 +894,12 @@
       ${acciones.length ? `<div class="acciones-ped">${acciones.map((a) => `<button type="button" class="btn ${principal.includes(a) ? "btn-primary" : "btn-ghost"}" data-acc="${a}">${ETIQUETAS[a]}</button>`).join("")}</div>` : ""}
       <section class="tarjeta">
         <h3 class="sub-titulo">Productos</h3>
-        <table class="tabla"><thead><tr><th>Producto</th><th>Cajas</th></tr></thead><tbody>
-          ${p.items.map((it) => `<tr><td>${esc(it.producto)} <span class="ped-det">${esc(it.code)}${it.total_unidades ? ` · ${it.total_unidades} ${esc(it.unidad)}` : ""}</span></td><td>${it.cajas}</td></tr>`).join("")}
+        <table class="tabla"><thead><tr><th>Producto</th><th>Cajas</th>${conPrecio ? '<th class="num">Precio</th>' : ""}</tr></thead><tbody>
+          ${p.items.map((it) => `<tr><td>${esc(it.producto)} <span class="ped-det">${esc(it.code)}${it.total_unidades ? ` · ${it.total_unidades} ${esc(it.unidad)}` : ""}</span></td><td>${it.cajas}</td>${conPrecio ? `<td class="num">${it.precio ? dinero(precioUnitario(it, tipoAcordado)) : "—"}</td>` : ""}</tr>`).join("")}
         </tbody></table>
         <p class="total-ped"><strong>Total: ${p.total_cajas} caja${p.total_cajas === 1 ? "" : "s"}</strong>${p.detalle_unidades ? ` · ${esc(p.detalle_unidades)}` : ""}</p>
+        ${conPrecio ? `<p class="monto-ped" id="dMonto"><strong>${dinero(totalPorPago(p.items, tipoAcordado))}</strong> · ${esc((pagoPorId(tipoAcordado) || {}).nombre || p.pago)} · precio ${p.nivel_precio === "mayor" ? "al mayor" : "al por menor"}${p.excepcion_precio ? " (excepción)" : ""}</p>` : ""}
+        ${conPrecio && p.tipo_pago_real && p.tipo_pago_real !== tipoAcordado ? `<p class="monto-ped cambio" id="dMontoReal">Pagó como <strong>${esc(pagoPorId(p.tipo_pago_real).nombre)}</strong>: ${dinero(totalPorPago(p.items, p.tipo_pago_real))}</p>` : ""}
         <dl class="datos">
           <dt>Fecha</dt><dd>${esc(fechaLegible(p.fecha))}</dd>
           <dt>Vendedor</dt><dd>${esc(p.vendedor)}</dd>
@@ -911,10 +976,21 @@
       const [titulo, cuerpo, ok] = textos[acc];
       const mon = p.moneda || monedaDePago(p.pago);
       const previo = p.monto ? String(p.monto).replace(".", ",") : "";
+      const conPrecio = p.items.some((it) => Number(it.precio) > 0);
+      const acordado = p.tipo_pago || tipoPagoDe(p.pago);
+      const elegido = p.tipo_pago_real || acordado;
+      const vigente = prontoVigente(p.entregado_at);
+      const limite = limitePronto(p.entregado_at);
       const r = await hoja({
         titulo,
         cuerpo: `<p class="modal-sub">${cuerpo}</p>
           ${acc === "conciliar" && p.monto ? `<p class="modal-sub">Reportado: <strong>${esc(formatoMonto(p.monto, p.moneda))}</strong>${p.cobrado_por ? ` por ${esc(p.cobrado_por)}` : ""}. Corregilo si recibiste otro monto.</p>` : ""}
+          <fieldset class="pay pagos" id="hPagos"><legend>¿Cómo pagó? <span class="ped-det">(acordado: ${esc((pagoPorId(acordado) || {}).nombre || p.pago)})</span></legend>
+            ${totalesPorPago(p.items).map((pg) => `<label class="pay-opt pago-opt"><input type="radio" name="tipo_pago_real" value="${pg.id}"${pg.id === elegido ? " checked" : ""} />
+              <span class="pago-txt"><strong>${esc(pg.nombre)}</strong>${pg.id === acordado ? "<span>Lo acordado</span>" : ""}</span>
+              ${conPrecio ? `<span class="pago-monto"><strong>${dinero(pg.total)}</strong></span>` : ""}</label>`).join("")}
+            ${!vigente && limite ? `<p class="form-warn" id="hProntoAviso" hidden>El plazo de pronto pago venció el ${esc(limite.toLocaleDateString("es-VE"))}. Aplicalo solo si lo autorizaron.</p>` : ""}
+          </fieldset>
           <fieldset class="pay moneda"><legend>Moneda</legend>
             ${["USD", "Bs"].map((m) => `<label class="pay-opt"><input type="radio" name="moneda" value="${m}"${m === mon ? " checked" : ""} /> ${m === "USD" ? "Dólares (USD)" : "Bolívares (Bs)"}</label>`).join("")}
           </fieldset>
@@ -922,9 +998,24 @@
             <input name="monto" id="hMonto" inputmode="decimal" autocomplete="off" placeholder="Ej. 120,50" value="${esc(previo)}" /></label>`,
         ok,
         validar: (d) => (montoNum(d.monto) > 0 ? "" : "Escribí el monto (mayor que 0)."),
+        alAbrir: (form) => {
+          // El monto sigue a la forma de pago (en dólares) mientras no lo escriban a mano
+          let tocado = !!previo;
+          const m = form.querySelector("#hMonto");
+          const sync = () => {
+            const tipo = (form.querySelector('input[name="tipo_pago_real"]:checked') || {}).value;
+            const usd = (form.querySelector('input[name="moneda"]:checked') || {}).value !== "Bs";
+            const aviso = form.querySelector("#hProntoAviso");
+            if (aviso) aviso.hidden = !/pronto/.test(tipo || "");
+            if (!tocado && conPrecio) m.value = usd ? String(totalPorPago(p.items, tipo)).replace(".", ",") : "";
+          };
+          m.addEventListener("input", () => { tocado = true; });
+          form.addEventListener("change", (e) => { if (e.target.name === "tipo_pago_real" || e.target.name === "moneda") sync(); });
+          sync();
+        },
       });
       if (!r) return;
-      extra = { monto: montoNum(r.monto), moneda: r.moneda === "Bs" ? "Bs" : "USD" };
+      extra = { monto: montoNum(r.monto), moneda: r.moneda === "Bs" ? "Bs" : "USD", tipo_pago_real: r.tipo_pago_real };
     } else if (acc === "rechazar") {
       const r = await hoja({
         titulo: `Pago no recibido · ${p.id}`,
@@ -1121,6 +1212,91 @@
     v.querySelector(".periodos").addEventListener("click", (e) => { const b = e.target.closest("[data-dias]"); if (b) { diasResumen = Number(b.dataset.dias); render(); } });
   }
 
+  /* ---------- Inventario y precios (Administración / Master) ---------- */
+  let busquedaInv = "";
+  async function vInventario(v, _p, _q, vigente) {
+    const r = await api("inventario");
+    if (!vigente()) return;
+    const nombre = (c) => (allProductsMap()[c] || {}).name;
+    const prods = r.productos.map((x) => ({ ...x, producto: nombre(x.code) || x.producto }));
+    const fila = (x) => `<li class="inv-fila" data-code="${esc(x.code)}" data-texto="${esc((x.producto + " " + x.code).toLowerCase())}">
+        <div class="inv-top"><div><strong>${esc(x.producto)}</strong><span class="ped-det">${esc(x.code)}</span></div>
+          <div class="inv-stock${x.controlado && x.disponible <= 0 ? " agotado" : ""}">${x.controlado ? `<strong>${x.disponible}</strong><span>disponibles</span>` : '<span>Sin cargar</span>'}</div></div>
+        <p class="ped-det">${x.controlado ? `Cargado ${x.cargado} · aprobado ${x.aprobado}` : "No se controla hasta la primera entrada"}${x.en_proceso ? ` · en proceso ${x.en_proceso}` : ""}</p>
+        <p class="ped-det inv-precios">${x.menor ? `Menor ${dinero(x.menor)} · Mayor ${dinero(x.mayor || x.menor)} · Pronto −${dinero(x.desc_pronto)} · Ef. créd. −${dinero(x.desc_efectivo_credito)} · Ef. pronto −${dinero(x.desc_efectivo_pronto)}` : "<em>Sin precio</em>"}</p>
+        <div class="inv-botones"><button type="button" class="btn btn-ghost" data-inv="entrada">Entrada / ajuste</button><button type="button" class="btn btn-ghost" data-inv="precio">Precios</button></div>
+      </li>`;
+    const sinPrecio = prods.filter((x) => !x.menor).length;
+    v.innerHTML = `
+      <div class="buscador"><input type="search" id="invBuscar" placeholder="Buscar producto o código" autocomplete="off" value="${esc(busquedaInv)}" /></div>
+      ${sinPrecio ? `<p class="aviso-chico">${sinPrecio} producto(s) sin precio. Cargalos con <strong>Precios</strong> o en la hoja <em>Precios</em>.</p>` : ""}
+      <ul class="lista-inv" id="invLista">${prods.map(fila).join("")}</ul>
+      <details class="tarjeta"><summary class="sub-titulo">Últimos movimientos</summary>
+        ${r.movimientos.length ? `<ul class="resumen-items">${r.movimientos.slice(0, 30).map((m) => `<li><span>${esc(nombre(m.code) || m.producto)} <span class="ped-det">${esc(new Date(m.fecha).toLocaleDateString("es-VE"))} · ${esc(m.usuario)}${m.nota ? " · " + esc(m.nota) : ""}</span></span><em>${m.cajas > 0 ? "+" : ""}${m.cajas}</em></li>`).join("")}</ul>` : '<p class="modal-sub">Todavía no hay entradas.</p>'}
+      </details>
+      <p class="nota-chica">Disponible = entradas y ajustes − pedidos aprobados (aprobado, en ruta y entregado). Al anular un pedido aprobado la mercancía vuelve.</p>`;
+    const filtrar = () => { const q = busquedaInv.trim().toLowerCase(); v.querySelectorAll(".inv-fila").forEach((li) => { li.hidden = !!q && !li.dataset.texto.includes(q); }); };
+    filtrar();
+    $("invBuscar").addEventListener("input", (e) => { busquedaInv = e.target.value; filtrar(); });
+    $("invLista").addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-inv]");
+      if (!b) return;
+      const x = prods.find((p) => p.code === b.closest(".inv-fila").dataset.code);
+      const num = (t) => { const n = Number(String(t ?? "").trim().replace(",", ".")); return isFinite(n) ? n : NaN; };
+      if (b.dataset.inv === "entrada") {
+        const d = await hoja({
+          titulo: `${x.producto} · inventario`,
+          cuerpo: `<p class="modal-sub">${x.controlado ? `Disponible ahora: <strong>${x.disponible}</strong> cajas.` : "Primera carga: desde aquí se empieza a controlar el stock."}</p>
+            <fieldset class="pay"><legend>Tipo</legend>
+              <label class="pay-opt"><input type="radio" name="tipo" value="entrada" checked /> Entrada de mercancía</label>
+              <label class="pay-opt"><input type="radio" name="tipo" value="ajuste" /> Ajuste (conteo, rotura…) — puede ser negativo</label></fieldset>
+            <label class="field field-full"><span>Cajas *</span><input name="cajas" id="hCajas" inputmode="numeric" autocomplete="off" placeholder="ej. 20 (ajuste: -2)" /></label>
+            <label class="field field-full"><span>Nota</span><input name="nota" maxlength="200" autocomplete="off" placeholder="Factura del proveedor, motivo del ajuste…" /></label>`,
+          ok: "Guardar",
+          validar: (d2) => {
+            const n = Math.round(num(d2.cajas));
+            if (!n) return "Indicá la cantidad de cajas.";
+            if (d2.tipo === "entrada" && n < 0) return "Una entrada debe ser mayor que 0. Para restar elegí Ajuste.";
+            if (d2.tipo === "ajuste" && !d2.nota.trim()) return "Escribí el motivo del ajuste.";
+            return "";
+          },
+        });
+        if (!d) return;
+        try {
+          const res = await api("movimiento", { code: x.code, producto: x.producto, cajas: Math.round(num(d.cajas)), tipo: d.tipo, nota: d.nota.trim() });
+          toast(`${x.producto}: ${res.disponible} disponibles`);
+          SkalaAPI.catalogo(true).catch(() => {});
+          render();
+        } catch (e2) { toast(e2.message); }
+        return;
+      }
+      const val = (k) => (x[k] ? String(x[k]).replace(".", ",") : "");
+      const campo = (k, t, ph) => `<label class="field"><span>${t}</span><input name="${k}" inputmode="decimal" autocomplete="off" placeholder="${ph}" value="${val(k)}" /></label>`;
+      const d = await hoja({
+        titulo: `Precios · ${x.producto}`,
+        cuerpo: `<p class="modal-sub">En dólares por caja. Los descuentos se restan del precio menor o mayor según cómo pague.</p>
+          <div class="form-grid">${campo("menor", "Al por menor *", "menos de 15 cajas")}${campo("mayor", "Al mayor", "15 cajas o más")}
+          ${campo("desc_pronto", "Desc. pronto pago", "0")}${campo("desc_efectivo_credito", "Desc. efectivo a crédito", "0")}${campo("desc_efectivo_pronto", "Desc. efectivo pronto pago", "0")}</div>`,
+        ok: "Guardar precios",
+        validar: (d2) => {
+          const n = Object.fromEntries(Object.entries(d2).map(([k, t]) => [k, t.trim() === "" ? 0 : num(t)]));
+          if (Object.values(n).some((y) => !(y >= 0))) return "Revisá los montos: solo números (ej. 12,50).";
+          if (!n.menor) return "Falta el precio al por menor.";
+          if (n.mayor > n.menor) return "El precio al mayor no puede ser más alto que al por menor.";
+          return "";
+        },
+      });
+      if (!d) return;
+      try {
+        const datos = Object.fromEntries(Object.entries(d).map(([k, t]) => [k, t.trim() === "" ? 0 : num(t)]));
+        await api("guardarPrecio", { code: x.code, producto: x.producto, ...datos });
+        toast(`Precios de ${x.producto} guardados`);
+        SkalaAPI.catalogo(true).catch(() => {});
+        render();
+      } catch (e2) { toast(e2.message); }
+    });
+  }
+
   /* ---------- Usuarios (Master) ---------- */
   let cacheUsuarios = [];
   async function vUsuarios(v, _p, _q, vigente) {
@@ -1186,6 +1362,7 @@
     const r = u.rol;
     const items = [];
     if (TOMAN.includes(r)) items.push(["#/resumen", "Resumen", "Pedidos, cajas y productos más pedidos"]);
+    if (r === "master" || r === "admin") items.push(["#/inventario", "Inventario y precios", "Existencias, entradas de mercancía y los 5 precios"]);
     if (r === "master") items.push(["#/usuarios", "Usuarios", "Crear usuarios, claves, roles y activar"]);
     items.push(["index.html", "Ver catálogo", "La página que ven los clientes"]);
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);

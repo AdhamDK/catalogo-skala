@@ -33,6 +33,10 @@ function servidor() {
   gas.ctx.crearUsuario("ana", "Ana", "admin", "Ana*2222");
   gas.ctx.crearUsuario("oscar", "Óscar", "vendedor", "Oscar.1234");
   gas.ctx.crearUsuario("luis", "Luis", "despachador", "Luis5555");
+  // Precios ($ por caja: menor, mayor, desc. pronto, efectivo crédito, efectivo pronto) e inventario
+  const precio = (code, menor, mayor, a, b, c) => gas.ctx.accionGuardarPrecio_({ code, menor, mayor, desc_pronto: a, desc_efectivo_credito: b, desc_efectivo_pronto: c }, { nombre: "Prueba" });
+  precio("BC-01", 10, 8, 1, 3, 4); precio("BC-06", 12, 10, 1, 3, 4); precio("KT-01", 20, 18, 2, 6, 8); precio("KT-02", 20, 18, 2, 6, 8);
+  gas.ctx.accionMovimiento_({ code: "KT-02", cajas: 6 }, { nombre: "Prueba" });
 
   const srv = await servidor();
   const BASE = `http://127.0.0.1:${srv.address().port}`;
@@ -160,21 +164,30 @@ function servidor() {
 
   /* ---------- Paso 2: productos ---------- */
   assert.match(await page.innerText(".cliente-elegido"), /Peluquería Bella/);
-  assert.equal(await page.locator(".prod.elegido").count(), 2);
-  assert.equal(await page.innerText("#nTotal"), "3 cajas");
-  assert.equal(await page.locator(".prod").count(), 19);
+  assert.equal(await page.locator(".pcard.elegido").count(), 2);
+  await page.waitForFunction(() => /40,00 \$/.test(document.getElementById("nTotal").textContent));
+  assert.equal(await page.innerText("#nTotal"), "3 cajas · 40,00 $");
+  assert.equal(await page.locator(".pcard").count(), 19);
+  assert.equal(await page.innerText('.pcard[data-code="BC-01"] [data-precio]'), "10,00 $ / caja");
+  assert.equal(await page.innerText('.pcard[data-code="KT-02"] [data-stock]'), "Hay 6");
+  assert.match(await page.innerText("#nNivel"), /faltan 12 cajas para el precio al mayor/);
   await page.click('#nFiltros [data-f="elegidos"]');
-  assert.equal(await page.locator(".prod:not([hidden])").count(), 2);
+  assert.equal(await page.locator(".pcard:not([hidden])").count(), 2);
   await page.click('#nFiltros [data-f="todos"]');
   await page.fill("#nBuscar", "crespo");
-  assert.ok((await page.locator(".prod:not([hidden])").count()) >= 2);
+  assert.ok((await page.locator(".pcard:not([hidden])").count()) >= 2);
   await page.fill("#nBuscar", "");
-  await tocar('.prod[data-code="BC-06"] [data-act="plus"]');
-  await page.locator('.prod[data-code="KT-02"] .qty-input').fill("5");
-  assert.equal(await page.innerText("#nTotal"), "9 cajas");
+  await tocar('.pcard[data-code="BC-06"] .pcard-tap'); // tocar la tarjeta suma una caja
+  assert.equal(await page.innerText('.pcard[data-code="BC-06"] .pcard-n'), "1");
+  await page.locator('.pcard[data-code="KT-02"] .pcard-tap').click();
+  await page.locator('.pcard[data-code="KT-02"] .qty-input').fill("7"); // hay 6
+  await page.waitForSelector("#toast:not([hidden])");
+  assert.match(await page.innerText("#toast"), /Solo hay 6 cajas de Kit Aguacate/);
+  await page.locator('.pcard[data-code="KT-02"] .qty-input').fill("5");
+  assert.equal(await page.innerText("#nTotal"), "9 cajas · 152,00 $");
   await foto("02-nuevo");
   await revisarDiseno("productos");
-  ok("paso 2: lista rápida con el carrito del catálogo, buscar, filtrar, + / −");
+  ok("paso 2: cuadrícula (tocar suma), precio por caja, stock con tope, buscar y filtrar");
 
   /* ---------- Paso 3: enviar (nota o factura) ---------- */
   await tocar("#nSeguir");
@@ -188,7 +201,16 @@ function servidor() {
   await tocar("#btnEnviar");
   assert.match(await page.innerText("#eError"), /RIF o la cédula/);
   await page.fill("#eRif", "J-12345678-9");
-  await tocar('input[name="ePago"][value="Divisas · Crédito"]');
+  // Montos según cómo paga: crédito 152 · pronto 137 · efectivo crédito 107 · efectivo pronto 92
+  assert.deepEqual(await page.locator("#ePagos .pago-monto strong").allInnerTexts(), ["152,00 $", "137,00 $", "107,00 $", "92,00 $"]);
+  await tocar("#btnEnviar");
+  assert.match(await page.innerText("#eError"), /forma de pago/);
+  await tocar("#eMayor"); // excepción: precio al mayor
+  assert.deepEqual(await page.locator("#ePagos .pago-monto strong").allInnerTexts(), ["134,00 $", "119,00 $", "89,00 $", "74,00 $"]);
+  assert.match(await page.innerText("#eNivel"), /mayor por excepción/);
+  await tocar("#eMayor");
+  await tocar('input[name="ePago"][value="credito"]');
+  assert.match(await page.innerText("#eItems"), /2 × Babosa[\s\S]*10,00 \$ c\/u · 20,00 \$/);
   assert.ok(await page.locator("#eCredito").isVisible());
   await tocar("#btnEnviar");
   assert.match(await page.innerText("#eError"), /días de crédito/);
@@ -202,7 +224,10 @@ function servidor() {
   const msg = await page.inputValue("#lMensaje");
   assert.match(msg, /• 2 × Babosa \(BC-01\) = 12 unidades/);
   assert.match(msg, /• 5 × Kit Aguacate \(KT-02\) = 30 dúos/);
-  assert.match(msg, /Pago: Divisas · Crédito \(15 días\)\nDocumento: Factura/);
+  assert.match(msg, /\*Monto: 152,00 \$\* · precio al por menor/);
+  assert.match(msg, /Pago: Crédito \(15 días\)\nDocumento: Factura/);
+  assert.equal(gas.tabla("Pedidos")[0].total, 152);
+  assert.equal(gas.tabla("Pedidos")[0].tipo_pago, "credito");
   assert.match(msg, /RIF: J-12345678-9/);
   await page.click("#btnGrupo");
   assert.deepEqual(await page.evaluate(() => window.__compartido), [msg]);
@@ -251,7 +276,7 @@ function servidor() {
   await page.click("#btnPedirCliente");
   await esperarRuta("#/nuevo/productos");
   assert.match(await page.innerText(".cliente-elegido"), /Peluquería Bella/);
-  await tocar('.prod[data-code="BC-03"] [data-act="plus"]');
+  await tocar('.pcard[data-code="BC-03"] .pcard-tap');
   ok("clientes: lista, ficha con historial y nuevo pedido con el cliente ya elegido");
 
   /* ---------- Añadir cliente (traspaso de la base, sin pedido) ---------- */
@@ -321,6 +346,7 @@ function servidor() {
   ok("paso 1: buscar cliente existente, lápiz guarda los cambios en la hoja, cambiar cliente");
 
   /* ---------- Sin señal ---------- */
+  await tocar('input[name="ePago"][value="pronto"]');
   sinSenal = true;
   await tocar("#btnEnviar");
   await esperarRuta("#/nuevo/listo");
@@ -353,6 +379,29 @@ function servidor() {
   assert.match(await page.innerText(".datos"), /Despachador\s+Luis/);
   assert.equal(gas.tabla("Pedidos")[0].estado, "confirmado");
   ok("administración aprueba (Aprobado · Preparando despacho) y asigna despachador");
+  await page.goto(BASE + "/panel.html#/inventario");
+  await esperarRuta("#/inventario");
+  const kt = '.inv-fila[data-code="KT-02"]';
+  assert.match(await page.innerText(kt + " .inv-stock"), /^1\s+disponibles/); // 6 − 5 aprobadas
+  assert.match(await page.innerText('.inv-fila[data-code="BC-09"] .inv-stock'), /Sin cargar/);
+  await page.click(kt + ' [data-inv="entrada"]');
+  await page.click("#hojaOk");
+  assert.match(await page.innerText("#hojaError"), /cantidad/);
+  await page.fill("#hCajas", "10");
+  await page.click("#hojaOk");
+  await page.waitForFunction((s) => /^11/.test(document.querySelector(s + " .inv-stock")?.textContent || ""), kt);
+  await page.click('.inv-fila[data-code="BC-09"] [data-inv="precio"]');
+  await page.fill('#hoja input[name="menor"]', "9,5");
+  await page.fill('#hoja input[name="mayor"]', "10");
+  await page.click("#hojaOk");
+  assert.match(await page.innerText("#hojaError"), /mayor no puede/);
+  await page.fill('#hoja input[name="mayor"]', "8");
+  await page.click("#hojaOk");
+  await page.waitForFunction(() => /Menor 9,50 \$ · Mayor 8,00 \$/.test(document.querySelector('.inv-fila[data-code="BC-09"]')?.textContent || ""));
+  assert.equal(gas.tabla("Precios").find((x) => x.code === "BC-09").menor, 9.5);
+  await foto("07a-inventario");
+  await revisarDiseno("inventario");
+  ok("inventario: disponible = cargado − aprobado; entrada de mercancía y precios desde el panel");
   await salir();
 
   /* ---------- Despachador ---------- */
@@ -432,7 +481,14 @@ function servidor() {
   assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Marcar cancelado (pagado)"]);
   await page.click('[data-acc="cobrar"]');
   await page.waitForSelector("#hMonto");
-  assert.equal(await page.locator('#hoja input[name="moneda"][value="USD"]').isChecked(), true); // pago en divisas
+  assert.equal(await page.locator('#hoja input[name="moneda"][value="USD"]').isChecked(), true);
+  assert.equal(await page.locator('#hoja input[name="tipo_pago_real"][value="credito"]').isChecked(), true); // lo acordado
+  assert.equal(await page.inputValue("#hMonto"), "152");
+  await page.click('#hoja input[name="tipo_pago_real"][value="efectivo_pronto"]'); // pagó en efectivo antes del plazo
+  assert.equal(await page.inputValue("#hMonto"), "92");
+  assert.ok(await page.locator("#hProntoAviso").isVisible()); // la entrega fue hace 40 días
+  await foto("09b-forma-pago");
+  await page.fill("#hMonto", "");
   await page.click("#hojaOk");
   assert.match(await page.innerText("#hojaError"), /monto/);
   await page.fill("#hMonto", "1.120,50");
@@ -443,6 +499,9 @@ function servidor() {
   assert.equal(gas.tabla("Pedidos")[0].cobro, "cancelado");
   assert.equal(Number(gas.tabla("Pedidos")[0].monto), 1120.5);
   assert.equal(gas.tabla("Pedidos")[0].moneda, "USD");
+  assert.equal(gas.tabla("Pedidos")[0].tipo_pago_real, "efectivo_pronto");
+  assert.equal(gas.tabla("Pedidos")[0].total_final, 92);
+  assert.match(await page.innerText("#dMontoReal"), /Pagó como Efectivo pronto pago: 92,00 \$/);
   assert.match(await page.innerText(".datos"), /USD 1\.120,50/);
   await foto("09b-cancelado");
   await salir();
@@ -490,7 +549,7 @@ function servidor() {
   await esperarRuta("#/inicio");
   await page.click('.app-nav a[href="#/mas"]');
   await esperarRuta("#/mas");
-  assert.deepEqual(await page.locator(".menu-mas strong").allInnerTexts(), ["Resumen", "Usuarios", "Ver catálogo"]);
+  assert.deepEqual(await page.locator(".menu-mas strong").allInnerTexts(), ["Resumen", "Inventario y precios", "Usuarios", "Ver catálogo"]);
   await page.click('.menu-mas a[href="#/resumen"]');
   await esperarRuta("#/resumen");
   await page.waitForSelector(".stats .stat");

@@ -35,9 +35,13 @@ const pedir = (g, token, extra = {}) =>
 const idDe = (g, usuario) => g.tabla("Usuarios").find((u) => u.usuario === usuario).id;
 
 /* ---------- Hojas, usuarios, login ---------- */
-test("crea 5 hojas; Clientes empieza con las columnas de GPS_CLIENTES", () => {
+test("crea 7 hojas; Clientes empieza con las columnas de GPS_CLIENTES; Precios precargada", () => {
   const g = preparar();
-  assert.deepEqual(Object.keys(g.hojas).sort(), ["Clientes", "Historial", "PedidoItems", "Pedidos", "Usuarios"]);
+  assert.deepEqual(Object.keys(g.hojas).sort(), ["Clientes", "Historial", "Inventario", "PedidoItems", "Pedidos", "Precios", "Usuarios"]);
+  assert.equal(g.tabla("Precios").length, 19);
+  assert.deepEqual(g.tabla("Precios")[0], { code: "BC-01", producto: "Babosa", menor: "", mayor: "", desc_pronto: "", desc_efectivo_credito: "", desc_efectivo_pronto: "", updated_at: "", updated_por: "" });
+  g.ctx.prepararHojas(); // no duplica
+  assert.equal(g.tabla("Precios").length, 19);
   assert.deepEqual(g.tabla("Clientes").length, 0);
   assert.deepEqual(g.hojas.Clientes.filas[0].slice(0, 10),
     ["id", "nombre", "rif_cedula", "direccion", "latitud", "longitud", "telefono", "updated_at", "sync_status", "deleted"]);
@@ -337,7 +341,7 @@ test("acción desconocida, JSON inválido y GET de salud", () => {
   const g = preparar();
   assert.equal(g.post({ action: "borrarTodo" }).code, "unknown_action");
   assert.equal(JSON.parse(g.ctx.doPost({ postData: { contents: "{no" } }).getContent()).code, "bad_json");
-  assert.deepEqual(g.get({}), { ok: true, app: "skala-crm", version: 2, claves: true });
+  assert.deepEqual(g.get({}), { ok: true, app: "skala-crm", version: 3, claves: true, precios: true });
 });
 
 test("GPS_CLIENTES puede escribir las 10 primeras columnas sin borrar las extra", () => {
@@ -543,4 +547,130 @@ test("conciliados del período: solo cobros conciliados, cada rol ve lo suyo", (
   assert.deepEqual(ids(tv, 30), [a]);
   g.setAhora("2026-12-20T12:00:00Z");
   assert.deepEqual(ids(login(g, "ana", "Ana*2222"), 7), []); // fuera del período
+});
+
+/* ---------- Precios e inventario (v3) ---------- */
+function conPrecios(g) {
+  const tk = login(g, "ana", "Ana*2222");
+  // Babosa: menor 10, mayor 8, descuentos 1 / 3 / 4 · Kit: menor 20, mayor 18, descuentos 2 / 6 / 8
+  assert.equal(g.post({ action: "guardarPrecio", token: tk, code: "BC-01", menor: "10", mayor: "8", desc_pronto: 1, desc_efectivo_credito: 3, desc_efectivo_pronto: 4 }).ok, true);
+  assert.equal(g.post({ action: "guardarPrecio", token: tk, code: "KT-01", menor: 20, mayor: "18,00", desc_pronto: 2, desc_efectivo_credito: 6, desc_efectivo_pronto: 8 }).ok, true);
+  return tk;
+}
+
+test("precios: solo gestión los edita; validaciones; catálogo público con precios", () => {
+  const g = preparar();
+  const tv = login(g);
+  assert.equal(g.post({ action: "guardarPrecio", token: tv, code: "BC-01", menor: 10 }).code, "forbidden");
+  const ta = conPrecios(g);
+  assert.match(g.post({ action: "guardarPrecio", token: ta, code: "BC-02", menor: 5, mayor: 6 }).error, /mayor no puede/);
+  assert.match(g.post({ action: "guardarPrecio", token: ta, code: "BC-02", menor: "" }).error, /por menor/);
+  assert.match(g.post({ action: "guardarPrecio", token: ta, code: "BC-02", menor: 5, desc_pronto: -1 }).error, /Revisá/);
+  const fila = g.tabla("Precios").find((x) => x.code === "BC-01");
+  assert.equal(fila.menor, 10); assert.equal(fila.updated_por, "Ana");
+  assert.equal(g.tabla("Precios").length, 19); // actualiza la fila, no agrega
+  const pub = g.post({ action: "catalogo" });
+  assert.equal(pub.ok, true);
+  const b = pub.productos.find((x) => x.code === "BC-01");
+  assert.deepEqual(b, { code: "BC-01", menor: 10, mayor: 8, desc_pronto: 1, desc_efectivo_credito: 3, desc_efectivo_pronto: 4, agotado: false });
+  assert.equal(pub.cajas_mayor, 15);
+  assert.deepEqual(pub.pagos.map((x) => x.id), ["credito", "pronto", "efectivo_credito", "efectivo_pronto"]);
+  // con sesión trae existencias
+  const conSes = g.post({ action: "catalogo", token: tv }).productos.find((x) => x.code === "BC-01");
+  assert.equal(conSes.controlado, false); assert.equal(conSes.disponible, null);
+});
+
+test("pedido con precios: menor < 15 cajas, mayor desde 15, excepción del vendedor, total según pago", () => {
+  const g = preparar();
+  conPrecios(g);
+  const tk = login(g);
+  // 2 Babosa + 1 Kit = 3 cajas · menor: 2×10 + 20 = 40 · Crédito 8 días
+  let r = pedir(g, tk, { tipo_pago: "credito", dias_credito: 8 });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.pedido.nivel_precio, "menor");
+  assert.equal(r.pedido.total, 40);
+  assert.equal(r.pedido.pago, "Crédito");
+  assert.deepEqual(r.pedido.items.map((it) => it.precio), [10, 20]);
+  assert.equal(g.tabla("PedidoItems")[0].desc_efectivo_pronto, 4);
+  // Efectivo pronto pago: 2×(10−4) + (20−8) = 24
+  r = pedir(g, tk, { tipo_pago: "efectivo_pronto" });
+  assert.equal(r.pedido.total, 24); assert.equal(r.pedido.dias_credito, 0);
+  // Excepción: precio mayor con 3 cajas → 2×8 + 18 = 34
+  r = pedir(g, tk, { tipo_pago: "credito", dias_credito: 15, precio_mayor: true });
+  assert.equal(r.pedido.nivel_precio, "mayor"); assert.equal(r.pedido.excepcion_precio, true); assert.equal(r.pedido.total, 34);
+  assert.match(g.tabla("Historial").at(-1).detalle, /precio mayor por excepción/);
+  // 15 cajas → mayor sin excepción
+  r = pedir(g, tk, { tipo_pago: "pronto", items: [{ code: "BC-01", producto: "Babosa", cajas: 15, unidades_caja: 6 }] });
+  assert.equal(r.pedido.nivel_precio, "mayor"); assert.equal(r.pedido.excepcion_precio, false);
+  assert.equal(r.pedido.total, 15 * (8 - 1));
+  // Crédito exige días; tipo inválido cae al texto
+  assert.equal(pedir(g, tk, { tipo_pago: "efectivo_credito" }).code, "credito");
+  r = pedir(g, tk, { pago: "Divisas · Contado" });
+  assert.equal(r.pedido.tipo_pago, "pronto"); assert.equal(r.pedido.pago, "Divisas · Contado");
+});
+
+test("producto sin precio cargado: total 0 y no falla", () => {
+  const g = preparar();
+  const tk = login(g);
+  const r = pedir(g, tk, { tipo_pago: "pronto" });
+  assert.equal(r.ok, true); assert.equal(r.pedido.total, 0);
+});
+
+test("inventario: entradas y ajustes; aprobar aparta stock; anular lo devuelve; no se pide más de lo que hay", () => {
+  const g = preparar();
+  const ta = conPrecios(g);
+  const tv = login(g);
+  assert.equal(g.post({ action: "movimiento", token: tv, code: "BC-01", cajas: 5 }).code, "forbidden");
+  assert.match(g.post({ action: "movimiento", token: ta, code: "BC-01", cajas: -2 }).error, /Ajuste/);
+  assert.match(g.post({ action: "movimiento", token: ta, code: "BC-01", cajas: -2, tipo: "ajuste" }).error, /motivo/);
+  assert.equal(g.post({ action: "movimiento", token: ta, code: "bc-01", cajas: 5 }).disponible, 5);
+  assert.equal(g.post({ action: "movimiento", token: ta, code: "BC-01", cajas: -1, tipo: "ajuste", nota: "rota" }).disponible, 4);
+  assert.equal(g.tabla("Inventario")[0].producto, "Babosa");
+  // Kit sin movimientos: no se controla
+  const p1 = pedir(g, tv, { tipo_pago: "pronto", items: [{ code: "BC-01", producto: "Babosa", cajas: 3 }, { code: "KT-01", producto: "Kit", cajas: 50 }] });
+  assert.equal(p1.ok, true, JSON.stringify(p1));
+  const p2 = pedir(g, tv, { tipo_pago: "pronto", items: [{ code: "BC-01", producto: "Babosa", cajas: 3 }] });
+  assert.equal(p2.ok, true); // en proceso no aparta
+  let inv = g.post({ action: "inventario", token: ta });
+  let b = inv.productos.find((x) => x.code === "BC-01");
+  assert.deepEqual([b.cargado, b.aprobado, b.en_proceso, b.disponible, b.controlado], [4, 0, 6, 4, true]);
+  assert.equal(inv.movimientos.length, 2);
+  assert.match(pedir(g, tv, { tipo_pago: "pronto", items: [{ code: "BC-01", producto: "Babosa", cajas: 5 }] }).error, /Sin stock suficiente: Babosa \(BC-01\): pediste 5, hay 4/);
+  const luis = idDe(g, "luis");
+  assert.equal(g.post({ action: "estado", token: ta, pedido_id: p1.pedido.id, estado: "confirmado", despachador_id: luis }).ok, true);
+  b = g.post({ action: "inventario", token: ta }).productos.find((x) => x.code === "BC-01");
+  assert.deepEqual([b.aprobado, b.en_proceso, b.disponible], [3, 3, 1]);
+  // El segundo ya no alcanza al aprobar
+  const r = g.post({ action: "estado", token: ta, pedido_id: p2.pedido.id, estado: "confirmado", despachador_id: luis });
+  assert.equal(r.code, "stock"); assert.match(r.error, /hay 1/);
+  // Público: agotado cuando no queda
+  g.post({ action: "movimiento", token: ta, code: "BC-01", cajas: -1, tipo: "ajuste", nota: "conteo" });
+  assert.equal(g.post({ action: "catalogo" }).productos.find((x) => x.code === "BC-01").agotado, true);
+  assert.equal(g.post({ action: "catalogo", token: tv }).productos.find((x) => x.code === "BC-01").disponible, 0);
+  // Anular el aprobado devuelve el stock
+  g.post({ action: "estado", token: ta, pedido_id: p1.pedido.id, estado: "cancelado", motivo: "prueba" });
+  b = g.post({ action: "inventario", token: ta }).productos.find((x) => x.code === "BC-01");
+  assert.equal(b.disponible, 3);
+  assert.equal(g.post({ action: "estado", token: ta, pedido_id: p2.pedido.id, estado: "confirmado", despachador_id: luis }).ok, true);
+});
+
+test("cobro con otro método de pago: recalcula el total final con el descuento", () => {
+  const g = preparar();
+  const ta = conPrecios(g);
+  const tv = login(g);
+  const p = pedir(g, tv, { tipo_pago: "credito", dias_credito: 8 }).pedido; // total 40
+  const luis = idDe(g, "luis");
+  g.post({ action: "estado", token: ta, pedido_id: p.id, estado: "confirmado", despachador_id: luis });
+  g.post({ action: "estado", token: login(g, "luis", "Luis5555"), pedido_id: p.id, estado: "entregado" });
+  // Pagó en efectivo de contado: 2×(10−4) + (20−8) = 24
+  let r = g.post({ action: "cobro", token: tv, pedido_id: p.id, accion: "cancelar", tipo_pago_real: "efectivo_pronto", monto: 24, moneda: "USD" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.pedido.tipo_pago_real, "efectivo_pronto"); assert.equal(r.pedido.total_final, 24);
+  assert.equal(r.pedido.total, 40); // lo acordado queda
+  assert.match(g.tabla("Historial").at(-1).detalle, /Pagó como Efectivo pronto pago \(total 24 \$\) · 24 USD/);
+  // Rechazo limpia; conciliar directo sin método usa el acordado
+  g.post({ action: "cobro", token: ta, pedido_id: p.id, accion: "rechazar", motivo: "no" });
+  assert.equal(g.tabla("Pedidos")[0].total_final, "");
+  r = g.post({ action: "cobro", token: ta, pedido_id: p.id, accion: "conciliar", monto: 40, moneda: "USD" });
+  assert.equal(r.pedido.tipo_pago_real, "credito"); assert.equal(r.pedido.total_final, 40);
 });

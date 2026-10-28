@@ -85,5 +85,25 @@ const SkalaAPI = (function () {
     return subidos;
   }
 
-  return { api, sesion, guardarSesion, cerrarSesion, ErrorRed, cola, encolar, subirCola, leerLS, guardarLS, borrarLS };
+  /* ---------- Precios y existencias (acción "catalogo"), guardados en el teléfono ---------- */
+  const K_CATALOGO = "skala_catalogo_v1";
+  const catalogoGuardado = () => (leerLS(K_CATALOGO, null) || {}).d || null;
+  async function catalogo(forzar) {
+    const c = leerLS(K_CATALOGO, null);
+    const conSesion = !!sesion();
+    // con sesión se pide de nuevo si lo guardado era público (sin existencias)
+    if (!forzar && c && Date.now() - c.t < 10 * 60000 && (!conSesion || c.s)) return c.d;
+    try {
+      const d = await api("catalogo");
+      guardarLS(K_CATALOGO, { t: Date.now(), s: conSesion, d });
+      return d;
+    } catch (e) {
+      if (c) return c.d;
+      throw e;
+    }
+  }
+  /* { code: {menor, mayor, ..., disponible} } */
+  const preciosMapa = (d) => Object.fromEntries(((d && d.productos) || []).map((p) => [p.code, p]));
+
+  return { catalogo, catalogoGuardado, preciosMapa, api, sesion, guardarSesion, cerrarSesion, ErrorRed, cola, encolar, subirCola, leerLS, guardarLS, borrarLS };
 })();

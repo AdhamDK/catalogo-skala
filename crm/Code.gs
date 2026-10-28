@@ -1,5 +1,5 @@
 /* ============================================================
-   Skala CRM v2 — Backend en Google Apps Script (Google Sheets)
+   Skala CRM v3 — Backend en Google Apps Script (Google Sheets)
    Roles: master · admin (administración) · vendedor · despachador
    Instalación: ver crm/INSTALAR.md
    - En la hoja: Extensiones -> Apps Script -> BORRAR todo y pegar este archivo.
@@ -26,6 +26,36 @@ function montoValido_(v) {
   return isFinite(n) && n > 0 && n < 1e9 ? Math.round(n * 100) / 100 : 0;
 }
 var esCredito_ = function (pago) { return /cr[eé]dito/i.test(String(pago || '')); };
+
+/* -------------------- Precios --------------------
+   Hoja Precios: por producto, precio Menor y Mayor ($ por caja) + 3 descuentos en $ por caja.
+   Nivel: Mayor desde CAJAS_MAYOR cajas (o excepción del vendedor). El descuento depende de cómo paga. */
+var CAJAS_MAYOR = 15;
+var PAGOS = [
+  { id: 'credito', nombre: 'Crédito', credito: true, desc: '' },
+  { id: 'pronto', nombre: 'Pronto pago', credito: false, desc: 'desc_pronto' },
+  { id: 'efectivo_credito', nombre: 'Efectivo a crédito', credito: true, desc: 'desc_efectivo_credito' },
+  { id: 'efectivo_pronto', nombre: 'Efectivo pronto pago', credito: false, desc: 'desc_efectivo_pronto' }
+];
+function pagoPorId_(id) { return PAGOS.filter(function (x) { return x.id === id; })[0] || null; }
+/* Pedidos viejos (texto libre como "Divisas · Contado") -> tipo de pago */
+function tipoPagoDe_(pago) {
+  var t = String(pago || '').toLowerCase();
+  var ef = /efectivo/.test(t), cred = /cr[eé]dito/.test(t);
+  if (ef) return cred ? 'efectivo_credito' : 'efectivo_pronto';
+  return cred ? 'credito' : 'pronto';
+}
+var r2_ = function (n) { return Math.round((Number(n) || 0) * 100) / 100; };
+function numPrecio_(v) { var n = Number(String(v === undefined || v === null ? '' : v).replace(',', '.')); return isFinite(n) && n > 0 ? r2_(n) : 0; }
+/* Productos que se precargan en Precios (mismos códigos que js/datos.js) */
+var PRODUCTOS_BASE = [
+  ['BC-01', 'Babosa'], ['BC-02', 'Banana e Macuri'], ['BC-03', 'Divino Potao'], ['BC-04', 'Divino Potinho Kids'],
+  ['BC-05', 'Dona Skala'], ['BC-06', 'Mais Cachos'], ['BC-07', 'Mais Crespinhos'], ['BC-08', 'Mais Crespos'],
+  ['BC-09', 'Mais Lisos'], ['BC-10', 'Potao de Amor'], ['BC-11', 'Potao Despaiado'],
+  ['KT-01', 'Kit 12 em 1'], ['KT-02', 'Kit Aguacate'], ['KT-03', 'Kit Babosa'], ['KT-04', 'Kit Bomba de Vitaminas S.O.S'],
+  ['KT-05', 'Kit Ceramidas'], ['KT-06', 'Kit Crespo Divino'], ['KT-07', 'Kit Mais Crespinhos'], ['KT-08', 'Kit Mais Cachos']
+];
+var ESTADOS_CON_STOCK = ['confirmado', 'en_ruta', 'entregado']; // aprobados: ya apartan mercancía
 var GESTION = ['master', 'admin'];          // ven y corrigen todo
 var TOMAN_PEDIDOS = ['master', 'admin', 'vendedor'];
 
@@ -41,15 +71,20 @@ var HOJAS = {
             'despachador_id', 'despachador', 'confirmado_por', 'confirmado_at',
             'entregado_por', 'entregado_at', 'documento',
             'dias_credito', 'cobro', 'cobrado_at', 'cobrado_por', 'conciliado_at', 'conciliado_por',
-            'monto', 'moneda'],
-  PedidoItems: ['pedido_id', 'code', 'producto', 'cajas', 'unidades_caja', 'unidad', 'total_unidades'],
-  Historial: ['fecha', 'pedido_id', 'usuario', 'accion', 'detalle']
+            'monto', 'moneda',
+            'nivel_precio', 'excepcion_precio', 'tipo_pago', 'total', 'tipo_pago_real', 'total_final'],
+  PedidoItems: ['pedido_id', 'code', 'producto', 'cajas', 'unidades_caja', 'unidad', 'total_unidades',
+                'precio', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto'],
+  Historial: ['fecha', 'pedido_id', 'usuario', 'accion', 'detalle'],
+  Precios: ['code', 'producto', 'menor', 'mayor', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto', 'updated_at', 'updated_por'],
+  // Entradas de mercancía y ajustes (positivo o negativo). Lo aprobado se descuenta solo.
+  Inventario: ['fecha', 'code', 'producto', 'cajas', 'tipo', 'nota', 'usuario']
 };
 
 /* -------------------- Entradas HTTP -------------------- */
 function doGet(e) {
   var p = (e && e.parameter) || {};
-  if (!p.action) return json_({ ok: true, app: 'skala-crm', version: 2, claves: true });
+  if (!p.action) return json_({ ok: true, app: 'skala-crm', version: 3, claves: true, precios: true });
   return json_(manejar_(p));
 }
 
@@ -76,6 +111,10 @@ var ACCIONES = {
   pedido: [accionPedido_, ROLES],
   estado: [accionEstado_, ROLES],
   cobro: [accionCobro_, TOMAN_PEDIDOS],
+  catalogo: [accionCatalogo_, null],          // precios (público); con sesión también existencias
+  inventario: [accionInventario_, GESTION],
+  movimiento: [accionMovimiento_, GESTION],
+  guardarPrecio: [accionGuardarPrecio_, GESTION],
   despachadores: [accionDespachadores_, GESTION],
   resumen: [accionResumen_, TOMAN_PEDIDOS],
   usuarios: [accionUsuarios_, ['master']],
@@ -413,10 +452,167 @@ function pedidoConItems_(ped, items) {
   o.total_cajas = Number(o.total_cajas);
   o.dias_credito = Number(o.dias_credito) || 0;
   o.monto = o.monto === '' || o.monto === undefined ? '' : Number(o.monto);
+  o.total = o.total === '' || o.total === undefined ? '' : Number(o.total);
+  o.total_final = o.total_final === '' || o.total_final === undefined ? '' : Number(o.total_final);
+  o.tipo_pago = String(o.tipo_pago || '') || tipoPagoDe_(o.pago);
+  o.excepcion_precio = o.excepcion_precio === true || String(o.excepcion_precio) === 'true';
   o.items = items.filter(function (it) { return String(it.pedido_id) === String(ped.id); }).map(function (it) {
-    return { code: it.code, producto: it.producto, cajas: Number(it.cajas), unidades_caja: it.unidades_caja === '' ? '' : Number(it.unidades_caja), unidad: it.unidad, total_unidades: it.total_unidades === '' ? '' : Number(it.total_unidades) };
+    return { code: it.code, producto: it.producto, cajas: Number(it.cajas), unidades_caja: it.unidades_caja === '' ? '' : Number(it.unidades_caja), unidad: it.unidad, total_unidades: it.total_unidades === '' ? '' : Number(it.total_unidades),
+      precio: Number(it.precio) || 0, desc_pronto: Number(it.desc_pronto) || 0, desc_efectivo_credito: Number(it.desc_efectivo_credito) || 0, desc_efectivo_pronto: Number(it.desc_efectivo_pronto) || 0 };
   });
   return o;
+}
+
+/* -------------------- Precios e inventario -------------------- */
+function tablaPrecios_() {
+  var m = {};
+  leer_('Precios').forEach(function (x) {
+    var code = String(x.code).trim().toUpperCase();
+    if (!code) return;
+    m[code] = { code: code, producto: String(x.producto), menor: numPrecio_(x.menor), mayor: numPrecio_(x.mayor),
+      desc_pronto: numPrecio_(x.desc_pronto), desc_efectivo_credito: numPrecio_(x.desc_efectivo_credito), desc_efectivo_pronto: numPrecio_(x.desc_efectivo_pronto), _fila: x._fila };
+  });
+  return m;
+}
+
+/* Pone precio (según nivel) y descuentos a cada item. Si falta el precio Mayor se usa el Menor. */
+function ponerPrecios_(items, precios, mayor) {
+  items.forEach(function (it) {
+    var pr = precios[it.code] || {};
+    it.precio = mayor ? (pr.mayor || pr.menor || 0) : (pr.menor || 0);
+    it.desc_pronto = pr.desc_pronto || 0;
+    it.desc_efectivo_credito = pr.desc_efectivo_credito || 0;
+    it.desc_efectivo_pronto = pr.desc_efectivo_pronto || 0;
+  });
+  return items;
+}
+
+/* Total del pedido según cómo paga (el descuento nunca deja la caja por debajo de 0) */
+function totalPorPago_(items, tipo) {
+  var pg = pagoPorId_(tipo) || PAGOS[0];
+  return r2_(items.reduce(function (a, it) {
+    var unit = Number(it.precio) || 0;
+    var d = pg.desc ? Number(it[pg.desc]) || 0 : 0;
+    return a + (Number(it.cajas) || 0) * Math.max(0, unit - d);
+  }, 0));
+}
+
+/* Existencias por producto. controlado = tiene al menos un movimiento cargado. */
+function existencias_(pedidos, items) {
+  var st = {};
+  var de = function (code) { return st[code] || (st[code] = { code: code, cargado: 0, aprobado: 0, en_proceso: 0, controlado: false }); };
+  leer_('Inventario').forEach(function (m) {
+    var code = String(m.code).trim().toUpperCase();
+    if (!code) return;
+    var x = de(code); x.cargado += Math.round(Number(m.cajas) || 0); x.controlado = true;
+  });
+  var estado = {};
+  (pedidos || leer_('Pedidos')).forEach(function (p) { estado[String(p.id)] = String(p.estado); });
+  (items || leer_('PedidoItems')).forEach(function (it) {
+    var e = estado[String(it.pedido_id)];
+    if (!e) return;
+    var x = de(String(it.code).toUpperCase());
+    if (ESTADOS_CON_STOCK.indexOf(e) !== -1) x.aprobado += Number(it.cajas) || 0;
+    else if (e === 'pendiente') x.en_proceso += Number(it.cajas) || 0;
+  });
+  Object.keys(st).forEach(function (k) { st[k].disponible = st[k].cargado - st[k].aprobado; });
+  return st;
+}
+
+/* Revisa que alcance el stock. Devuelve '' o el mensaje con lo que falta. */
+function faltaStock_(items, stock) {
+  var faltan = [];
+  items.forEach(function (it) {
+    var s = stock[String(it.code).toUpperCase()];
+    if (s && s.controlado && Number(it.cajas) > s.disponible) faltan.push(it.producto + ' (' + it.code + '): pediste ' + it.cajas + ', hay ' + Math.max(0, s.disponible));
+  });
+  return faltan.length ? 'Sin stock suficiente: ' + faltan.join(' · ') : '';
+}
+
+function accionCatalogo_(p) {
+  var ses = p.token ? verificarToken_(p.token) : null;
+  var precios = tablaPrecios_();
+  var stock = existencias_();
+  var codes = {};
+  PRODUCTOS_BASE.forEach(function (b) { codes[b[0]] = b[1]; });
+  Object.keys(precios).forEach(function (k) { codes[k] = codes[k] || precios[k].producto; });
+  var productos = Object.keys(codes).sort().map(function (code) {
+    var pr = precios[code] || {}, s = stock[code];
+    var o = { code: code, menor: pr.menor || 0, mayor: pr.mayor || pr.menor || 0, desc_pronto: pr.desc_pronto || 0,
+      desc_efectivo_credito: pr.desc_efectivo_credito || 0, desc_efectivo_pronto: pr.desc_efectivo_pronto || 0,
+      agotado: !!(s && s.controlado && s.disponible <= 0) };
+    if (ses) { o.controlado = !!(s && s.controlado); o.disponible = s && s.controlado ? Math.max(0, s.disponible) : null; o.en_proceso = s ? s.en_proceso : 0; }
+    return o;
+  });
+  return { ok: true, actualizado: ahora_(), cajas_mayor: CAJAS_MAYOR, pagos: PAGOS.map(function (x) { return { id: x.id, nombre: x.nombre, credito: x.credito, desc: x.desc }; }), productos: productos };
+}
+
+function accionInventario_(p) {
+  var precios = tablaPrecios_();
+  var stock = existencias_();
+  var movs = leer_('Inventario').map(function (m) { return { fecha: String(m.fecha), code: String(m.code), producto: String(m.producto), cajas: Number(m.cajas) || 0, tipo: String(m.tipo), nota: String(m.nota), usuario: String(m.usuario) }; });
+  movs.sort(function (a, b) { return b.fecha.localeCompare(a.fecha); });
+  var codes = {};
+  PRODUCTOS_BASE.forEach(function (b) { codes[b[0]] = b[1]; });
+  Object.keys(precios).forEach(function (k) { codes[k] = codes[k] || precios[k].producto; });
+  Object.keys(stock).forEach(function (k) { codes[k] = codes[k] || k; });
+  return { ok: true, productos: Object.keys(codes).sort().map(function (code) {
+    var s = stock[code] || { cargado: 0, aprobado: 0, en_proceso: 0, disponible: 0, controlado: false };
+    var pr = precios[code] || {};
+    return { code: code, producto: (precios[code] && precios[code].producto) || codes[code], cargado: s.cargado, aprobado: s.aprobado, en_proceso: s.en_proceso, disponible: s.disponible, controlado: s.controlado,
+      menor: pr.menor || 0, mayor: pr.mayor || 0, desc_pronto: pr.desc_pronto || 0, desc_efectivo_credito: pr.desc_efectivo_credito || 0, desc_efectivo_pronto: pr.desc_efectivo_pronto || 0 };
+  }), movimientos: movs.slice(0, Math.min(Math.max(Number(p.limite) || 50, 1), 500)) };
+}
+
+/* Entrada de mercancía (cajas > 0) o ajuste (+/-, con nota) */
+function accionMovimiento_(p, ses) {
+  var code = txt_(p.code, 20).toUpperCase();
+  var cajas = Math.round(Number(p.cajas));
+  var tipo = p.tipo === 'ajuste' ? 'ajuste' : 'entrada';
+  var nota = txt_(p.nota, 200);
+  if (!code) return { ok: false, error: 'Elegí el producto.', code: 'producto' };
+  if (!isFinite(cajas) || cajas === 0 || Math.abs(cajas) > 100000) return { ok: false, error: 'Indicá la cantidad de cajas.', code: 'cajas' };
+  if (tipo === 'entrada' && cajas < 0) return { ok: false, error: 'Una entrada debe ser mayor que 0. Para restar usá Ajuste.', code: 'cajas' };
+  if (tipo === 'ajuste' && !nota) return { ok: false, error: 'Indicá el motivo del ajuste.', code: 'nota' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var base = {}; PRODUCTOS_BASE.forEach(function (b) { base[b[0]] = b[1]; });
+    var pr = tablaPrecios_()[code];
+    var nombre = (pr && pr.producto) || base[code] || txt_(p.producto, 120) || code;
+    agregar_('Inventario', { fecha: ahora_(), code: code, producto: nombre, cajas: cajas, tipo: tipo, nota: nota, usuario: ses.nombre });
+    var s = existencias_()[code];
+    return { ok: true, disponible: s ? s.disponible : cajas };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function accionGuardarPrecio_(p, ses) {
+  var code = txt_(p.code, 20).toUpperCase();
+  if (!code) return { ok: false, error: 'Elegí el producto.', code: 'producto' };
+  var campos = ['menor', 'mayor', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto'];
+  var vals = {};
+  for (var i = 0; i < campos.length; i++) {
+    var v = p[campos[i]];
+    var n = v === '' || v === undefined || v === null ? 0 : Number(String(v).replace(',', '.'));
+    if (!isFinite(n) || n < 0 || n > 1e7) return { ok: false, error: 'Revisá los montos (números de 0 en adelante).', code: 'precio' };
+    vals[campos[i]] = r2_(n);
+  }
+  if (!vals.menor) return { ok: false, error: 'Falta el precio al por menor.', code: 'precio' };
+  if (vals.mayor > vals.menor) return { ok: false, error: 'El precio al mayor no puede ser más alto que al por menor.', code: 'precio' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var tabla = tablaPrecios_();
+    var base = {}; PRODUCTOS_BASE.forEach(function (b) { base[b[0]] = b[1]; });
+    var fila = { code: code, producto: (tabla[code] && tabla[code].producto) || base[code] || txt_(p.producto, 120) || code, updated_at: ahora_(), updated_por: ses.nombre };
+    campos.forEach(function (c) { fila[c] = vals[c]; });
+    if (tabla[code]) actualizar_('Precios', tabla[code]._fila, fila); else agregar_('Precios', fila);
+    return { ok: true, precio: fila };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function accionGuardarPedido_(p, ses) {
@@ -424,9 +620,13 @@ function accionGuardarPedido_(p, ses) {
   if (!items.length) return { ok: false, error: 'El pedido no tiene productos.', code: 'empty' };
   var documento = txt_(p.documento, 30);
   if (DOCUMENTOS.indexOf(documento) === -1) return { ok: false, error: 'Indicá si el cliente quiere nota de entrega o factura.', code: 'documento' };
+  // Tipo de pago (nuevo) o texto libre (versiones anteriores / sin señal)
+  var tipoPago = pagoPorId_(String(p.tipo_pago || '')) ? String(p.tipo_pago) : tipoPagoDe_(p.pago);
+  var pagoDef = pagoPorId_(tipoPago);
+  var pagoTexto = p.tipo_pago ? pagoDef.nombre : (txt_(p.pago, 40) || pagoDef.nombre);
   // Crédito: hay que indicar los días (se cuentan desde la entrega)
   var diasCredito = 0;
-  if (esCredito_(p.pago)) {
+  if (pagoDef.credito) {
     diasCredito = Math.floor(Number(p.dias_credito));
     if (!isFinite(diasCredito) || diasCredito < 1 || diasCredito > MAX_DIAS_CREDITO) {
       return { ok: false, error: 'Indicá los días de crédito (1 a ' + MAX_DIAS_CREDITO + ').', code: 'credito' };
@@ -454,19 +654,28 @@ function accionGuardarPedido_(p, ses) {
       }
       if (soloDigitos_(rifCliente).length < 6) return { ok: false, error: 'Para factura hace falta el RIF o la cédula del cliente.', code: 'rif' };
     }
+    var pItems = leer_('PedidoItems');
+    var sinStock = faltaStock_(items, existencias_(pedidos, pItems));
+    if (sinStock) return { ok: false, error: sinStock, code: 'stock' };
     var cliente;
     try { cliente = guardarCliente_(p.cliente || {}, ses); }
     catch (err) { return { ok: false, error: err.message, code: 'cliente' }; }
 
+    var totalCajas = items.reduce(function (a, it) { return a + it.cajas; }, 0);
+    var excepcion = p.precio_mayor === true && totalCajas < CAJAS_MAYOR;
+    var mayor = totalCajas >= CAJAS_MAYOR || excepcion;
+    ponerPrecios_(items, tablaPrecios_(), mayor);
     var t = ahora_();
     var ped = {
       id: nuevoIdPedido_(pedidos),
       fecha: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm'),
       vendedor_id: ses.id, vendedor: ses.nombre,
       cliente_id: cliente.id, cliente: cliente.contacto || cliente.nombre, negocio: cliente.nombre,
-      total_cajas: items.reduce(function (a, it) { return a + it.cajas; }, 0),
+      total_cajas: totalCajas,
       detalle_unidades: detalleUnidades_(items),
-      pago: txt_(p.pago, 40), nota: txt_(p.nota, 300), documento: documento,
+      pago: pagoTexto, tipo_pago: tipoPago, nivel_precio: mayor ? 'mayor' : 'menor', excepcion_precio: excepcion,
+      total: totalPorPago_(items, tipoPago),
+      nota: txt_(p.nota, 300), documento: documento,
       dias_credito: diasCredito, cobro: '',
       estado: 'pendiente', estado_at: t, estado_por: ses.nombre, motivo: '',
       client_ref: ref, created_at: t, updated_at: t
@@ -475,7 +684,7 @@ function accionGuardarPedido_(p, ses) {
     var filas = items.map(function (it) { it.pedido_id = ped.id; return filaDe_('PedidoItems', it); });
     var hItems = hoja_('PedidoItems');
     hItems.getRange(hItems.getLastRow() + 1, 1, filas.length, HOJAS.PedidoItems.length).setValues(filas);
-    historial_(ped.id, ses, 'creado', ped.total_cajas + ' cajas · ' + ped.negocio);
+    historial_(ped.id, ses, 'creado', ped.total_cajas + ' cajas · ' + ped.negocio + (ped.total ? ' · ' + ped.total + ' $ (' + pagoTexto + ')' : '') + (excepcion ? ' · precio mayor por excepción' : ''));
     return { ok: true, pedido: pedidoConItems_(ped, items), cliente_id: cliente.id, cliente: clientePublico_(cliente) };
   } finally {
     lock.releaseLock();
@@ -549,11 +758,21 @@ function accionCobro_(p, ses) {
     var t = ahora_(), detalle = '';
     var monto = montoValido_(p.monto);
     var moneda = MONEDAS.indexOf(String(p.moneda)) !== -1 ? String(p.moneda) : '';
+    // Cómo pagó de verdad (puede cambiar el descuento: ej. era crédito y pagó en efectivo al contado)
+    var real = pagoPorId_(String(p.tipo_pago_real || ''));
+    var ponerReal = function () {
+      var tipo = real ? real.id : (String(ped.tipo_pago_real || '') || String(ped.tipo_pago || '') || tipoPagoDe_(ped.pago));
+      var its = pedidoConItems_(ped, leer_('PedidoItems')).items;
+      var antes = String(ped.tipo_pago_real || ped.tipo_pago || tipoPagoDe_(ped.pago));
+      ped.tipo_pago_real = tipo;
+      ped.total_final = its.some(function (it) { return it.precio; }) ? totalPorPago_(its, tipo) : '';
+      return tipo !== antes ? 'Pagó como ' + pagoPorId_(tipo).nombre + (ped.total_final !== '' ? ' (total ' + ped.total_final + ' $)' : '') + ' · ' : '';
+    };
     if (accion === 'cancelar') {
       if (cobro) return { ok: false, error: 'Ese pedido ya figura como ' + (cobro === 'conciliado' ? 'conciliado' : 'cancelado') + '.', code: 'repetido' };
       if (!monto || !moneda) return { ok: false, error: 'Indicá cuánto cobraste y en qué moneda.', code: 'monto' };
       ped.cobro = 'cancelado'; ped.cobrado_at = t; ped.cobrado_por = ses.nombre;
-      ped.monto = monto; ped.moneda = moneda; detalle = monto + ' ' + moneda;
+      ped.monto = monto; ped.moneda = moneda; detalle = ponerReal() + monto + ' ' + moneda;
     } else if (!gestion) {
       return { ok: false, error: 'Solo Administración verifica y concilia los pagos.', code: 'forbidden' };
     } else if (accion === 'conciliar') {
@@ -562,13 +781,14 @@ function accionCobro_(p, ses) {
       if (monto && moneda) { ped.monto = monto; ped.moneda = moneda; }
       if (!montoValido_(ped.monto) || MONEDAS.indexOf(String(ped.moneda)) === -1) return { ok: false, error: 'Indicá el monto recibido y la moneda.', code: 'monto' };
       if (!cobro) { ped.cobrado_at = t; ped.cobrado_por = ses.nombre; } // Administración recibió el pago directo
+      var cambio = (real || !cobro) ? ponerReal() : '';
       ped.cobro = 'conciliado'; ped.conciliado_at = t; ped.conciliado_por = ses.nombre;
-      detalle = Number(ped.monto) + ' ' + ped.moneda;
+      detalle = cambio + Number(ped.monto) + ' ' + ped.moneda;
     } else if (accion === 'rechazar') {
       if (cobro !== 'cancelado') return { ok: false, error: 'Solo se rechaza un pago reportado como cancelado.', code: 'estado' };
       detalle = txt_(p.motivo, 200);
       if (!detalle) return { ok: false, error: 'Indicá por qué no se recibió el pago.', code: 'motivo' };
-      ped.cobro = ''; ped.cobrado_at = ''; ped.cobrado_por = ''; ped.monto = ''; ped.moneda = '';
+      ped.cobro = ''; ped.cobrado_at = ''; ped.cobrado_por = ''; ped.monto = ''; ped.moneda = ''; ped.tipo_pago_real = ''; ped.total_final = '';
     } else if (accion === 'desconciliar') {
       if (cobro !== 'conciliado') return { ok: false, error: 'Ese pago no está conciliado.', code: 'estado' };
       ped.cobro = 'cancelado'; ped.conciliado_at = ''; ped.conciliado_por = '';
@@ -639,6 +859,13 @@ function accionEstado_(p, ses) {
 
     var t = ahora_();
     var detalle = '';
+    // Aprobar aparta la mercancía: tiene que alcanzar el stock
+    if (nuevo === 'confirmado' && !reasignar && String(ped.estado) === 'pendiente') {
+      var todos = leer_('Pedidos'), its = leer_('PedidoItems');
+      var mios = its.filter(function (it) { return String(it.pedido_id) === String(ped.id); }).map(function (it) { return { code: String(it.code), producto: String(it.producto), cajas: Number(it.cajas) }; });
+      var falta = faltaStock_(mios, existencias_(todos, its));
+      if (falta) return { ok: false, error: falta, code: 'stock' };
+    }
     // Confirmar (o reasignar) exige despachador activo
     if (nuevo === 'confirmado' || reasignar) {
       var dId = txt_(p.despachador_id || ped.despachador_id, 40);
@@ -773,6 +1000,8 @@ function onOpen() {
 function prepararHojas() {
   Object.keys(HOJAS).forEach(hoja_);
   secreto_();
+  var yaPrecios = tablaPrecios_();
+  PRODUCTOS_BASE.forEach(function (b) { if (!yaPrecios[b[0]]) agregar_('Precios', { code: b[0], producto: b[1] }); });
   var migrados = 0;
   var ss = libro_();
   var vieja = ss.getSheetByName('Vendedores');
@@ -787,7 +1016,7 @@ function prepararHojas() {
       migrados++;
     });
   }
-  var msg = 'Listo: hojas Usuarios, Clientes, Pedidos, PedidoItems e Historial.' +
+  var msg = 'Listo: hojas Usuarios, Clientes, Pedidos, PedidoItems, Historial, Precios e Inventario.\nCargá los precios en la hoja Precios ($ por caja).' +
     (migrados ? '\n' + migrados + ' vendedor(es) pasados a Usuarios (misma clave/PIN; el usuario es su nombre en minúsculas). Podés borrar la hoja Vendedores.' : '') +
     (leer_('Usuarios').some(function (u) { return u.rol === 'master'; }) ? '' : '\nAhora creá el usuario Master (menú 2).');
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}

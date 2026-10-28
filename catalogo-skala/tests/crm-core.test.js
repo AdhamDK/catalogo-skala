@@ -261,3 +261,58 @@ test("resumenConciliados suma dinero por moneda, por vendedor y por método de p
   assert.equal(r.productos[0].cajas, 5);
   assert.deepEqual(core.resumenConciliados([]).montos, { USD: 0, Bs: 0 });
 });
+
+/* ---------- Precios (v3) ---------- */
+const PRECIOS = {
+  "BC-01": { menor: 10, mayor: 8, desc_pronto: 1, desc_efectivo_credito: 3, desc_efectivo_pronto: 4 },
+  "KT-01": { menor: 20, mayor: 18, desc_pronto: 2, desc_efectivo_credito: 6, desc_efectivo_pronto: 8 },
+};
+const ITS = [{ code: "BC-01", producto: "Babosa", cajas: 2 }, { code: "KT-01", producto: "Kit", cajas: 1 }, { code: "BC-09", producto: "Lisos", cajas: 1 }];
+
+test("nivel de precio: menor < 15 cajas, mayor desde 15 o por excepción", () => {
+  assert.equal(core.nivelPrecio(14, false), "menor");
+  assert.equal(core.nivelPrecio(15, false), "mayor");
+  assert.equal(core.nivelPrecio(3, true), "mayor");
+});
+
+test("totales por forma de pago con descuentos (ej. 100 → 90 / 70 / 60)", () => {
+  const its = core.conPrecios(ITS, PRECIOS, "menor");
+  assert.deepEqual(its.map((x) => x.precio), [10, 20, 0]);
+  assert.deepEqual(core.sinPrecio(its), ["BC-09"]);
+  const t = core.totalesPorPago(its);
+  assert.deepEqual(t.map((x) => [x.id, x.total, x.ahorro]), [["credito", 40, 0], ["pronto", 36, 4], ["efectivo_credito", 28, 12], ["efectivo_pronto", 24, 16]]);
+  const may = core.conPrecios(ITS, PRECIOS, "mayor");
+  assert.equal(core.totalPorPago(may, "credito"), 34);
+  assert.equal(core.precioUnitario({ precio: 2, desc_efectivo_pronto: 5 }, "efectivo_pronto"), 0); // nunca negativo
+  // ejemplo del dueño: 10 cajas de 10 $ con descuentos 1 / 3 / 4 por caja
+  const ej = core.conPrecios([{ code: "BC-01", cajas: 10 }], PRECIOS, "menor");
+  assert.deepEqual(core.totalesPorPago(ej).map((x) => x.total), [100, 90, 70, 60]);
+  assert.equal(core.dinero(1234.5), "1.234,50 $");
+});
+
+test("tipo de pago desde texto viejo y pronto pago hasta el día siguiente a la entrega", () => {
+  assert.equal(core.tipoPagoDe("Divisas · Crédito"), "credito");
+  assert.equal(core.tipoPagoDe("Bolívares · Contado"), "pronto");
+  assert.equal(core.tipoPagoDe("Efectivo a crédito"), "efectivo_credito");
+  assert.equal(core.tipoPagoDe("Efectivo pronto pago"), "efectivo_pronto");
+  const ent = new Date(2026, 9, 25, 10, 0).toISOString();
+  assert.equal(core.prontoVigente(ent, new Date(2026, 9, 26, 23, 0)), true);
+  assert.equal(core.prontoVigente(ent, new Date(2026, 9, 27, 0, 1)), false);
+  assert.equal(core.prontoVigente("", new Date()), true);
+});
+
+test("stock para el vendedor", () => {
+  assert.equal(core.textoStock({ controlado: true, disponible: 4 }), "Hay 4");
+  assert.equal(core.textoStock({ controlado: true, disponible: 0 }), "Agotado");
+  assert.equal(core.textoStock({ controlado: false, disponible: null }), "");
+  assert.equal(core.topeStock({ controlado: true, disponible: -2 }), 0);
+  assert.equal(core.topeStock(undefined), Infinity);
+});
+
+test("mensaje al grupo con precios y monto", () => {
+  const ped = { id: "SKL-1", fecha: "2026-10-25 10:00", vendedor: "Óscar", total_cajas: 3, tipo_pago: "efectivo_pronto", pago: "Efectivo pronto pago", nivel_precio: "menor",
+    items: core.conPrecios(ITS.slice(0, 2), PRECIOS, "menor") };
+  const m = core.mensajeGrupo(ped, { nombre: "Bella" });
+  assert.match(m, /2 × Babosa \(BC-01\) · 6,00 \$ c\/u/);
+  assert.match(m, /\*Monto: 24,00 \$\* · precio al por menor/);
+});

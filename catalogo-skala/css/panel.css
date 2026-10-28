@@ -316,3 +316,75 @@ html[data-tema="oscuro"] .stat-alerta strong { color: #ff8a8e; }
 details.tarjeta > summary { cursor: pointer; margin: 0; }
 details.tarjeta[open] > summary { margin-bottom: 6px; }
 .moneda { margin-bottom: 4px; }
+
+/* ---------- Productos en cuadrícula (tocar = sumar una caja) ---------- */
+.nivel-aviso { margin: 4px 0 8px; }
+.grilla-prod { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (min-width: 560px) { .grilla-prod { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.pcard {
+  position: relative; display: flex; flex-direction: column; background: var(--superficie);
+  border: 2px solid var(--borde-suave); border-radius: 16px; overflow: hidden;
+  transition: border-color .15s ease, transform .12s ease;
+}
+.pcard-tap {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; flex: 1;
+  padding: 8px 10px 6px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.pcard-tap:active { background: var(--crema-2); }
+.pcard-tap:disabled { cursor: default; }
+.pcard picture { display: block; width: 100%; }
+.pcard img { width: 100%; height: 64px; object-fit: contain; border-radius: 10px; background: #f6fbf0; margin-bottom: 4px; }
+.pcard strong { font-size: 0.92rem; line-height: 1.15; }
+.pcard-sub { font-size: 0.72rem; color: var(--tinta-suave); }
+.pcard-precio { font-size: 0.85rem; font-weight: 700; color: var(--verde-osc); }
+.pcard-stock { font-size: 0.72rem; color: var(--tinta-suave); }
+.pcard-stock.agotado { color: #c41d22; font-weight: 700; }
+.pcard-n {
+  position: absolute; top: 6px; right: 6px; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 999px;
+  display: grid; place-items: center; background: var(--verde-osc); color: #fff; font-size: 0.9rem; pointer-events: none;
+}
+.pcard-n:empty { display: none; }
+.pcard-qty { display: none; align-items: center; justify-content: space-between; gap: 4px; padding: 4px 6px 6px; }
+.pcard.elegido { border-color: var(--verde); }
+.pcard.elegido .pcard-qty { display: flex; }
+.pcard .qty-btn { width: 44px; height: 44px; flex: 0 0 auto; }
+.pcard .qty-input { width: 100%; min-width: 0; height: 44px; text-align: center; font-size: 16px; border: 1px solid var(--borde); border-radius: 10px; background: var(--superficie); color: var(--tinta); }
+.pcard.sin-stock { opacity: .55; }
+.pcard.pulso .pcard-tap picture, .pcard.pulso .pcard-n { animation: pulso .25s ease; }
+@media (prefers-reduced-motion: reduce) { .pcard.pulso .pcard-tap picture, .pcard.pulso .pcard-n { animation: none; } }
+@keyframes pulso { 50% { transform: scale(0.9); } }
+html[data-tema="oscuro"] .pcard img { background: #2e2b26; }
+html[data-tema="oscuro"] .pcard-precio { color: var(--verde-claro); }
+html[data-tema="oscuro"] .pcard-stock.agotado { color: #ff8a8d; }
+
+/* ---------- Formas de pago con montos ---------- */
+.pagos .pago-opt { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 14px; }
+.pagos .pago-opt:has(input:checked) { border-color: var(--verde); background: var(--verde-suave); }
+.pago-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.pago-txt span { font-size: 0.78rem; color: var(--tinta-suave); }
+.pago-monto { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; white-space: nowrap; }
+.pago-monto strong { font-size: 1.02rem; }
+.pago-monto span { font-size: 0.78rem; color: var(--verde-osc); font-weight: 700; }
+html[data-tema="oscuro"] .pago-monto span { color: var(--verde-claro); }
+.check.excepcion { margin-top: 4px; }
+.monto-ped { margin: 4px 0 10px; font-size: 0.95rem; }
+.monto-ped strong { font-size: 1.15rem; }
+.monto-ped.cambio { color: var(--verde-osc); }
+html[data-tema="oscuro"] .monto-ped.cambio { color: var(--verde-claro); }
+.aviso-chico { margin: 8px 0; padding: 10px 12px; border-radius: 12px; background: #fff3e6; color: #6b3a0b; font-size: 0.88rem; }
+html[data-tema="oscuro"] .aviso-chico { background: rgba(245, 130, 42, 0.15); color: #ffc58f; }
+
+/* ---------- Inventario y precios ---------- */
+.lista-inv { list-style: none; margin: 8px 0 12px; padding: 0; display: grid; gap: 8px; }
+.inv-fila { padding: 12px 14px; background: var(--superficie); border: 1px solid var(--borde-suave); border-radius: 14px; }
+.inv-top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.inv-top > div:first-child { display: flex; flex-direction: column; min-width: 0; }
+.inv-stock { text-align: right; line-height: 1.1; white-space: nowrap; }
+.inv-stock strong { display: block; font-family: "Baloo 2", sans-serif; font-size: 1.5rem; color: var(--verde-osc); }
+.inv-stock span { font-size: 0.75rem; color: var(--tinta-suave); }
+.inv-stock.agotado strong { color: #c41d22; }
+html[data-tema="oscuro"] .inv-stock strong { color: var(--verde-claro); }
+html[data-tema="oscuro"] .inv-stock.agotado strong { color: #ff8a8d; }
+.inv-fila .ped-det { margin: 4px 0 0; }
+.inv-botones { display: flex; gap: 8px; margin-top: 8px; }
+.inv-botones .btn { flex: 1; min-height: 44px; padding: 6px 10px; font-size: 0.88rem; }
