@@ -378,6 +378,111 @@ function estadoApp(versionInstalada, config) {
   return { nueva: !!(c.url_apk && Number(c.version_apk) > v), obligatoria: !!(c.url_apk && Number(c.minima_apk) > v), version: Number(c.version_apk) || 0 };
 }
 
+/* -------------------- Pedidos: 4 pestañas (v4) --------------------
+   Por hacer (lo que me toca a mí) · En curso · Cobros (por cobrar / por conciliar / conciliados)
+   · Historial (entregados / anulados). Todo se arma con una sola lista de pedidos. */
+function vistasPedidos(rol) {
+  const gestion = rol === "master" || rol === "admin";
+  return [
+    { id: "hacer", nombre: "Por hacer" },
+    { id: "curso", nombre: "En curso" },
+    { id: "cobros", nombre: "Cobros", ver: [{ id: "cobrar", nombre: "Por cobrar" }, ...(gestion ? [{ id: "conciliar", nombre: "Por conciliar" }] : []), { id: "conciliados", nombre: "Conciliados" }] },
+    { id: "historial", nombre: "Historial", ver: [{ id: "entregado", nombre: "Entregados" }, { id: "cancelado", nombre: "Anulados" }] },
+  ];
+}
+/* Enlaces viejos (?tab=pendiente, ?tab=cobrar…) → pestaña nueva */
+const ALIAS_VISTA = {
+  pendiente: ["hacer"], web: ["hacer"], curso: ["curso"], cobrar: ["cobros", "cobrar"], conciliar: ["cobros", "conciliar"],
+  conciliados: ["cobros", "conciliados"], entregado: ["historial", "entregado"], cancelado: ["historial", "cancelado"],
+};
+function resolverVista(rol, tab, ver) {
+  const vistas = vistasPedidos(rol);
+  const [t, v] = ALIAS_VISTA[tab] && !vistas.some((x) => x.id === tab && !ALIAS_VISTA[tab][1]) ? ALIAS_VISTA[tab] : [tab, ver];
+  const vista = vistas.find((x) => x.id === t) || vistas[0];
+  const sub = vista.ver ? (vista.ver.find((x) => x.id === (ver || v)) || vista.ver[0]) : null;
+  return { vistas, vista, sub };
+}
+
+/* ¿Qué le toca hacer a cada rol con este pedido? (secciones de "Por hacer") */
+function urgenciaCobro(p, hoy) {
+  if (p.estado === "cancelado" || p.cobro) return false;
+  const ec = estadoCredito(p, hoy);
+  if (ec) return ["proximo", "vencido", "muy_vencido"].includes(ec.nivel);
+  return p.estado === "entregado"; // contado entregado sin pagar
+}
+function porHacer(pedidos, rol, uid, hoy = new Date()) {
+  const gestion = rol === "master" || rol === "admin";
+  const L = pedidos || [];
+  if (gestion) {
+    return [
+      { id: "aprobar", titulo: "Por aprobar", pedidos: L.filter((p) => p.estado === "pendiente") },
+      { id: "conciliar", titulo: "Pagos por conciliar", pedidos: L.filter((p) => p.cobro === "cancelado") },
+    ];
+  }
+  return [
+    { id: "cobrar", titulo: "Para cobrar (vencidos, por vencer o de contado)", pedidos: L.filter((p) => String(p.vendedor_id) === String(uid) && urgenciaCobro(p, hoy))
+      // primero lo más vencido, después lo de contado, después lo que está por vencer
+      .sort((a, b) => { const d = (p) => { const ec = estadoCredito(p, hoy); return !ec ? 0 : ec.nivel === "proximo" ? 1 + ec.dias : -1 - ec.dias; }; return d(a) - d(b); }) },
+  ];
+}
+
+function pedidosDeVista(pedidos, vista, ver, { rol, uid, hoy = new Date(), dias = 30 } = {}) {
+  const L = pedidos || [];
+  switch (vista) {
+    case "curso": return filtrarPedidosLocal(L, { estados: ["pendiente", "confirmado", "en_ruta"] }, hoy);
+    case "cobros":
+      if (ver === "conciliar") return filtrarPedidosLocal(L, { por_conciliar: true }, hoy);
+      if (ver === "conciliados") return filtrarPedidosLocal(L, { conciliados: true, dias }, hoy).sort((a, b) => String(b.conciliado_at).localeCompare(String(a.conciliado_at)));
+      return filtrarPedidosLocal(L, { por_cobrar: true }, hoy);
+    case "historial": return filtrarPedidosLocal(L, { estados: [ver === "cancelado" ? "cancelado" : "entregado"], dias: 365 }, hoy);
+    default: return [].concat(...porHacer(L, rol, uid, hoy).map((s) => s.pedidos));
+  }
+}
+
+/* Buscar por cliente, número, teléfono o vendedor */
+function buscarPedidos(pedidos, q) {
+  const t = String(q || "").trim().toLowerCase();
+  if (!t) return pedidos || [];
+  const dig = t.replace(/\D/g, "");
+  return (pedidos || []).filter((p) => {
+    const c = p.cliente_datos || {};
+    const texto = [p.id, p.negocio, p.cliente, p.vendedor, p.despachador, c.direccion, c.rif_cedula].join(" ").toLowerCase();
+    if (texto.includes(t)) return true;
+    return dig.length >= 4 && [c.telefono, c.telefono2].some((x) => String(x || "").replace(/\D/g, "").includes(dig));
+  });
+}
+
+/* Agrupar por día: Hoy, Ayer, o la fecha */
+function grupoDia(fecha, hoy = new Date()) {
+  const m = String(fecha || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return "Sin fecha";
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const h = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  const dif = Math.round((h - d) / DIA);
+  if (dif === 0) return "Hoy";
+  if (dif === 1) return "Ayer";
+  if (dif > 1 && dif < 7) return ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"][d.getDay()];
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+function agruparPorDia(pedidos, hoy = new Date()) {
+  const grupos = [];
+  (pedidos || []).forEach((p) => {
+    const g = grupoDia(p.fecha, hoy);
+    const ult = grupos[grupos.length - 1];
+    if (ult && ult.titulo === g) ult.pedidos.push(p); else grupos.push({ titulo: g, pedidos: [p] });
+  });
+  return grupos;
+}
+
+/* Cantidades para los contadores de las pestañas */
+function contadoresVistas(pedidos, rol, uid, hoy = new Date()) {
+  return {
+    hacer: porHacer(pedidos, rol, uid, hoy).reduce((a, s) => a + s.pedidos.length, 0),
+    curso: pedidosDeVista(pedidos, "curso", null, { rol, uid, hoy }).length,
+    cobros: pedidosDeVista(pedidos, "cobros", "cobrar", { rol, uid, hoy }).length + (rol === "master" || rol === "admin" ? pedidosDeVista(pedidos, "cobros", "conciliar", { rol, uid, hoy }).length : 0),
+  };
+}
+
 function validarCliente(c, opciones = {}) {
   const faltan = [];
   if (!String(c.negocio || c.nombre || c.contacto || "").trim()) faltan.push("Nombre del cliente o del negocio");
@@ -426,5 +531,6 @@ if (typeof module !== "undefined" && module.exports) {
     monedaDePago, formatoMonto, resumenConciliados,
     CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, sinPrecio, dinero,
     limitePronto, prontoVigente, textoStock, topeStock, puedeBorrar, refWeb, mensajeWeb,
+    vistasPedidos, resolverVista, porHacer, urgenciaCobro, pedidosDeVista, buscarPedidos, grupoDia, agruparPorDia, contadoresVistas,
     HORAS_SYNC, debeSincronizar, proximaSync, filtrarPedidosLocal, buscarClientesLocal, respuestaLocal, estadoApp };
 }

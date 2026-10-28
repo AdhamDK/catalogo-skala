@@ -399,3 +399,44 @@ test("varios roles: botones y permisos suman los de cada rol", () => {
   assert.equal(core.puedeTomarPedidos(["despachador"]), false);
   assert.equal(core.puedeBorrar(["admin", "vendedor"], "U3", p), true);
 });
+
+/* ---------- Pedidos en 4 pestañas ---------- */
+test("pestañas de Pedidos: 4, con sub-filtros; enlaces viejos siguen funcionando", () => {
+  assert.deepEqual(core.vistasPedidos("vendedor").map((v) => v.id), ["hacer", "curso", "cobros", "historial"]);
+  assert.deepEqual(core.vistasPedidos("vendedor")[2].ver.map((v) => v.id), ["cobrar", "conciliados"]);
+  assert.deepEqual(core.vistasPedidos("admin")[2].ver.map((v) => v.id), ["cobrar", "conciliar", "conciliados"]);
+  const r = (rol, t, v) => { const x = core.resolverVista(rol, t, v); return [x.vista.id, x.sub && x.sub.id]; };
+  assert.deepEqual(r("admin", "conciliar"), ["cobros", "conciliar"]);
+  assert.deepEqual(r("admin", "cobros", "conciliados"), ["cobros", "conciliados"]);
+  assert.deepEqual(r("admin", "cancelado"), ["historial", "cancelado"]);
+  assert.deepEqual(r("admin", "curso"), ["curso", null]);
+  assert.deepEqual(r("vendedor", "web"), ["hacer", null]);
+  assert.deepEqual(r("vendedor", "nada"), ["hacer", null]);
+  assert.deepEqual(r("vendedor", "conciliar"), ["cobros", "cobrar"]); // el vendedor no tiene "por conciliar"
+});
+
+test("Por hacer según el rol; búsqueda; agrupar por día; contadores", () => {
+  const hoy = new Date(2026, 9, 28, 10);
+  const iso = (d) => new Date(2026, 9, d, 10).toISOString();
+  const P = [
+    { id: "A", estado: "pendiente", vendedor_id: "U3", created_at: iso(28), fecha: "2026-10-28 09:00", negocio: "Bella", cliente_datos: { telefono: "0412-1234567" } },
+    { id: "B", estado: "entregado", vendedor_id: "U3", created_at: iso(20), fecha: "2026-10-20 09:00", entregado_at: iso(20), cobro: "", negocio: "Max" },          // contado sin cobrar
+    { id: "C", estado: "entregado", vendedor_id: "U3", created_at: iso(10), fecha: "2026-10-10 09:00", entregado_at: iso(10), dias_credito: 30, cobro: "", negocio: "Luz" }, // crédito al día
+    { id: "D", estado: "entregado", vendedor_id: "U3", created_at: iso(1), fecha: "2026-10-01 09:00", entregado_at: iso(1), dias_credito: 15, cobro: "", negocio: "Sol" },   // vencido
+    { id: "E", estado: "entregado", vendedor_id: "U4", created_at: iso(27), fecha: "2026-10-27 09:00", cobro: "cancelado", negocio: "Mar" },
+    { id: "F", estado: "confirmado", vendedor_id: "U3", created_at: iso(26), fecha: "2026-10-26 09:00", negocio: "Río" },
+  ];
+  const adm = core.porHacer(P, "admin", "U2", hoy);
+  assert.deepEqual(adm.map((s) => [s.id, s.pedidos.map((p) => p.id)]), [["aprobar", ["A"]], ["conciliar", ["E"]]]);
+  const ven = core.porHacer(P, "vendedor", "U3", hoy);
+  assert.deepEqual(ven[0].pedidos.map((p) => p.id), ["D", "B"]); // vencido primero; C está al día
+  assert.deepEqual(core.pedidosDeVista(P, "curso", null, { hoy }).map((p) => p.id), ["A", "F"]);
+  assert.deepEqual(core.pedidosDeVista(P, "cobros", "cobrar", { hoy }).map((p) => p.id), ["B", "C", "D"]);
+  assert.deepEqual(core.pedidosDeVista(P, "historial", "entregado", { hoy }).map((p) => p.id), ["E", "B", "C", "D"]);
+  assert.deepEqual(core.buscarPedidos(P, "bella").map((p) => p.id), ["A"]);
+  assert.deepEqual(core.buscarPedidos(P, "1234567").map((p) => p.id), ["A"]);
+  assert.equal(core.buscarPedidos(P, "").length, 6);
+  assert.deepEqual(core.agruparPorDia(P.slice(0, 2).concat([P[5], P[4]]).sort((a, b) => b.fecha.localeCompare(a.fecha)), hoy).map((g) => [g.titulo, g.pedidos.length]),
+    [["Hoy", 1], ["Ayer", 1], ["Lunes", 1], ["20/10/2026", 1]]);
+  assert.deepEqual(core.contadoresVistas(P, "admin", "U2", hoy), { hacer: 2, curso: 2, cobros: 4 });
+});

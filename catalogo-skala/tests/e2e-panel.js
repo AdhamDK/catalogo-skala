@@ -257,6 +257,8 @@ function servidor() {
   await revisarDiseno("inicio");
   await page.click('.app-nav a[href="#/pedidos"]');
   await esperarRuta("#/pedidos");
+  await page.click('.tabs-ped [data-vista="curso"]');
+  await esperarRuta("#/pedidos?tab=curso");
   await page.click("#pLista .fila-ped");
   await esperarRuta("#/pedido/");
   assert.match(await titulo(), /^SKL-\d{6}-001$/);
@@ -275,6 +277,36 @@ function servidor() {
   await page.goto(BASE + "/panel.html#/pedidos");
   await esperarRuta("#/pedidos");
   ok("logo de arriba → página de productos de los clientes");
+
+  // Pedidos: 4 pestañas con contadores, buscador y lista por día
+  await page.click('.app-nav a[href="#/pedidos"]');
+  await esperarRuta("#/pedidos");
+  assert.deepEqual(await page.locator(".tabs-ped .tab").evaluateAll((els) => els.map((e) => e.firstChild.textContent.trim())), ["Por hacer", "En curso", "Cobros", "Historial"]);
+  assert.match(await page.innerText("#pLista"), /Nada pendiente por ahora/); // el vendedor no tiene nada urgente
+  await page.click('.tabs-ped [data-vista="curso"]');
+  await esperarRuta("#/pedidos?tab=curso");
+  assert.equal(await page.innerText('[data-cuenta="curso"]'), "1");
+  assert.equal(await page.innerText("#pLista .grupo-tit"), "HOY");
+  assert.match(await page.innerText("#pLista .fila-monto"), /152,00 \$/);
+  await page.fill("#pBuscar", "nada que ver");
+  await page.waitForFunction(() => /Nada con ese filtro/.test(document.getElementById("pLista").textContent));
+  await page.fill("#pBuscar", "1234567"); // por teléfono
+  await page.waitForSelector("#pLista .fila-ped");
+  await page.fill("#pBuscar", "");
+  await page.waitForSelector("#pLista .fila-ped");
+  await foto("05b-pedidos");
+  await revisarDiseno("pedidos 4 pestañas");
+  // abrir un pedido es inmediato (ya está en la lista) y el historial llega después
+  retraso = 1500;
+  await page.click("#pLista .fila-ped");
+  await page.waitForFunction(() => /^SKL-/.test(document.getElementById("appTitulo").textContent) && !!document.querySelector(".acciones-ped"));
+  assert.ok(await page.locator("text=Cargando historial").count(), "el detalle esperó al servidor");
+  retraso = 0;
+  await esperarRuta("#/pedido/");
+  await page.waitForSelector(".historial");
+  await page.click("#btnAtras");
+  await esperarRuta("#/pedidos");
+  ok("pedidos: 4 pestañas con contadores, buscador, lista por día y detalle al instante");
 
   /* ---------- Clientes ---------- */
   await page.click('.app-nav a[href="#/clientes"]');
@@ -375,7 +407,7 @@ function servidor() {
   assert.match(await page.innerText(".listo h2"), /Guardado en el teléfono/);
   await page.click('.app-nav a[href="#/inicio"]');
   await page.waitForSelector("#pendSubir:not([hidden])");
-  await page.goto(BASE + "/panel.html#/pedidos?tab=pendiente");
+  await page.goto(BASE + "/panel.html#/pedidos?tab=curso");
   await esperarRuta("#/pedidos");
   assert.match(await page.innerText("#modoLocal"), /Sin señal · mostrando los datos guardados/);
   assert.equal(await page.locator("#pLista .fila-ped").count(), 1); // de la copia del teléfono
@@ -570,11 +602,12 @@ function servidor() {
   assert.match(await page.innerText("#concCuenta"), /1 pedido · \d+ cajas?/);
   assert.match(await page.innerText("#vista"), /Por vendedor[\s\S]*Óscar[\s\S]*Por método de pago/);
   assert.equal(await page.locator("#pLista .fila-ped").count(), 1);
-  assert.equal(await page.locator(".periodos-chicos .tab.active").innerText(), "30 días");
+  assert.equal(await page.locator("#pPeriodo .tab.active").innerText(), "30 días");
+  assert.equal(await page.locator("#pVer .tab.active").innerText(), "Conciliados");
   await foto("09d-conciliados");
   await revisarDiseno("conciliados");
-  await page.click('.periodos-chicos a[href$="dias=1"]');
-  await page.waitForFunction(() => document.querySelector(".periodos-chicos .tab.active")?.textContent === "Hoy" && document.body.dataset.lista);
+  await page.click('#pPeriodo a[href$="dias=1"]');
+  await page.waitForFunction(() => document.querySelector("#pPeriodo .tab.active")?.textContent === "Hoy" && document.body.dataset.lista);
   assert.equal(await page.innerText("#concUSD"), "USD 1.100,00"); // se concilió hoy
   await salir();
   ok("administración verifica el pago y lo marca Conciliado");
@@ -590,7 +623,7 @@ function servidor() {
   await page.waitForSelector("#iWeb");
   assert.match(await page.innerText("#iWeb"), /1 pedido web/);
   await page.click("#iWeb");
-  await esperarRuta("#/pedidos?tab=web");
+  await esperarRuta("#/pedidos?tab=hacer");
   await page.click("#pLista .fila-web");
   await esperarRuta("#/web/");
   assert.equal(await page.locator("#btnTomarWeb").count(), 0); // Administración lo ve, no lo toma
@@ -600,7 +633,7 @@ function servidor() {
   await esperarRuta("#/inicio");
   await page.waitForSelector("#iWeb");
   await page.click("#iWeb");
-  await esperarRuta("#/pedidos?tab=web");
+  await esperarRuta("#/pedidos?tab=hacer");
   await page.click("#pLista .fila-web");
   await esperarRuta("#/web/");
   assert.match(await page.innerText(".monto-ped"), /36,00 \$ · Pronto pago/); // 4 × (10 − 1)

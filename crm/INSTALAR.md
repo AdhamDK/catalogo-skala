@@ -74,6 +74,14 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
 - **La hoja NO debe compartirse con "Cualquier persona con el enlace"**: dejala en
   *Compartir → Restringido*. La API funciona igual (corre con tu cuenta).
 
+## Pedidos (panel)
+4 pestañas con contador: **Por hacer** (Administración: por aprobar, pagos por conciliar y
+pedidos web; Vendedor: sus pedidos web y lo que tiene para cobrar: vencidos, por vencer o de
+contado), **En curso**, **Cobros** (por cobrar / por conciliar / conciliados) e **Historial**
+(entregados / anulados). Buscador por cliente, número o teléfono; Administración filtra por
+vendedor. La lista se muestra al instante con lo guardado y se actualiza por detrás; abrir un
+pedido es inmediato y el historial llega después.
+
 ## Precios e inventario
 - **Precios** (hoja `Precios` o panel → Más → *Inventario y precios*), en **$ por caja**:
   `menor` (menos de 15 cajas), `mayor` (15 cajas o más) y tres **descuentos** que se restan según

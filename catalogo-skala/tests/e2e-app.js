@@ -117,7 +117,7 @@ const TIPOS = { ".html": "text/html", ".js": "text/javascript", ".css": "text/cs
       window.__app.nativo = JSON.stringify(d);
     });
     sinSenal = true;
-    await page.goto(BASE + "/panel.html#/pedidos?tab=pendiente");
+    await page.goto(BASE + "/panel.html#/pedidos?tab=curso");
     await esperarRuta("#/pedidos");
     assert.match(await page.innerText("#pLista"), /Copia del worker/);
     assert.ok(await page.locator("#modoLocal").isVisible());

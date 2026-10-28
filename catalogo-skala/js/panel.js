@@ -112,7 +112,7 @@
     pedidos: { titulo: "Pedidos", roles: TOMAN, nav: "pedidos", render: vPedidos },
     entregas: { titulo: "Mis entregas", roles: ["despachador"], nav: "entregas", render: vPedidos },
     pedido: { titulo: "Pedido", roles: TODOS, atras: true, render: vPedido },
-    web: { titulo: "Pedido web", roles: TOMAN, nav: "pedidos", atras: "#/pedidos?tab=web", render: vWeb },
+    web: { titulo: "Pedido web", roles: TOMAN, nav: "pedidos", atras: "#/pedidos?tab=hacer", render: vWeb },
     carga: { titulo: "Total de carga", roles: ["despachador", "master", "admin"], atras: true, render: vCarga },
     clientes: { titulo: "Clientes", roles: TOMAN, nav: "clientes", render: vClientes },
     cliente: { titulo: "Cliente", roles: TOMAN, nav: "clientes", atras: "#/clientes", render: vCliente },
@@ -361,15 +361,15 @@
       if (!vigente()) return;
       if (web.pedidos.length) {
         const n = web.pedidos.length;
-        destacadoHtml += `<a class="tarjeta aviso-web-inicio" href="#/pedidos?tab=web" id="iWeb"><strong>${n} pedido${n === 1 ? "" : "s"} web</strong><span>${r === "vendedor" ? "Tus clientes los armaron en el catálogo: revisalos y envialos a Administración." : "Armados por clientes en el catálogo, esperando a su vendedor."}</span></a>`;
+        destacadoHtml += `<a class="tarjeta aviso-web-inicio" href="#/pedidos?tab=hacer" id="iWeb"><strong>${n} pedido${n === 1 ? "" : "s"} web</strong><span>${r === "vendedor" ? "Tus clientes los armaron en el catálogo: revisalos y envialos a Administración." : "Armados por clientes en el catálogo, esperando a su vendedor."}</span></a>`;
       }
       const vencidos = porCobrar.pedidos.filter((p) => { const ec = estadoCredito(p); return ec && (ec.nivel === "vencido" || ec.nivel === "muy_vencido"); }).length;
       const proximos = porCobrar.pedidos.filter((p) => { const ec = estadoCredito(p); return ec && ec.nivel === "proximo"; }).length;
       tiles = tile(hoy.total_pedidos, "pedidos hoy", "#/pedidos") + tile(hoy.total_cajas, "cajas hoy", "#/resumen") +
-        tile(c.pendiente, r === "vendedor" ? "en proceso" : "por aprobar", "#/pedidos?tab=pendiente") +
+        tile(c.pendiente, r === "vendedor" ? "en proceso" : "por aprobar", r === "vendedor" ? "#/pedidos?tab=curso" : "#/pedidos?tab=hacer") +
         tile(c.confirmado + c.en_ruta, "en despacho", "#/pedidos?tab=curso") +
-        `<a class="stat${vencidos ? " stat-alerta" : ""}" href="#/pedidos?tab=cobrar"><strong>${vencidos}</strong><span>crédito vencido${proximos ? ` · ${proximos} por vencer` : ""}</span></a>` +
-        (gestion ? tile(porConciliar.pedidos.length, "por conciliar", "#/pedidos?tab=conciliar") : tile(porCobrar.pedidos.length, "por cobrar", "#/pedidos?tab=cobrar"));
+        `<a class="stat${vencidos ? " stat-alerta" : ""}" href="#/pedidos?tab=cobros&ver=cobrar"><strong>${vencidos}</strong><span>crédito vencido${proximos ? ` · ${proximos} por vencer` : ""}</span></a>` +
+        (gestion ? tile(porConciliar.pedidos.length, "por conciliar", "#/pedidos?tab=cobros&ver=conciliar") : tile(porCobrar.pedidos.length, "por cobrar", "#/pedidos?tab=cobros&ver=cobrar"));
       destacados = abiertos.pedidos.filter((p) => p.estado === "pendiente").slice(0, 5);
       $("iListaTit").textContent = destacados.length ? (r === "vendedor" ? "Tus pedidos en proceso" : "Por aprobar") : "";
     }
@@ -788,6 +788,7 @@
       const btn = $("btnEnviar");
       btn.disabled = true; btn.classList.add("ocupado"); btn.textContent = "Enviando…";
       const terminar = (listo) => {
+        memoria.t = 0;
         guardarCarrito({});
         guardarLS(K_MAYOR, false);
         borrarLS(K_WEB);
@@ -849,6 +850,12 @@
     return b ? `<span class="bandera b-${esc(b.clase)}"><i aria-hidden="true"></i>${esc(b.texto)}</span>` : "";
   };
 
+  /* Monto del pedido en la fila (lo acordado, o lo final si pagó distinto) */
+  const montoFila = (p) => {
+    if (!vende()) return "";
+    const n = p.total_final !== "" && p.total_final != null ? Number(p.total_final) : Number(p.total);
+    return n > 0 ? `<strong class="fila-monto">${esc(dinero(n))}</strong>` : "";
+  };
   function filaPedido(p, elegible) {
     const r = enEntregas() ? "despachador" : rolPedidos();
     const extra = r === "vendedor" ? (p.despachador ? `Despacha: ${p.despachador}` : "")
@@ -856,14 +863,153 @@
     return `<li class="${elegible ? "con-check" : ""}">${elegible ? `<label class="check-ped"><input type="checkbox" value="${esc(p.id)}" aria-label="Elegir ${esc(p.negocio)} para la carga" /></label>` : ""}
       <a class="fila-ped est-borde-${esc(p.estado)}" href="#/pedido/${encodeURIComponent(p.id)}">
       <div class="fila-top"><strong>${esc(p.negocio)}</strong>${chipEstado(p.estado)}</div>
-      <div class="ped-det">${esc(p.id)} · ${esc(fechaLegible(p.fecha))}</div>
-      <div class="ped-det">${esc(p.total_cajas)} caja(s)${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}${p.monto && p.cobro ? ` · <strong>${esc(formatoMonto(p.monto, p.moneda))}</strong>` : ""}</div>
+      <div class="fila-linea"><span class="ped-det">${esc(p.id)} · ${esc(fechaLegible(p.fecha))}</span>${montoFila(p)}</div>
+      <div class="ped-det">${esc(p.total_cajas)} caja(s)${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}${p.monto && p.cobro ? ` · cobrado <strong>${esc(formatoMonto(p.monto, p.moneda))}</strong>` : ""}</div>
       ${extra ? `<div class="ped-det">${esc(extra)}</div>` : ""}
       ${chipBandera(p)}
     </a></li>`;
   }
 
+  /* ---------- Lista de pedidos en memoria: se muestra al instante y se actualiza por detrás ---------- */
+  const memoria = { pedidos: null, web: null, t: 0, uid: "" };
+  function pedidosEnMemoria() {
+    // otro usuario en el mismo teléfono: empezar de cero
+    if (memoria.uid !== yo().id) { memoria.pedidos = null; memoria.web = null; memoria.t = 0; memoria.uid = yo().id; }
+    if (memoria.pedidos) return memoria.pedidos;
+    const d = SkalaAPI.datosLocales();
+    return d && Array.isArray(d.pedidos) ? d.pedidos : null;
+  }
+  async function refrescarPedidos() {
+    const [r, w] = await Promise.all([
+      api("pedidos", { dias: 90 }),
+      vende() ? api("pedidosWeb").catch(() => ({ pedidos: memoria.web || [] })) : Promise.resolve({ pedidos: [] }),
+    ]);
+    memoria.pedidos = r.pedidos; memoria.web = w.pedidos; memoria.t = r.local ? 0 : Date.now();
+    return memoria;
+  }
+  /* Después de una acción: guardar el pedido que devolvió el servidor y pedir lista fresca la próxima vez */
+  function guardarEnMemoria(p) {
+    memoria.t = 0;
+    if (!p || !memoria.pedidos) return;
+    const i = memoria.pedidos.findIndex((x) => x.id === p.id);
+    if (i >= 0) memoria.pedidos[i] = { ...memoria.pedidos[i], ...p };
+  }
+
+  let busquedaPed = "", vendedorPed = "";
   async function vPedidos(v, _p, query, vigente) {
+    if (enEntregas()) return vListaClasica(v, _p, query, vigente);
+    const rp = rolPedidos();
+    const { vistas, vista, sub } = resolverVista(rp, query.get("tab"), query.get("ver"));
+    const PERIODOS = [[1, "Hoy"], [7, "7 días"], [30, "30 días"], [90, "90 días"]];
+    const esConc = sub && sub.id === "conciliados";
+    const dias = esConc ? (PERIODOS.find(([d]) => d === Number(query.get("dias"))) || [30])[0] : 30;
+    const conCarga = vista.id === "curso" && gestion();
+    const url = (t, ver, d) => `#/pedidos?tab=${t}${ver ? `&ver=${ver}` : ""}${d ? `&dias=${d}` : ""}`;
+    v.innerHTML = `
+      <div class="buscador buscador-ped"><input type="search" id="pBuscar" placeholder="Buscar cliente, número o teléfono" autocomplete="off" enterkeyhint="search" value="${esc(busquedaPed)}" /></div>
+      <div class="periodos tabs-ped" role="tablist">${vistas.map((t) => `<a role="tab" class="tab${t.id === vista.id ? " active" : ""}" aria-selected="${t.id === vista.id}" href="${url(t.id)}" data-vista="${t.id}">${esc(t.nombre)}<b class="cuenta" data-cuenta="${t.id}"></b></a>`).join("")}</div>
+      ${vista.ver ? `<div class="periodos periodos-chicos" id="pVer">${vista.ver.map((x) => `<a class="tab${x.id === sub.id ? " active" : ""}"${x.id === sub.id ? ' aria-current="true"' : ""} href="${url(vista.id, x.id)}">${esc(x.nombre)}</a>`).join("")}</div>` : ""}
+      ${esConc ? `<div class="periodos periodos-chicos" id="pPeriodo" aria-label="Período">${PERIODOS.map(([d, t]) => `<a class="tab${d === dias ? " active" : ""}"${d === dias ? ' aria-current="true"' : ""} href="${url(vista.id, sub.id, d)}">${t}</a>`).join("")}</div>
+      <div id="pResumen"></div>` : ""}
+      ${gestion() ? '<label class="filtro-vend"><span>Vendedor</span><select id="pVend"><option value="">Todos</option></select></label>' : ""}
+      <div class="modal-sub" id="pInfo"></div>
+      ${conCarga ? '<div class="fila-elegir" id="pElegir" hidden><label class="check"><input type="checkbox" id="pTodos" /> Elegir todos (en despacho)</label></div>' : ""}
+      <ul class="lista-ped" id="pLista"></ul>
+      ${conCarga ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}`;
+
+    let conciliadosServidor = null; // la lista de conciliados del período la da el servidor (puede ser vieja)
+    let visibles = [];
+    const filtrar = (lista) => {
+      let l = buscarPedidos(lista, busquedaPed);
+      if (vendedorPed) l = l.filter((p) => p.vendedor === vendedorPed);
+      return l;
+    };
+    const filasDe = (lista, conDias) => {
+      const el = (p) => filaPedido(p, conCarga && ["confirmado", "en_ruta"].includes(p.estado));
+      if (!conDias) return lista.map(el).join("");
+      return agruparPorDia(lista).map((g) => `<li class="grupo-tit">${esc(g.titulo)}</li>${g.pedidos.map(el).join("")}`).join("");
+    };
+    const lista0 = $("pLista");
+    const pintar = () => {
+      if (!document.body.contains(lista0)) return; // ya se cambió de página
+      const todos = memoria.pedidos || [];
+      // contadores en las pestañas
+      const c = contadoresVistas(todos, rp, yo().id);
+      c.hacer += (memoria.web || []).filter((w) => w.estado === "nuevo").length;
+      v.querySelectorAll("[data-cuenta]").forEach((b) => { const n = c[b.dataset.cuenta]; b.textContent = n ? String(n) : ""; });
+      // filtro de vendedor (Administración)
+      const sel = $("pVend");
+      if (sel && sel.options.length === 1) {
+        [...new Set(todos.map((p) => p.vendedor).filter(Boolean))].sort().forEach((n) => sel.add(new Option(n, n, false, n === vendedorPed)));
+      }
+      let html = "", info = "";
+      if (vista.id === "hacer") {
+        const web = (memoria.web || []).filter((w) => w.estado === "nuevo")
+          .filter((w) => !busquedaPed || [w.id, w.cliente.negocio, w.cliente.contacto, w.cliente.telefono].join(" ").toLowerCase().includes(busquedaPed.trim().toLowerCase()))
+          .filter((w) => !vendedorPed || w.vendedor === vendedorPed);
+        const secciones = [{ id: "web", titulo: rp === "vendedor" ? "Pedidos web de tus clientes" : "Pedidos web (los toma su vendedor)", web: true, pedidos: web }]
+          .concat(porHacer(todos, rp, yo().id).map((s) => ({ ...s, pedidos: filtrar(s.pedidos) })));
+        visibles = [].concat(...secciones.filter((s) => !s.web).map((s) => s.pedidos));
+        const total = secciones.reduce((a, s) => a + s.pedidos.length, 0);
+        html = secciones.filter((s) => s.pedidos.length).map((s) => `<li class="grupo-tit" data-seccion="${s.id}">${esc(s.titulo)} <b>${s.pedidos.length}</b></li>${s.web ? s.pedidos.map(filaWeb).join("") : filasDe(s.pedidos, false)}`).join("");
+        info = total ? "" : "";
+        if (!total) html = `<li class="vacio-panel">${busquedaPed || vendedorPed ? "Nada con ese filtro." : "Nada pendiente por ahora."}</li>`;
+      } else {
+        let lista = esConc && conciliadosServidor ? conciliadosServidor : pedidosDeVista(todos, vista.id, sub && sub.id, { rol: rp, uid: yo().id, dias });
+        if (vista.id === "cobros" && sub.id === "cobrar") {
+          const peso = (p) => { const ec = estadoCredito(p); return ec && ec.vence ? (ec.nivel === "al_dia" || ec.nivel === "proximo" ? ec.dias : -ec.dias) : 9999; };
+          lista = lista.slice().sort((a, b) => peso(a) - peso(b));
+        }
+        lista = filtrar(lista);
+        visibles = lista;
+        if (esConc) $("pResumen").innerHTML = resumenConciliadosHtml(resumenConciliados(lista), dias);
+        const vencidos = lista.filter((p) => { const b = bandera(p); return b && (b.clase === "vencido" || b.clase === "muy_vencido"); }).length;
+        info = lista.length ? `${lista.length} pedido(s)${vista.id === "cobros" && sub.id === "cobrar" && vencidos ? ` · ${vencidos} vencido(s)` : ""}${conCarga ? " · elegí pedidos para ver el total a cargar" : ""}` : "";
+        html = lista.length ? filasDe(lista, vista.id === "curso" || vista.id === "historial") : `<li class="vacio-panel">${busquedaPed || vendedorPed ? "Nada con ese filtro." : "No hay pedidos en esta lista."}</li>`;
+      }
+      $("pInfo").textContent = info;
+      $("pLista").innerHTML = html;
+      if (conCarga) { $("pElegir").hidden = !visibles.some((p) => ["confirmado", "en_ruta"].includes(p.estado)); pintarSel(); }
+    };
+    const elegidos = () => [...v.querySelectorAll(".check-ped input:checked")].map((x) => x.value);
+    const pintarSel = () => {
+      if (!conCarga) return;
+      const ids = elegidos();
+      const elegibles = visibles.filter((p) => ["confirmado", "en_ruta"].includes(p.estado));
+      const t = totalCarga(elegibles.filter((p) => ids.includes(p.id)));
+      $("pBarra").hidden = !ids.length;
+      $("pSel").textContent = `${ids.length} pedido${ids.length === 1 ? "" : "s"}`;
+      $("pSelCajas").textContent = ` · ${t.cajas} caja${t.cajas === 1 ? "" : "s"}`;
+      $("pTodos").checked = !!ids.length && ids.length === elegibles.length;
+    };
+    if (conCarga) {
+      $("pLista").addEventListener("change", pintarSel);
+      $("pTodos").addEventListener("change", () => { v.querySelectorAll(".check-ped input").forEach((x) => (x.checked = $("pTodos").checked)); pintarSel(); });
+      $("btnVerCarga").addEventListener("click", () => { sessionStorage.setItem(K_CARGA, JSON.stringify(elegidos())); ir("#/carga"); });
+    }
+    let tBus = null;
+    $("pBuscar").addEventListener("input", (e) => { clearTimeout(tBus); tBus = setTimeout(() => { busquedaPed = e.target.value; pintar(); }, 120); });
+    const sv = $("pVend");
+    if (sv) sv.addEventListener("change", () => { vendedorPed = sv.value; pintar(); });
+
+    // 1) al instante con lo que ya hay  2) lista fresca por detrás
+    const guardado = pedidosEnMemoria();
+    if (guardado) { memoria.pedidos = guardado; pintar(); }
+    else $("pLista").innerHTML = `<li>${spin()}</li>`;
+    const tareas = [];
+    // siempre se trae la lista fresca por detrás (salvo que se haya traído recién, al ir y volver rápido)
+    if (Date.now() - memoria.t > 4000) tareas.push(refrescarPedidos().catch((e) => { if (!guardado) throw e; }));
+    if (esConc) tareas.push(api("pedidos", { conciliados: true, dias }).then((r) => { conciliadosServidor = r.pedidos.slice().sort((a, b) => String(b.conciliado_at).localeCompare(String(a.conciliado_at))); }));
+    if (tareas.length) {
+      cargando(1);
+      try { await Promise.all(tareas); } finally { cargando(-1); }
+      if (!vigente()) return;
+      pintar();
+    }
+  }
+
+  /* Entregas del despachador (lista simple con elegir carga) */
+  async function vListaClasica(v, _p, query, vigente) {
     const entregas = enEntregas();
     const tabs = pestanasPanel(entregas ? "despachador" : rolPedidos()).filter((t) => t.estados || t.filtro || t.web);
     const tab = tabs.find((t) => t.id === query.get("tab")) || tabs[0];
@@ -1010,7 +1156,7 @@
         ok: "Descartar", validar: (x) => (x.motivo.trim() ? "" : "Escribí el motivo."),
       });
       if (!d) return;
-      try { await api("descartarWeb", { id: w.id, motivo: d.motivo.trim() }); toast(`${w.id} descartado`); ir("#/pedidos?tab=web"); }
+      try { await api("descartarWeb", { id: w.id, motivo: d.motivo.trim() }); memoria.t = 0; toast(`${w.id} descartado`); ir("#/pedidos?tab=hacer"); }
       catch (e) { toast(e.message); }
     });
   }
@@ -1055,8 +1201,21 @@
   const ETIQUETAS = { confirmar: "Aprobar", en_ruta: "Salió en ruta", entregado: "Entregado", reasignar: "Cambiar despachador", cancelar: "Anular pedido", reabrir: "Volver a En proceso",
     cobrar: "Marcar cancelado (pagado)", conciliar: "Conciliar pago (recibido)", rechazar: "Pago no recibido", desconciliar: "Deshacer conciliación" };
   async function vPedido(v, id, _q, vigente) {
-    const { pedido: p } = await api("pedido", { pedido_id: id });
+    // Al instante con lo que ya está en la lista; el historial llega después
+    const enLista = (pedidosEnMemoria() || []).find((x) => x.id === id);
+    if (enLista) dibujarPedido(v, { historial: null, ...enLista });
+    let p;
+    try {
+      p = (await api("pedido", { pedido_id: id })).pedido;
+    } catch (e) {
+      if (enLista && e instanceof ErrorRed) return;
+      throw e;
+    }
     if (!vigente()) return;
+    guardarEnMemoria(p);
+    dibujarPedido(v, p);
+  }
+  function dibujarPedido(v, p) {
     $("appTitulo").textContent = p.id;
     const c = p.cliente_datos || {};
     const tel = telLink(c.telefono), tel2 = telLink(c.telefono2);
@@ -1103,6 +1262,7 @@
       </section>
       <button type="button" class="btn btn-ghost btn-bloque" id="btnReenviar">Reenviar al grupo de WhatsApp</button>
       ${puedeBorrar(roles(), yo().id, p) ? '<button type="button" class="btn btn-ghost btn-bloque btn-peligro" id="btnBorrarPed">Borrar pedido</button>' : ""}
+      ${p.historial === null ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3>${spin("Cargando historial…")}</section>` : ""}
       ${p.historial && p.historial.length ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3><ol class="historial">${p.historial.map((h) =>
         `<li><strong>${esc({ creado: "Enviado (en proceso)", reasignado: "Despachador cambiado", pendiente: "Vuelto a En proceso", confirmado: "Aprobado",
           cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", borrado: "Borrado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
@@ -1117,7 +1277,12 @@
         ok: "Borrar pedido", validar: (x) => (x.motivo.trim() ? "" : "Escribí el motivo."),
       });
       if (!d) return;
-      try { await api("borrarPedido", { pedido_id: p.id, motivo: d.motivo.trim() }); toast(`${p.id} borrado`); ir("#/pedidos"); }
+      try {
+        await api("borrarPedido", { pedido_id: p.id, motivo: d.motivo.trim() });
+        if (memoria.pedidos) memoria.pedidos = memoria.pedidos.filter((x) => x.id !== p.id);
+        memoria.t = 0;
+        toast(`${p.id} borrado`); ir("#/pedidos");
+      }
       catch (e) { toast(e.message); }
     });
     v.querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", () => accionPedido(p, b.dataset.acc)));
@@ -1158,8 +1323,11 @@
       if (!r) return;
       estado = acc === "entregado" ? "entregado" : "pendiente";
     }
+    const btn = document.querySelector(`[data-acc="${acc}"]`);
+    if (btn) { btn.disabled = true; btn.classList.add("ocupado"); }
     try {
-      await api("estado", { pedido_id: p.id, estado, ...extra });
+      const r = await api("estado", { pedido_id: p.id, estado, ...extra });
+      guardarEnMemoria(r.pedido);
       toast(`${p.id}: ${acc === "reasignar" ? "despachador cambiado" : nombreEstado(estado)}`);
       render();
     } catch (e) {
@@ -1231,7 +1399,8 @@
       if (!(await hoja({ titulo, cuerpo: `<p class="modal-sub">${cuerpo}</p>`, ok }))) return;
     }
     try {
-      await api("cobro", { pedido_id: p.id, accion: { cobrar: "cancelar" }[acc] || acc, ...extra });
+      const rc = await api("cobro", { pedido_id: p.id, accion: { cobrar: "cancelar" }[acc] || acc, ...extra });
+      guardarEnMemoria(rc.pedido);
       toast({ cobrar: "Marcado como cancelado", conciliar: "Pago conciliado", rechazar: "Pago rechazado: vuelve a Por cobrar", desconciliar: "Conciliación deshecha" }[acc]);
       render();
     } catch (e) {
@@ -1604,7 +1773,7 @@
       SkalaTema.fijar(b.dataset.tema);
       v.querySelectorAll(".selector-tema button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
     });
-    $("btnSalir").addEventListener("click", () => { SkalaAPI.cerrarSesion(); toast("Sesión cerrada"); ir("#/ingresar"); });
+    $("btnSalir").addEventListener("click", () => { SkalaAPI.cerrarSesion(); memoria.pedidos = null; memoria.web = null; memoria.t = 0; memoria.uid = ""; toast("Sesión cerrada"); ir("#/ingresar"); });
     $("btnSync").addEventListener("click", async () => {
       const b = $("btnSync");
       b.disabled = true; b.classList.add("ocupado"); b.textContent = "Actualizando…";
