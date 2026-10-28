@@ -233,40 +233,46 @@
     <button type="button" class="btn btn-primary" id="btnArmarPedido">Armar pedido por WhatsApp</button>
   </div>
 
-  <!-- Modal de pedido -->
+  <!-- Modal de pedido: revisar (sumar / quitar), monto según forma de pago, vendedor y datos -->
   <div class="modal" id="orderModal" hidden>
     <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="orderModalTitle" tabindex="-1">
       <h3 id="orderModalTitle">Tu pedido</h3>
-      <p class="modal-sub">Revisá el pedido abajo. Los datos del cliente son opcionales.</p>
+      <p class="modal-sub" id="cartNivel">Revisá, sumá o quitá productos.</p>
+      <ul class="carrito" id="cartList"></ul>
+      <p class="cart-total" id="cartTotal"></p>
+
+      <fieldset class="pay pagos" id="fsPagoWeb">
+        <legend>Forma de pago</legend>
+        <div id="pagosWeb"></div>
+      </fieldset>
+
+      <label class="field field-full"><span>Tu vendedor *</span>
+        <select id="fVendedor"><option value="">Elegí tu vendedor</option></select>
+      </label>
 
       <div class="form-grid">
+        <label class="field"><span>Nombre del negocio *</span>
+          <input id="fNegocio" type="text" placeholder="Razón social / nombre" autocomplete="organization" enterkeyhint="next" />
+        </label>
+        <label class="field"><span>Tu nombre</span>
+          <input id="fContacto" type="text" placeholder="Persona de contacto" autocomplete="name" enterkeyhint="next" />
+        </label>
+        <label class="field"><span>Teléfono *</span>
+          <input id="fTelefono" type="tel" inputmode="tel" placeholder="0412-1234567" autocomplete="tel" enterkeyhint="next" />
+        </label>
         <label class="field"><span>RIF</span>
           <input id="fRif" type="text" placeholder="J-12345678-9" autocomplete="off" autocapitalize="characters" enterkeyhint="next" />
         </label>
-        <label class="field"><span>Nombre del negocio</span>
-          <input id="fNegocio" type="text" placeholder="Razón social / nombre" autocomplete="organization" enterkeyhint="next" />
-        </label>
         <label class="field field-full"><span>Dirección</span>
-          <input id="fDireccion" type="text" placeholder="Dirección de entrega" autocomplete="street-address" enterkeyhint="next" />
-        </label>
-        <label class="field field-full"><span>Número de teléfono</span>
-          <input id="fTelefono" type="tel" inputmode="tel" placeholder="0412-1234567" autocomplete="tel" enterkeyhint="done" />
+          <input id="fDireccion" type="text" placeholder="Dirección de entrega" autocomplete="street-address" enterkeyhint="done" />
         </label>
       </div>
 
-      <fieldset class="pay">
-        <legend>Método de pago</legend>
-        <label class="pay-opt"><input type="radio" name="pago" value="Bolívares · Contado" /> Bolívares · Contado</label>
-        <label class="pay-opt"><input type="radio" name="pago" value="Bolívares · Crédito" /> Bolívares · Crédito</label>
-        <label class="pay-opt"><input type="radio" name="pago" value="Divisas · Contado" /> Divisas · Contado</label>
-        <label class="pay-opt"><input type="radio" name="pago" value="Divisas · Crédito" /> Divisas · Crédito</label>
-      </fieldset>
+      <details class="ver-mensaje"><summary>Ver el mensaje de WhatsApp</summary>
+        <textarea id="orderText" readonly rows="9" aria-label="Mensaje a enviar"></textarea>
+      </details>
 
-      <label class="field field-full"><span>Mensaje a enviar</span>
-        <textarea id="orderText" readonly rows="9"></textarea>
-      </label>
-
-      <p class="form-warn" id="formWarn">Completá RIF, negocio, dirección, teléfono y método de pago para enviar.</p>
+      <p class="form-warn" id="formWarn" hidden></p>
 
       <div class="modal-actions">
         <button class="btn btn-ghost" id="btnCopy">Copiar mensaje</button>

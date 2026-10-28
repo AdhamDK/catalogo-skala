@@ -110,6 +110,42 @@ function accionesPedido(rol, uid, p) {
   return [];
 }
 
+/* Borrar (ej. pedidos de prueba): el vendedor los suyos, el Master cualquiera */
+function puedeBorrar(rol, uid, p) {
+  return rol === "master" || (rol === "vendedor" && String(p.vendedor_id) === String(uid));
+}
+
+/* Pedido web: número de referencia y mensaje de WhatsApp del cliente */
+function refWeb() {
+  const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let r = "";
+  for (let i = 0; i < 6; i++) r += abc[Math.floor(Math.random() * abc.length)];
+  return "WEB-" + r;
+}
+function mensajeWeb({ ref, cliente = {}, vendedor, items = [], tipo_pago, nota }) {
+  const cajas = items.reduce((a, it) => a + (Number(it.cajas) || 0), 0);
+  const conPrecio = items.some((it) => Number(it.precio) > 0);
+  const pg = pagoPorId(tipo_pago);
+  return [
+    `Hola! Quiero hacer este pedido de Skala (${ref}):`,
+    "",
+    "*Mis datos*",
+    `Negocio: ${cliente.negocio || "—"}`,
+    cliente.contacto ? `Nombre: ${cliente.contacto}` : null,
+    cliente.rif_cedula ? `RIF: ${cliente.rif_cedula}` : null,
+    `Teléfono: ${cliente.telefono || "—"}`,
+    cliente.direccion ? `Dirección: ${cliente.direccion}` : null,
+    vendedor ? `Mi vendedor: ${vendedor}` : null,
+    "",
+    "*Pedido*",
+    ...items.map((it) => `• ${it.cajas} × ${it.producto} (${it.code})${conPrecio && it.precio ? ` · ${dinero(precioUnitario(it, tipo_pago))} c/u` : ""}`),
+    "",
+    `Total: ${cajas} caja${cajas === 1 ? "" : "s"}`,
+    conPrecio && pg ? `Monto: ${dinero(totalPorPago(items, tipo_pago))} (${pg.nombre})` : pg ? `Forma de pago: ${pg.nombre}` : null,
+    nota ? `Nota: ${nota}` : null,
+  ].filter((l) => l !== null).join("\n");
+}
+
 function pestanasPanel(rol) {
   if (rol === "despachador") {
     return [
@@ -119,6 +155,7 @@ function pestanasPanel(rol) {
   }
   const tabs = [
     { id: "pendiente", nombre: rol === "vendedor" ? "En proceso" : "Por aprobar", estados: ["pendiente"] },
+    { id: "web", nombre: "Web", web: true },
     { id: "curso", nombre: "En despacho", estados: ["confirmado", "en_ruta"] },
     { id: "entregado", nombre: "Entregados", estados: ["entregado"] },
     { id: "cobrar", nombre: "Por cobrar", filtro: "por_cobrar" },
@@ -301,5 +338,5 @@ if (typeof module !== "undefined" && module.exports) {
     nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, coordsDeTexto, estadoCredito, totalCarga,
     monedaDePago, formatoMonto, resumenConciliados,
     CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, sinPrecio, dinero,
-    limitePronto, prontoVigente, textoStock, topeStock };
+    limitePronto, prontoVigente, textoStock, topeStock, puedeBorrar, refWeb, mensajeWeb };
 }

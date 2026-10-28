@@ -72,13 +72,17 @@ var HOJAS = {
             'entregado_por', 'entregado_at', 'documento',
             'dias_credito', 'cobro', 'cobrado_at', 'cobrado_por', 'conciliado_at', 'conciliado_por',
             'monto', 'moneda',
-            'nivel_precio', 'excepcion_precio', 'tipo_pago', 'total', 'tipo_pago_real', 'total_final'],
+            'nivel_precio', 'excepcion_precio', 'tipo_pago', 'total', 'tipo_pago_real', 'total_final',
+            'web_id', 'borrado', 'borrado_motivo', 'borrado_por', 'borrado_at'],
   PedidoItems: ['pedido_id', 'code', 'producto', 'cajas', 'unidades_caja', 'unidad', 'total_unidades',
                 'precio', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto'],
   Historial: ['fecha', 'pedido_id', 'usuario', 'accion', 'detalle'],
   Precios: ['code', 'producto', 'menor', 'mayor', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto', 'updated_at', 'updated_por'],
   // Entradas de mercancía y ajustes (positivo o negativo). Lo aprobado se descuenta solo.
-  Inventario: ['fecha', 'code', 'producto', 'cajas', 'tipo', 'nota', 'usuario']
+  Inventario: ['fecha', 'code', 'producto', 'cajas', 'tipo', 'nota', 'usuario'],
+  // Pedidos que arma el cliente en el catálogo: esperan a que su vendedor los tome
+  PedidosWeb: ['id', 'fecha', 'created_at', 'vendedor_id', 'vendedor', 'negocio', 'contacto', 'rif_cedula', 'telefono', 'direccion',
+               'items', 'tipo_pago', 'total_cajas', 'total', 'nota', 'estado', 'pedido_id', 'atendido_por', 'atendido_at', 'motivo']
 };
 
 /* -------------------- Entradas HTTP -------------------- */
@@ -112,6 +116,11 @@ var ACCIONES = {
   estado: [accionEstado_, ROLES],
   cobro: [accionCobro_, TOMAN_PEDIDOS],
   catalogo: [accionCatalogo_, null],          // precios (público); con sesión también existencias
+  vendedores: [accionVendedores_, null],      // para que el cliente elija su vendedor
+  pedidoWeb: [accionPedidoWeb_, null],        // el cliente envía su pedido desde el catálogo
+  pedidosWeb: [accionPedidosWeb_, TOMAN_PEDIDOS],
+  descartarWeb: [accionDescartarWeb_, TOMAN_PEDIDOS],
+  borrarPedido: [accionBorrarPedido_, TOMAN_PEDIDOS],
   inventario: [accionInventario_, GESTION],
   movimiento: [accionMovimiento_, GESTION],
   guardarPrecio: [accionGuardarPrecio_, GESTION],
@@ -211,6 +220,7 @@ function ahora_() { return new Date().toISOString(); }
 function txt_(v, max) { return String(v === undefined || v === null ? '' : v).trim().slice(0, max || 200); }
 function uuid_() { return Utilities.getUuid(); }
 function esGestion_(ses) { return GESTION.indexOf(ses.rol) !== -1; }
+function borrado_(x) { return x.borrado === true || String(x.borrado) === 'true'; }
 
 /* -------------------- Seguridad -------------------- */
 function hex_(bytes) {
@@ -507,7 +517,7 @@ function existencias_(pedidos, items) {
     var x = de(code); x.cargado += Math.round(Number(m.cajas) || 0); x.controlado = true;
   });
   var estado = {};
-  (pedidos || leer_('Pedidos')).forEach(function (p) { estado[String(p.id)] = String(p.estado); });
+  (pedidos || leer_('Pedidos')).forEach(function (p) { if (!borrado_(p)) estado[String(p.id)] = String(p.estado); });
   (items || leer_('PedidoItems')).forEach(function (it) {
     var e = estado[String(it.pedido_id)];
     if (!e) return;
@@ -654,6 +664,14 @@ function accionGuardarPedido_(p, ses) {
       }
       if (soloDigitos_(rifCliente).length < 6) return { ok: false, error: 'Para factura hace falta el RIF o la cédula del cliente.', code: 'rif' };
     }
+    // Pedido web que el vendedor toma (lo pudo editar antes de enviarlo a Administración)
+    var web = null;
+    if (p.web_id) {
+      web = leer_('PedidosWeb').filter(function (w) { return String(w.id) === String(p.web_id); })[0];
+      if (!web) return { ok: false, error: 'Ese pedido web no existe.', code: 'not_found' };
+      if (String(web.estado) !== 'nuevo') return { ok: false, error: 'Ese pedido web ya fue ' + (String(web.estado) === 'tomado' ? 'tomado (' + web.pedido_id + ')' : 'descartado') + '.', code: 'web' };
+      if (!puedeTomarWeb_(ses, web)) return { ok: false, error: 'Este pedido web es de ' + web.vendedor + '. Solo su vendedor (o el Master) lo puede tomar.', code: 'forbidden' };
+    }
     var pItems = leer_('PedidoItems');
     var sinStock = faltaStock_(items, existencias_(pedidos, pItems));
     if (sinStock) return { ok: false, error: sinStock, code: 'stock' };
@@ -678,21 +696,26 @@ function accionGuardarPedido_(p, ses) {
       nota: txt_(p.nota, 300), documento: documento,
       dias_credito: diasCredito, cobro: '',
       estado: 'pendiente', estado_at: t, estado_por: ses.nombre, motivo: '',
-      client_ref: ref, created_at: t, updated_at: t
+      client_ref: ref, created_at: t, updated_at: t, web_id: web ? String(web.id) : ''
     };
     agregar_('Pedidos', ped);
+    if (web) {
+      web.estado = 'tomado'; web.pedido_id = ped.id; web.atendido_por = ses.nombre; web.atendido_at = t;
+      actualizar_('PedidosWeb', web._fila, web);
+    }
     var filas = items.map(function (it) { it.pedido_id = ped.id; return filaDe_('PedidoItems', it); });
     var hItems = hoja_('PedidoItems');
     hItems.getRange(hItems.getLastRow() + 1, 1, filas.length, HOJAS.PedidoItems.length).setValues(filas);
-    historial_(ped.id, ses, 'creado', ped.total_cajas + ' cajas · ' + ped.negocio + (ped.total ? ' · ' + ped.total + ' $ (' + pagoTexto + ')' : '') + (excepcion ? ' · precio mayor por excepción' : ''));
+    historial_(ped.id, ses, 'creado', ped.total_cajas + ' cajas · ' + ped.negocio + (ped.total ? ' · ' + ped.total + ' $ (' + pagoTexto + ')' : '') + (excepcion ? ' · precio mayor por excepción' : '') + (web ? ' · desde pedido web ' + web.id : ''));
     return { ok: true, pedido: pedidoConItems_(ped, items), cliente_id: cliente.id, cliente: clientePublico_(cliente) };
   } finally {
     lock.releaseLock();
   }
 }
 
-/* ¿Puede este usuario ver el pedido? */
+/* ¿Puede este usuario ver el pedido? Los borrados no los ve nadie (quedan en la hoja). */
 function puedeVer_(ses, x) {
+  if (borrado_(x)) return false;
   if (esGestion_(ses)) return true;
   if (ses.rol === 'vendedor') return String(x.vendedor_id) === ses.id;
   if (ses.rol === 'despachador') {
@@ -900,12 +923,125 @@ function accionDespachadores_() {
   return { ok: true, despachadores: lista };
 }
 
+/* -------------------- Pedidos web (los arma el cliente en el catálogo) -------------------- */
+var WEB_MAX_HORA = 5; // por teléfono, para frenar abusos
+function puedeTomarWeb_(ses, w) { return ses.rol === 'master' || (ses.rol === 'vendedor' && String(w.vendedor_id) === ses.id); }
+
+function accionVendedores_() {
+  var lista = leer_('Usuarios').filter(function (u) { return String(u.rol) === 'vendedor' && activo_(u); })
+    .map(function (u) { return { id: String(u.id), nombre: String(u.nombre) }; });
+  lista.sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
+  return { ok: true, vendedores: lista };
+}
+
+function accionPedidoWeb_(p) {
+  var c = p.cliente || {};
+  var datos = { negocio: txt_(c.negocio, 120), contacto: txt_(c.contacto, 120), rif_cedula: txt_(c.rif_cedula || c.rif, 30).toUpperCase(),
+    telefono: txt_(c.telefono, 30), direccion: txt_(c.direccion, 250) };
+  if (!datos.negocio && !datos.contacto) return { ok: false, error: 'Escribí tu nombre o el de tu negocio.', code: 'cliente' };
+  if (soloDigitos_(datos.telefono).length < 7) return { ok: false, error: 'Escribí tu teléfono (para que el vendedor te contacte).', code: 'telefono' };
+  var items = limpiarItems_(p.items);
+  if (!items.length) return { ok: false, error: 'El pedido no tiene productos.', code: 'empty' };
+  var v = leer_('Usuarios').filter(function (u) { return String(u.id) === String(p.vendedor_id) && String(u.rol) === 'vendedor' && activo_(u); })[0];
+  if (!v) return { ok: false, error: 'Elegí tu vendedor.', code: 'vendedor' };
+  var ref = txt_(p.ref, 40).toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  if (!/^WEB-[A-Z0-9]{4,12}$/.test(ref)) ref = 'WEB-' + uuid_().replace(/-/g, '').slice(0, 8).toUpperCase();
+  var cache = CacheService.getScriptCache();
+  var claveTel = 'web_' + soloDigitos_(datos.telefono);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var todos = leer_('PedidosWeb');
+    var previo = todos.filter(function (w) { return String(w.id) === ref; })[0];
+    if (previo) return { ok: true, duplicado: true, id: ref };
+    var n = Number(cache.get(claveTel) || 0);
+    if (n >= WEB_MAX_HORA) return { ok: false, error: 'Ya enviaste varios pedidos. Esperá un rato o escribinos por WhatsApp.', code: 'limite' };
+    cache.put(claveTel, String(n + 1), 3600);
+    var totalCajas = items.reduce(function (a, it) { return a + it.cajas; }, 0);
+    ponerPrecios_(items, tablaPrecios_(), totalCajas >= CAJAS_MAYOR);
+    var tipo = pagoPorId_(String(p.tipo_pago || '')) ? String(p.tipo_pago) : 'credito';
+    var t = ahora_();
+    agregar_('PedidosWeb', { id: ref, fecha: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm'), created_at: t,
+      vendedor_id: String(v.id), vendedor: String(v.nombre), negocio: datos.negocio || datos.contacto, contacto: datos.contacto,
+      rif_cedula: datos.rif_cedula, telefono: datos.telefono, direccion: datos.direccion,
+      items: JSON.stringify(items.map(function (it) { return { code: it.code, producto: it.producto, cajas: it.cajas, unidades_caja: it.unidades_caja, unidad: it.unidad }; })),
+      tipo_pago: tipo, total_cajas: totalCajas, total: totalPorPago_(items, tipo), nota: txt_(p.nota, 300), estado: 'nuevo' });
+    return { ok: true, id: ref };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function webPublico_(w, precios) {
+  var items = [];
+  try { items = JSON.parse(String(w.items || '[]')); } catch (e) { items = []; }
+  items = limpiarItems_(items);
+  var cajas = items.reduce(function (a, it) { return a + it.cajas; }, 0);
+  ponerPrecios_(items, precios, cajas >= CAJAS_MAYOR);
+  return { id: String(w.id), fecha: String(w.fecha), created_at: String(w.created_at), vendedor_id: String(w.vendedor_id), vendedor: String(w.vendedor),
+    cliente: { negocio: String(w.negocio), contacto: String(w.contacto), rif_cedula: String(w.rif_cedula), telefono: String(w.telefono), direccion: String(w.direccion) },
+    items: items, tipo_pago: String(w.tipo_pago) || 'credito', total_cajas: cajas, nota: String(w.nota), estado: String(w.estado),
+    pedido_id: String(w.pedido_id), atendido_por: String(w.atendido_por), motivo: String(w.motivo) };
+}
+
+/* Vendedor: los suyos. Administración y Master: todos (Administración los ve, pero no los toma). */
+function accionPedidosWeb_(p, ses) {
+  var precios = tablaPrecios_();
+  var estado = p.estado === 'todos' ? '' : 'nuevo';
+  var lista = leer_('PedidosWeb').filter(function (w) {
+    if (estado && String(w.estado) !== estado) return false;
+    return esGestion_(ses) || String(w.vendedor_id) === ses.id;
+  });
+  lista.sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
+  return { ok: true, pedidos: lista.slice(0, 200).map(function (w) { var o = webPublico_(w, precios); o.puede_tomar = puedeTomarWeb_(ses, w); return o; }) };
+}
+
+function accionDescartarWeb_(p, ses) {
+  var motivo = txt_(p.motivo, 200);
+  if (!motivo) return { ok: false, error: 'Indicá el motivo.', code: 'motivo' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var w = leer_('PedidosWeb').filter(function (x) { return String(x.id) === String(p.id); })[0];
+    if (!w || (!esGestion_(ses) && String(w.vendedor_id) !== ses.id)) return { ok: false, error: 'Pedido web no encontrado.', code: 'not_found' };
+    if (!puedeTomarWeb_(ses, w)) return { ok: false, error: 'Solo su vendedor (o el Master) lo puede descartar.', code: 'forbidden' };
+    if (String(w.estado) !== 'nuevo') return { ok: false, error: 'Ese pedido web ya fue atendido.', code: 'web' };
+    w.estado = 'descartado'; w.motivo = motivo; w.atendido_por = ses.nombre; w.atendido_at = ahora_();
+    actualizar_('PedidosWeb', w._fila, w);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* Borrar un pedido (ej. uno de prueba). Vendedor: los suyos · Master: cualquiera.
+   No se pierde: queda en la hoja marcado como borrado y en el Historial. Sale de listas, totales y stock. */
+function accionBorrarPedido_(p, ses) {
+  var motivo = txt_(p.motivo, 200);
+  if (!motivo) return { ok: false, error: 'Indicá por qué se borra.', code: 'motivo' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ped = leer_('Pedidos').filter(function (x) { return String(x.id) === String(p.pedido_id); })[0];
+    if (!ped || !puedeVer_(ses, ped)) return { ok: false, error: 'Pedido no encontrado.', code: 'not_found' };
+    var propio = ses.rol === 'vendedor' && String(ped.vendedor_id) === ses.id;
+    if (!propio && ses.rol !== 'master') return { ok: false, error: 'Solo el vendedor del pedido o el Master pueden borrarlo.', code: 'forbidden' };
+    var t = ahora_();
+    ped.borrado = true; ped.borrado_motivo = motivo; ped.borrado_por = ses.nombre; ped.borrado_at = t; ped.updated_at = t;
+    actualizar_('Pedidos', ped._fila, ped);
+    historial_(ped.id, ses, 'borrado', motivo);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /* -------------------- Resumen -------------------- */
 function accionResumen_(p, ses) {
   var dias = Math.min(Math.max(Number(p.dias) || 30, 1), 365);
   var desde = new Date(Date.now() - dias * 86400000).toISOString();
   var pedidos = leer_('Pedidos').filter(function (x) {
-    return String(x.created_at) >= desde && (esGestion_(ses) || String(x.vendedor_id) === ses.id);
+    return !borrado_(x) && String(x.created_at) >= desde && (esGestion_(ses) || String(x.vendedor_id) === ses.id);
   });
   var ids = {};
   pedidos.forEach(function (x) { ids[String(x.id)] = x; });

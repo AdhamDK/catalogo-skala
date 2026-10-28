@@ -388,3 +388,16 @@ html[data-tema="oscuro"] .inv-stock.agotado strong { color: #ff8a8d; }
 .inv-fila .ped-det { margin: 4px 0 0; }
 .inv-botones { display: flex; gap: 8px; margin-top: 8px; }
 .inv-botones .btn { flex: 1; min-height: 44px; padding: 6px 10px; font-size: 0.88rem; }
+
+/* ---------- Pedidos web y borrar ---------- */
+.est-web { background: #fde8f1; color: #9b1f52; }
+html[data-tema="oscuro"] .est-web { background: rgba(233, 78, 140, 0.18); color: #f7a8c8; }
+.fila-web { border-left-color: var(--rosa); }
+.aviso-web-inicio { display: flex; flex-direction: column; gap: 2px; color: inherit; border-color: var(--rosa); background: #fff5f9; }
+.aviso-web-inicio strong { font-size: 1.1rem; color: #9b1f52; }
+.aviso-web-inicio span { font-size: 0.88rem; color: var(--tinta-suave); }
+html[data-tema="oscuro"] .aviso-web-inicio { background: rgba(233, 78, 140, 0.1); }
+html[data-tema="oscuro"] .aviso-web-inicio strong { color: #f7a8c8; }
+.aviso-web .link-btn { min-height: 44px; }
+.btn-peligro { color: #b3261e; border-color: rgba(179, 38, 30, 0.45); }
+html[data-tema="oscuro"] .btn-peligro { color: #ff8a80; border-color: rgba(255, 138, 128, 0.5); }

@@ -21,6 +21,7 @@
   const K_DESTINO = "skala_destino";
   const K_ULTIMO_USUARIO = "skala_ultimo_usuario";
   const K_CARGA = "skala_carga";          // pedidos elegidos para ver el total de carga
+  const K_WEB = "skala_tomando_web";      // pedido web que se está tomando (id, cliente, forma de pago)
   const TODOS = ["master", "admin", "vendedor", "despachador"];
   const TOMAN = ["master", "admin", "vendedor"];
   const rol = () => (sesion() || { usuario: {} }).usuario.rol;
@@ -49,6 +50,7 @@
     pedidos: { titulo: "Pedidos", roles: TOMAN, nav: "pedidos", render: vPedidos },
     entregas: { titulo: "Mis entregas", roles: ["despachador"], nav: "entregas", render: vPedidos },
     pedido: { titulo: "Pedido", roles: TODOS, atras: true, render: vPedido },
+    web: { titulo: "Pedido web", roles: TOMAN, nav: "pedidos", atras: "#/pedidos?tab=web", render: vWeb },
     carga: { titulo: "Total de carga", roles: ["despachador", "master", "admin"], atras: true, render: vCarga },
     clientes: { titulo: "Clientes", roles: TOMAN, nav: "clientes", render: vClientes },
     cliente: { titulo: "Cliente", roles: TOMAN, nav: "clientes", atras: "#/clientes", render: vCliente },
@@ -270,12 +272,17 @@
       }
     } else {
       const gestion = r !== "vendedor";
-      const [hoy, porCobrar, porConciliar] = await Promise.all([
+      const [hoy, porCobrar, porConciliar, web] = await Promise.all([
         api("resumen", { dias: 1 }),
         api("pedidos", { por_cobrar: true }),
         gestion ? api("pedidos", { por_conciliar: true }) : Promise.resolve({ pedidos: [] }),
+        api("pedidosWeb").catch(() => ({ pedidos: [] })),
       ]);
       if (!vigente()) return;
+      if (web.pedidos.length) {
+        const n = web.pedidos.length;
+        $("iDestacado").innerHTML = `<a class="tarjeta aviso-web-inicio" href="#/pedidos?tab=web" id="iWeb"><strong>${n} pedido${n === 1 ? "" : "s"} web</strong><span>${r === "vendedor" ? "Tus clientes los armaron en el catálogo: revisalos y envialos a Administración." : "Armados por clientes en el catálogo, esperando a su vendedor."}</span></a>`;
+      }
       const vencidos = porCobrar.pedidos.filter((p) => { const ec = estadoCredito(p); return ec && (ec.nivel === "vencido" || ec.nivel === "muy_vencido"); }).length;
       const proximos = porCobrar.pedidos.filter((p) => { const ec = estadoCredito(p); return ec && ec.nivel === "proximo"; }).length;
       tiles = tile(hoy.total_pedidos, "pedidos hoy", "#/pedidos") + tile(hoy.total_cajas, "cajas hoy", "#/resumen") +
@@ -306,7 +313,7 @@
     if (!cli) return ir("#/nuevo");
     const productos = [...BANOS.map((p) => ({ ...p, tipo: "banos" })), ...KITS.map((p) => ({ ...p, tipo: "kits" }))];
     let precios = {};
-    v.innerHTML = `${pasos(2)}
+    v.innerHTML = `${pasos(2)}${avisoWeb()}
       <a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>
       <div class="buscador"><input type="search" id="nBuscar" placeholder="Buscar producto o código" autocomplete="off" enterkeyhint="search" value="${esc(busquedaNuevo)}" /></div>
       <div class="periodos" id="nFiltros">${[["todos", "Todos"], ["banos", "Baños de crema"], ["kits", "Kits"], ["elegidos", "Elegidos"]].map(([k, t]) =>
@@ -416,6 +423,7 @@
       if (await hoja({ titulo: "¿Vaciar el pedido?", cuerpo: '<p class="modal-sub">Se quitan todos los productos elegidos.</p>', ok: "Vaciar" })) { guardarCarrito({}); guardarLS(K_MAYOR, false); pintar(); }
     });
     $("nSeguir").addEventListener("click", (e) => { if (!cajasCarrito()) { e.preventDefault(); toast("Elegí al menos un producto."); } });
+    enlazarAvisoWeb();
     return preciosYStock((m) => { if (vigente() && $("nLista") === lista) { precios = m; pintar(); } }).then((m) => { precios = m; pintar(); });
   }
 
@@ -526,11 +534,12 @@
         return;
       }
       if (modo === "ficha") {
-        v.innerHTML = `${pasos(1)}${fichaCliente(cli)}
+        v.innerHTML = `${pasos(1)}${avisoWeb()}${fichaCliente(cli)}
           <div class="barra-accion">
             <button type="button" class="btn btn-ghost" id="btnCambiarCli">Cambiar cliente</button>
             <a class="btn btn-primary" href="#/nuevo/productos" id="btnAProductos">Continuar a productos</a>
           </div>`;
+        enlazarAvisoWeb();
         $("btnLapiz").addEventListener("click", () => { enEdicion = cli; modo = "form"; pintar(); });
         $("btnCambiarCli").addEventListener("click", () => { borrarLS(K_CLIENTE); modo = "buscar"; pintar(); });
         const g = $("btnGpsFicha");
@@ -598,7 +607,8 @@
     const unidades = {};
     items.forEach((it) => { if (it.total_unidades) unidades[it.unidad] = (unidades[it.unidad] || 0) + it.total_unidades; });
     let precios = await preciosYStock((m) => { precios = m; if ($("fEnviar")) pintarPrecios(); });
-    v.innerHTML = `${pasos(3)}
+    const web = tomandoWeb();
+    v.innerHTML = `${pasos(3)}${avisoWeb()}
       <a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>
       <section class="tarjeta">
         <div class="fila-top"><h3 class="sub-titulo">Productos</h3><a class="link-btn" href="#/nuevo/productos">Cambiar</a></div>
@@ -649,7 +659,13 @@
         </label>`).join("") + (hayPrecio && sinPrecio(its).length ? `<p class="nota-chica">Sin precio cargado: ${esc(sinPrecio(its).join(", "))}.</p>` : "")
         + (hayPrecio ? "" : '<p class="nota-chica">Todavía no hay precios cargados para estos productos.</p>');
     }
+    enlazarAvisoWeb();
     pintarPrecios();
+    if (web && web.tipo_pago && !pagoSel()) {
+      const r0 = document.querySelector(`input[name="ePago"][value="${web.tipo_pago}"]`);
+      if (r0) { r0.checked = true; $("eCredito").hidden = !esCredito(); pintarPrecios(); }
+      if (web.nota && !$("eNota").value) $("eNota").value = `Pedido web ${web.id}: ${web.nota}`;
+    }
     $("fsPago").addEventListener("change", (e) => { if (e.target.name === "ePago") { $("eCredito").hidden = !esCredito(); $("fsPago").classList.remove("falta"); pintarPrecios(); } });
     const may = $("eMayor");
     if (may) may.addEventListener("change", () => { guardarLS(K_MAYOR, may.checked); pintarPrecios(); });
@@ -684,11 +700,13 @@
       const datos = { client_ref: nuevoRef(), cliente, items: its, documento: d,
         tipo_pago: pagoSel(), pago: pagoPorId(pagoSel()).nombre, precio_mayor: total < CAJAS_MAYOR && excepcionMayor(),
         dias_credito: esCredito() ? dias : 0, nota: $("eNota").value.trim() };
+      if (web) datos.web_id = web.id;
       const btn = $("btnEnviar");
       btn.disabled = true; btn.textContent = "Enviando…";
       const terminar = (listo) => {
         guardarCarrito({});
         guardarLS(K_MAYOR, false);
+        borrarLS(K_WEB);
         borrarLS(K_CLIENTE);
         sessionStorage.setItem(K_LISTO, JSON.stringify(listo));
         ir("#/nuevo/listo");
@@ -762,7 +780,7 @@
   }
 
   async function vPedidos(v, _p, query, vigente) {
-    const tabs = pestanasPanel(rol()).filter((t) => t.estados || t.filtro);
+    const tabs = pestanasPanel(rol()).filter((t) => t.estados || t.filtro || t.web);
     const tab = tabs.find((t) => t.id === query.get("tab")) || tabs[0];
     const base = rol() === "despachador" ? "#/entregas" : "#/pedidos";
     const conCarga = tab.id === "curso" && ["despachador", "admin", "master"].includes(rol());
@@ -776,6 +794,13 @@
       ${conCarga ? '<div class="fila-elegir" id="pElegir" hidden><label class="check"><input type="checkbox" id="pTodos" /> Elegir todos</label></div>' : ""}
       <ul class="lista-ped" id="pLista"></ul>
       ${conCarga ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}`;
+    if (tab.web) {
+      const rw = await api("pedidosWeb");
+      if (!vigente()) return;
+      $("pInfo").textContent = rw.pedidos.length ? `${rw.pedidos.length} pedido(s) que armaron los clientes en el catálogo` : "";
+      $("pLista").innerHTML = rw.pedidos.length ? rw.pedidos.map(filaWeb).join("") : '<li class="vacio-panel">No hay pedidos web esperando.</li>';
+      return;
+    }
     const filtro = tab.filtro ? { [tab.filtro]: true } : { estados: tab.estados };
     const r = await api("pedidos", { ...filtro, dias });
     if (!vigente()) return;
@@ -830,6 +855,83 @@
         <ul class="resumen-items">${t.productos.map((x) => `<li><span>${esc(x.producto)} <span class="ped-det">${esc(x.code)}</span></span><em>${x.cajas} caja(s)</em></li>`).join("")}</ul>
       </details>
       <h3 class="sub-titulo">Pedidos conciliados</h3>`;
+  }
+
+  /* ---------- Pedidos web (los arma el cliente en el catálogo) ---------- */
+  function filaWeb(w) {
+    const monto = totalPorPago(w.items, w.tipo_pago);
+    return `<li><a class="fila-ped fila-web" href="#/web/${encodeURIComponent(w.id)}">
+      <div class="fila-top"><strong>${esc(w.cliente.negocio)}</strong><span class="chip-estado est-web">Pedido web</span></div>
+      <div class="ped-det">${esc(w.id)} · ${esc(fechaLegible(w.fecha))}</div>
+      <div class="ped-det">${w.total_cajas} caja(s)${monto ? ` · <strong>${esc(dinero(monto))}</strong>` : ""} · ${esc((pagoPorId(w.tipo_pago) || {}).nombre || "")}</div>
+      ${rol() === "vendedor" ? "" : `<div class="ped-det">Para: ${esc(w.vendedor)}</div>`}
+    </a></li>`;
+  }
+
+  async function vWeb(v, id, _q, vigente) {
+    const r = await api("pedidosWeb", { estado: "todos" });
+    if (!vigente()) return;
+    const w = r.pedidos.find((x) => x.id === id);
+    if (!w) { v.innerHTML = '<p class="vacio-panel">Ese pedido web ya no está.</p>'; return; }
+    $("appTitulo").textContent = w.id;
+    const c = w.cliente;
+    const tel = telLink(c.telefono), wa = telefonoWhatsapp(c.telefono);
+    const conPrecio = w.items.some((it) => it.precio > 0);
+    const estado = w.estado === "nuevo" ? "" : w.estado === "tomado" ? `Tomado por ${w.atendido_por} → <a href="#/pedido/${encodeURIComponent(w.pedido_id)}">${esc(w.pedido_id)}</a>` : `Descartado por ${esc(w.atendido_por)}: ${esc(w.motivo)}`;
+    v.innerHTML = `
+      <section class="tarjeta">
+        <div class="fila-top"><h2 class="ped-titulo">${esc(c.negocio)}</h2><span class="chip-estado est-web">Pedido web</span></div>
+        ${c.contacto && c.contacto !== c.negocio ? `<p class="ped-det">${esc(c.contacto)}</p>` : ""}
+        ${c.direccion ? `<p class="ped-det">${esc(c.direccion)}</p>` : ""}
+        <p class="ped-det">${esc(fechaLegible(w.fecha))} · eligió a <strong>${esc(w.vendedor)}</strong></p>
+        <div class="botones-contacto">
+          ${tel ? `<a class="btn btn-ghost" href="tel:${esc(tel)}">Llamar</a>` : ""}
+          ${wa ? `<a class="btn btn-ghost" href="https://wa.me/${wa}" target="_blank" rel="noopener">WhatsApp</a>` : ""}
+        </div>
+      </section>
+      ${estado ? `<p class="aviso-chico">${estado}</p>` : w.puede_tomar
+        ? `<div class="acciones-ped"><button type="button" class="btn btn-primary" id="btnTomarWeb">Tomar y revisar</button><button type="button" class="btn btn-ghost" id="btnDescartarWeb">Descartar</button></div>`
+        : `<p class="aviso-chico">Esperando a que ${esc(w.vendedor)} lo tome. Administración lo ve, pero lo toma su vendedor.</p>`}
+      <section class="tarjeta">
+        <h3 class="sub-titulo">Productos</h3>
+        <ul class="resumen-items">${w.items.map((it) => `<li><span>${it.cajas} × ${esc(it.producto)} <span class="ped-det">${esc(it.code)}</span></span><em>${it.precio ? dinero(it.cajas * precioUnitario(it, w.tipo_pago)) : ""}</em></li>`).join("")}</ul>
+        <p class="total-ped"><strong>Total: ${w.total_cajas} caja${w.total_cajas === 1 ? "" : "s"}</strong></p>
+        ${conPrecio ? `<p class="monto-ped"><strong>${dinero(totalPorPago(w.items, w.tipo_pago))}</strong> · ${esc((pagoPorId(w.tipo_pago) || {}).nombre || "")}</p>` : ""}
+        <dl class="datos">
+          ${c.rif_cedula ? `<dt>RIF</dt><dd>${esc(c.rif_cedula)}</dd>` : ""}
+          <dt>Teléfono</dt><dd>${esc(c.telefono)}</dd>
+          ${w.nota ? `<dt>Nota</dt><dd>${esc(w.nota)}</dd>` : ""}
+        </dl>
+      </section>`;
+    const bt = $("btnTomarWeb");
+    if (bt) bt.addEventListener("click", () => {
+      // Pasa al pedido en curso: el vendedor revisa cliente, productos y pago antes de enviarlo a Administración
+      const c2 = {};
+      w.items.forEach((it) => { c2[it.code] = it.cajas; });
+      guardarCarrito(c2);
+      guardarLS(K_MAYOR, false);
+      fijarCliente({ negocio: c.negocio, contacto: c.contacto, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: "", direccion: c.direccion, latitud: "", longitud: "" });
+      guardarLS(K_WEB, { id: w.id, tipo_pago: w.tipo_pago, nota: w.nota });
+      toast(`Tomando ${w.id}: revisá y enviá`);
+      ir("#/nuevo");
+    });
+    const bd = $("btnDescartarWeb");
+    if (bd) bd.addEventListener("click", async () => {
+      const d = await hoja({
+        titulo: `Descartar ${w.id}`,
+        cuerpo: '<label class="field field-full"><span>Motivo</span><textarea name="motivo" rows="3" maxlength="200" placeholder="Ej. repetido, el cliente no responde"></textarea></label>',
+        ok: "Descartar", validar: (x) => (x.motivo.trim() ? "" : "Escribí el motivo."),
+      });
+      if (!d) return;
+      try { await api("descartarWeb", { id: w.id, motivo: d.motivo.trim() }); toast(`${w.id} descartado`); ir("#/pedidos?tab=web"); }
+      catch (e) { toast(e.message); }
+    });
+  }
+  const tomandoWeb = () => leerLS(K_WEB, null);
+  const avisoWeb = () => { const t = tomandoWeb(); return t ? `<p class="aviso-chico aviso-web" id="avisoWeb">Tomando el pedido web <strong>${esc(t.id)}</strong>. <button type="button" class="link-btn" id="btnSoltarWeb">Dejar de tomarlo</button></p>` : ""; };
+  function enlazarAvisoWeb() {
+    const b = $("btnSoltarWeb");
+    if (b) b.addEventListener("click", () => { borrarLS(K_WEB); guardarCarrito({}); borrarLS(K_CLIENTE); toast("Pedido web liberado: sigue en la pestaña Web"); render(); });
   }
 
   /* ---------- Total de carga (despachador) ---------- */
@@ -913,11 +1015,24 @@
         </dl>
       </section>
       <button type="button" class="btn btn-ghost btn-bloque" id="btnReenviar">Reenviar al grupo de WhatsApp</button>
+      ${puedeBorrar(rol(), yo().id, p) ? '<button type="button" class="btn btn-ghost btn-bloque btn-peligro" id="btnBorrarPed">Borrar pedido</button>' : ""}
       ${p.historial && p.historial.length ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3><ol class="historial">${p.historial.map((h) =>
         `<li><strong>${esc({ creado: "Enviado (en proceso)", reasignado: "Despachador cambiado", pendiente: "Vuelto a En proceso", confirmado: "Aprobado",
-          cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
+          cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", borrado: "Borrado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
 
     $("btnReenviar").addEventListener("click", () => enviarAlGrupo(mensajeGrupo(p, c)));
+    const bb = $("btnBorrarPed");
+    if (bb) bb.addEventListener("click", async () => {
+      const d = await hoja({
+        titulo: `¿Borrar ${p.id}?`,
+        cuerpo: `<p class="modal-sub">Sale de las listas, los totales y el inventario. Queda guardado en la hoja y en el historial.</p>
+          <label class="field field-full"><span>¿Por qué se borra?</span><textarea name="motivo" rows="2" maxlength="200" placeholder="Ej. era un pedido de prueba"></textarea></label>`,
+        ok: "Borrar pedido", validar: (x) => (x.motivo.trim() ? "" : "Escribí el motivo."),
+      });
+      if (!d) return;
+      try { await api("borrarPedido", { pedido_id: p.id, motivo: d.motivo.trim() }); toast(`${p.id} borrado`); ir("#/pedidos"); }
+      catch (e) { toast(e.message); }
+    });
     v.querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", () => accionPedido(p, b.dataset.acc)));
   }
 

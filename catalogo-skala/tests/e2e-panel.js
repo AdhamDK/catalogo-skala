@@ -99,9 +99,9 @@ function servidor() {
   /* ---------- Catálogo → panel con el carrito ---------- */
   await page.goto(BASE + "/index.html");
   await page.waitForSelector(".card");
-  await tocar('.qty-btn[data-act="plus"][data-code="BC-01"]');
-  await tocar('.qty-btn[data-act="plus"][data-code="BC-01"]');
-  await tocar('.qty-btn[data-act="plus"][data-code="KT-01"]');
+  await tocar('.card[data-card="BC-01"] .card-name');
+  await tocar('.card[data-card="BC-01"] .card-name');
+  await tocar('.card[data-card="KT-01"] .card-name');
   await tocar("#btnArmarPedido");
   assert.ok(await page.locator("#modoModal").isVisible());
   await page.click("#btnModoVendedor");
@@ -543,6 +543,66 @@ function servidor() {
   assert.equal(await page.innerText("#concUSD"), "USD 1.100,00"); // se concilió hoy
   await salir();
   ok("administración verifica el pago y lo marca Conciliado");
+
+  /* ---------- Pedido web: lo arma el cliente, lo toma su vendedor ---------- */
+  const oscarId = gas.tabla("Usuarios").find((u) => u.usuario === "oscar").id;
+  const pw = gas.post({ action: "pedidoWeb", ref: "WEB-TEST01", vendedor_id: oscarId, tipo_pago: "pronto",
+    cliente: { negocio: "Salón Luz", contacto: "Luz", telefono: "0414-5551234", direccion: "Centro" },
+    items: [{ code: "BC-01", producto: "Babosa", cajas: 4, unidades_caja: 6, unidad: "unidades" }] });
+  assert.equal(pw.ok, true);
+  await ingresar("ana", "Ana*2222");
+  await esperarRuta("#/inicio");
+  await page.waitForSelector("#iWeb");
+  assert.match(await page.innerText("#iWeb"), /1 pedido web/);
+  await page.click("#iWeb");
+  await esperarRuta("#/pedidos?tab=web");
+  await page.click("#pLista .fila-web");
+  await esperarRuta("#/web/");
+  assert.equal(await page.locator("#btnTomarWeb").count(), 0); // Administración lo ve, no lo toma
+  assert.match(await page.innerText("#vista"), /Esperando a que Óscar lo tome/);
+  await salir();
+  await ingresar("oscar", "Oscar.1234");
+  await esperarRuta("#/inicio");
+  await page.waitForSelector("#iWeb");
+  await page.click("#iWeb");
+  await esperarRuta("#/pedidos?tab=web");
+  await page.click("#pLista .fila-web");
+  await esperarRuta("#/web/");
+  assert.match(await page.innerText(".monto-ped"), /36,00 \$ · Pronto pago/); // 4 × (10 − 1)
+  await foto("09e-pedido-web");
+  await revisarDiseno("pedido web");
+  await page.click("#btnTomarWeb");
+  await esperarRuta("#/nuevo");
+  await page.waitForSelector("#avisoWeb");
+  assert.match(await page.innerText("#fichaCli"), /Salón Luz/);
+  await tocar("#btnAProductos");
+  await esperarRuta("#/nuevo/productos");
+  assert.match(await page.innerText("#nTotal"), /^4 cajas/);
+  await tocar('.pcard[data-code="BC-01"] .pcard-tap'); // el vendedor lo edita: 5 cajas
+  await tocar("#nSeguir");
+  await esperarRuta("#/nuevo/enviar");
+  assert.equal(await page.locator('input[name="ePago"][value="pronto"]').isChecked(), true);
+  await tocar('input[name="eDoc"][value="Nota de entrega"]');
+  await tocar("#btnEnviar");
+  await esperarRuta("#/nuevo/listo");
+  const w = gas.tabla("PedidosWeb")[0];
+  assert.equal(w.estado, "tomado");
+  const tomado = gas.tabla("Pedidos").find((p) => p.web_id === "WEB-TEST01");
+  assert.equal(tomado.total_cajas, 5); assert.equal(tomado.estado, "pendiente"); assert.equal(tomado.total, 45);
+  ok("pedido web: Administración lo ve sin tomarlo; su vendedor lo toma, lo edita y lo envía");
+
+  // Borrar un pedido de prueba (el vendedor, los suyos)
+  await page.goto(BASE + "/panel.html#/pedido/" + tomado.id);
+  await esperarRuta("#/pedido/");
+  await tocar("#btnBorrarPed");
+  await page.click("#hojaOk");
+  assert.match(await page.innerText("#hojaError"), /motivo/);
+  await page.fill('#hoja textarea[name="motivo"]', "Era de prueba");
+  await page.click("#hojaOk");
+  await esperarRuta("#/pedidos");
+  assert.equal(gas.tabla("Pedidos").find((p) => p.id === tomado.id).borrado, true);
+  ok("borrar pedido: con motivo; sale de las listas y queda en la hoja");
+  await salir();
 
   /* ---------- Master ---------- */
   await ingresar("jose", "Skala#2026");

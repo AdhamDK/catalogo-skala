@@ -105,5 +105,17 @@ const SkalaAPI = (function () {
   /* { code: {menor, mayor, ..., disponible} } */
   const preciosMapa = (d) => Object.fromEntries(((d && d.productos) || []).map((p) => [p.code, p]));
 
-  return { catalogo, catalogoGuardado, preciosMapa, api, sesion, guardarSesion, cerrarSesion, ErrorRed, cola, encolar, subirCola, leerLS, guardarLS, borrarLS };
+  /* Envío que no espera respuesta y sobrevive a que se abra WhatsApp (pedido web del cliente) */
+  function enviarSinEsperar(action, datos = {}) {
+    if (!API) return false;
+    const body = JSON.stringify({ action, ...datos });
+    try {
+      fetch(API, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body, keepalive: true, redirect: "follow" }).catch(() => {});
+      return true;
+    } catch (e) {
+      try { return navigator.sendBeacon(API, new Blob([body], { type: "text/plain;charset=utf-8" })); } catch (e2) { return false; }
+    }
+  }
+
+  return { enviarSinEsperar, catalogo, catalogoGuardado, preciosMapa, api, sesion, guardarSesion, cerrarSesion, ErrorRed, cola, encolar, subirCola, leerLS, guardarLS, borrarLS };
 })();

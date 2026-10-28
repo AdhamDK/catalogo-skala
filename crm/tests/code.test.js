@@ -35,9 +35,9 @@ const pedir = (g, token, extra = {}) =>
 const idDe = (g, usuario) => g.tabla("Usuarios").find((u) => u.usuario === usuario).id;
 
 /* ---------- Hojas, usuarios, login ---------- */
-test("crea 7 hojas; Clientes empieza con las columnas de GPS_CLIENTES; Precios precargada", () => {
+test("crea 8 hojas; Clientes empieza con las columnas de GPS_CLIENTES; Precios precargada", () => {
   const g = preparar();
-  assert.deepEqual(Object.keys(g.hojas).sort(), ["Clientes", "Historial", "Inventario", "PedidoItems", "Pedidos", "Precios", "Usuarios"]);
+  assert.deepEqual(Object.keys(g.hojas).sort(), ["Clientes", "Historial", "Inventario", "PedidoItems", "Pedidos", "PedidosWeb", "Precios", "Usuarios"]);
   assert.equal(g.tabla("Precios").length, 19);
   assert.deepEqual(g.tabla("Precios")[0], { code: "BC-01", producto: "Babosa", menor: "", mayor: "", desc_pronto: "", desc_efectivo_credito: "", desc_efectivo_pronto: "", updated_at: "", updated_por: "" });
   g.ctx.prepararHojas(); // no duplica
@@ -673,4 +673,84 @@ test("cobro con otro método de pago: recalcula el total final con el descuento"
   assert.equal(g.tabla("Pedidos")[0].total_final, "");
   r = g.post({ action: "cobro", token: ta, pedido_id: p.id, accion: "conciliar", monto: 40, moneda: "USD" });
   assert.equal(r.pedido.tipo_pago_real, "credito"); assert.equal(r.pedido.total_final, 40);
+});
+
+/* ---------- Pedidos web y borrar (v3) ---------- */
+const WEB = { cliente: { negocio: "Salón Luz", contacto: "Luz", telefono: "0414-5551234", direccion: "Centro" },
+  items: [{ code: "BC-01", producto: "Babosa", cajas: 3, unidades_caja: 6, unidad: "unidades" }], tipo_pago: "efectivo_pronto" };
+
+test("pedido web: el cliente elige vendedor; validaciones; límite por teléfono; sin duplicar por ref", () => {
+  const g = preparar();
+  conPrecios(g);
+  const vend = g.post({ action: "vendedores" });
+  assert.deepEqual(vend.vendedores.map((v) => v.nombre), ["Kevin", "Óscar"]);
+  const oscar = idDe(g, "oscar");
+  assert.equal(g.post({ action: "pedidoWeb", ...WEB }).code, "vendedor");
+  assert.equal(g.post({ action: "pedidoWeb", ...WEB, vendedor_id: idDe(g, "ana") }).code, "vendedor"); // solo vendedores
+  assert.equal(g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar, cliente: { negocio: "X", telefono: "12" } }).code, "telefono");
+  assert.equal(g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar, items: [] }).code, "empty");
+  const r = g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar, ref: "web-ab12cd" });
+  assert.equal(r.ok, true); assert.equal(r.id, "WEB-AB12CD");
+  assert.equal(g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar, ref: "WEB-AB12CD" }).duplicado, true);
+  const fila = g.tabla("PedidosWeb")[0];
+  assert.equal(fila.vendedor, "Óscar"); assert.equal(fila.total, 3 * 6); assert.equal(fila.estado, "nuevo");
+  assert.equal(g.tabla("Clientes").length, 0); // el cliente se guarda cuando el vendedor lo toma
+  for (let i = 0; i < 4; i++) g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar });
+  assert.equal(g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar }).code, "limite");
+});
+
+test("pedido web: lo ve su vendedor y Administración; lo toma su vendedor (o Master); queda enlazado", () => {
+  const g = preparar();
+  conPrecios(g);
+  const oscar = idDe(g, "oscar");
+  const id = g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar }).id;
+  const to = login(g), tk = login(g, "kevin", "Kevin9876"), ta = login(g, "ana", "Ana*2222");
+  assert.equal(g.post({ action: "pedidosWeb", token: tk }).pedidos.length, 0);
+  const deAna = g.post({ action: "pedidosWeb", token: ta }).pedidos;
+  assert.equal(deAna.length, 1); assert.equal(deAna[0].puede_tomar, false);
+  const mio = g.post({ action: "pedidosWeb", token: to }).pedidos[0];
+  assert.equal(mio.puede_tomar, true); assert.equal(mio.items[0].precio, 10); assert.equal(mio.cliente.telefono, "0414-5551234");
+  // Administración no lo toma; otro vendedor tampoco
+  assert.equal(pedir(g, ta, { web_id: id, tipo_pago: "pronto" }).code, "forbidden");
+  assert.equal(pedir(g, tk, { web_id: id, tipo_pago: "pronto" }).code, "forbidden");
+  // Óscar lo edita (4 cajas) y lo envía
+  const r = pedir(g, to, { web_id: id, tipo_pago: "pronto", cliente: { ...WEB.cliente, id: undefined }, items: [{ code: "BC-01", producto: "Babosa", cajas: 4 }] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.pedido.web_id, id); assert.equal(r.pedido.estado, "pendiente"); assert.equal(r.pedido.total_cajas, 4);
+  assert.match(g.tabla("Historial").at(-1).detalle, new RegExp("desde pedido web " + id));
+  const w = g.tabla("PedidosWeb")[0];
+  assert.equal(w.estado, "tomado"); assert.equal(w.pedido_id, r.pedido.id);
+  assert.equal(g.post({ action: "pedidosWeb", token: to }).pedidos.length, 0);
+  assert.equal(pedir(g, to, { web_id: id, tipo_pago: "pronto" }).code, "web"); // no se toma dos veces
+  // Descartar con motivo
+  const id2 = g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar }).id;
+  assert.equal(g.post({ action: "descartarWeb", token: to, id: id2 }).code, "motivo");
+  assert.equal(g.post({ action: "descartarWeb", token: ta, id: id2, motivo: "x" }).code, "forbidden");
+  assert.equal(g.post({ action: "descartarWeb", token: to, id: id2, motivo: "Repetido" }).ok, true);
+  assert.equal(g.post({ action: "pedidosWeb", token: to, estado: "todos" }).pedidos.length, 2);
+  // Master puede tomar
+  const id3 = g.post({ action: "pedidoWeb", ...WEB, vendedor_id: oscar }).id;
+  assert.equal(pedir(g, login(g, "jose", "Skala#2026"), { web_id: id3, tipo_pago: "pronto" }).ok, true);
+});
+
+test("borrar pedido: vendedor los suyos, Master todos; sale de listas, resumen y stock", () => {
+  const g = preparar();
+  const ta = conPrecios(g);
+  g.post({ action: "movimiento", token: ta, code: "BC-01", cajas: 10 });
+  const to = login(g), tk = login(g, "kevin", "Kevin9876"), tj = login(g, "jose", "Skala#2026");
+  const p1 = pedir(g, to, { tipo_pago: "pronto" }).pedido;
+  const p2 = pedir(g, tk, { tipo_pago: "pronto" }).pedido;
+  g.post({ action: "estado", token: ta, pedido_id: p1.id, estado: "confirmado", despachador_id: idDe(g, "luis") });
+  assert.equal(g.post({ action: "inventario", token: ta }).productos.find((x) => x.code === "BC-01").disponible, 8);
+  assert.equal(g.post({ action: "borrarPedido", token: to, pedido_id: p1.id }).code, "motivo");
+  assert.equal(g.post({ action: "borrarPedido", token: to, pedido_id: p2.id, motivo: "x" }).code, "not_found"); // no es suyo
+  assert.equal(g.post({ action: "borrarPedido", token: ta, pedido_id: p2.id, motivo: "x" }).code, "forbidden"); // admin no
+  assert.equal(g.post({ action: "borrarPedido", token: to, pedido_id: p1.id, motivo: "Era de prueba" }).ok, true);
+  assert.equal(g.post({ action: "borrarPedido", token: tj, pedido_id: p2.id, motivo: "Prueba" }).ok, true);
+  assert.equal(g.post({ action: "pedidos", token: ta }).pedidos.length, 0);
+  assert.equal(g.post({ action: "pedido", token: ta, pedido_id: p1.id }).code, "not_found");
+  assert.equal(g.post({ action: "resumen", token: ta, dias: 1 }).total_pedidos, 0);
+  assert.equal(g.post({ action: "inventario", token: ta }).productos.find((x) => x.code === "BC-01").disponible, 10);
+  assert.equal(g.tabla("Pedidos").length, 2); // siguen en la hoja
+  assert.equal(g.tabla("Historial").filter((h) => h.accion === "borrado").length, 2);
 });

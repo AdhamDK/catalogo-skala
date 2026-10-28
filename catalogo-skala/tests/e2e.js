@@ -4,6 +4,8 @@
 const path = require("path");
 const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
+const { crearGas } = require("../../crm/tests/fake-gas.js");
+const API = "https://crm.test/exec";
 
 const URL = "file://" + path.resolve(__dirname, "..", "index.html");
 const PANTALLAS = [
@@ -21,6 +23,21 @@ async function probar(browser, cfg) {
     isMobile: cfg.movil,
     hasTouch: cfg.movil,
   });
+  // CRM simulado: precios, un agotado y dos vendedores
+  const gas = crearGas();
+  gas.ctx.prepararHojas();
+  gas.ctx.crearUsuario("oscar", "Óscar", "vendedor", "Oscar.1234");
+  gas.ctx.crearUsuario("kevin", "Kevin", "vendedor", "Kevin9876");
+  const precio = (code, menor, mayor, a, b, c) => gas.ctx.accionGuardarPrecio_({ code, menor, mayor, desc_pronto: a, desc_efectivo_credito: b, desc_efectivo_pronto: c }, { nombre: "Prueba" });
+  precio("BC-01", 10, 8, 1, 3, 4); precio("KT-01", 20, 18, 2, 6, 8);
+  gas.ctx.accionMovimiento_({ code: "BC-08", cajas: 1 }, { nombre: "Prueba" });
+  gas.ctx.accionMovimiento_({ code: "BC-08", cajas: -1, tipo: "ajuste", nota: "vendido" }, { nombre: "Prueba" });
+  await ctx.route(API, async (route) => {
+    const body = JSON.parse(route.request().postData() || "{}");
+    await route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(gas.post(body)) });
+  });
+  await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await ctx.addInitScript((api) => { window.SKALA_CRM_URL = api; }, API);
   const page = await ctx.newPage();
   const errores = [];
   page.on("pageerror", (e) => errores.push(e.message));
@@ -55,7 +72,7 @@ async function probar(browser, cfg) {
   assert.deepEqual(await iconos("BC-08"), ["Crespo"]);
   assert.deepEqual(await iconos("BC-09"), ["Liso", "Ondulado"]);
   assert.deepEqual(await iconos("KT-06"), ["Cacheado", "Crespo"]);
-  assert.match(await page.locator('.card:has([data-code="BC-01"]) .card-hair').innerText(), /1A–4C/);
+  assert.match(await page.locator('.card:has([data-code="BC-01"]) .card-hair').textContent(), /1A–4C/);
   ok("iconos de curvatura + código");
 
   const units = await page.locator("#gridBanos .card-units").allInnerTexts();
@@ -80,7 +97,7 @@ async function probar(browser, cfg) {
   ok("sin scroll horizontal");
   assert.ok(lay.navVisible, "el menú no se ve");
   ok("menú visible");
-  const colsEsperadas = cfg.viewport.width <= 560 ? 1 : cfg.viewport.width <= 900 ? 2 : 4;
+  const colsEsperadas = cfg.viewport.width <= 560 ? 2 : cfg.viewport.width <= 900 ? 3 : 4;
   assert.equal(lay.cols, colsEsperadas);
   ok(`${lay.cols} columna(s) de productos`);
 
@@ -113,10 +130,29 @@ async function probar(browser, cfg) {
   assert.ok(tapado.h2 >= tapado.bar - 1, `título tapado: h2=${tapado.h2} bar=${tapado.bar}`);
   ok("menú lleva a Kits sin tapar el título");
 
-  // --- Pedido ---
-  await tocar('.qty-btn[data-act="plus"][data-code="BC-01"]');
-  await tocar('.qty-btn[data-act="plus"][data-code="BC-01"]');
-  await tocar('.qty-btn[data-act="plus"][data-code="KT-01"]');
+  // --- Precios del CRM y "Agotado" ---
+  await page.waitForFunction(() => /10,00 \$/.test(document.querySelector('.card[data-card="BC-01"] [data-precio]')?.textContent || ""));
+  assert.match(await page.innerText('.card[data-card="BC-01"] [data-precio]'), /10,00 \$\s*\/ caja/);
+  assert.equal(await page.innerText('.card[data-card="BC-08"] [data-badge]'), "Agotado");
+  if (cfg.viewport.width <= 560) {
+    // al menos 4 productos a la vista en un teléfono
+    const vistos = await page.evaluate(() => {
+      const bar = () => document.querySelector(".topbar").getBoundingClientRect().bottom;
+      const g = document.getElementById("gridBanos");
+      window.scrollTo({ top: g.getBoundingClientRect().top + scrollY - bar() - 4, behavior: "instant" });
+      return [...g.querySelectorAll(".card")].filter((c) => { const r = c.getBoundingClientRect(); return r.top >= bar() - 1 && r.bottom <= innerHeight + 1; }).length;
+    });
+    assert.ok(vistos >= 4, `solo ${vistos} productos a la vista`);
+    ok(`${vistos} productos a la vista en la pantalla`);
+  }
+
+  // --- Pedido: tocar la tarjeta suma una caja ---
+  await tocar('.card[data-card="BC-01"] .card-name');
+  await tocar('.card[data-card="BC-01"] .card-img');
+  assert.equal(await page.innerText('.card[data-card="BC-01"] .card-n'), "2");
+  await tocar('.card[data-card="BC-08"] .card-name'); // agotado: no suma
+  assert.equal(await page.locator('.card[data-card="BC-08"].elegido').count(), 0);
+  await tocar('.card[data-card="KT-01"] .card-name');
   await page.waitForTimeout(350);
   const barra = await page.locator("#orderBar").boundingBox();
   assert.ok(barra && barra.y + barra.height <= cfg.viewport.height + 1 && barra.y < cfg.viewport.height, "barra de pedido fuera de pantalla");
@@ -131,11 +167,33 @@ async function probar(browser, cfg) {
   await page.locator("#btnModoCliente").click();
   assert.equal(await page.locator("#modoModal").isHidden(), true);
   assert.equal(await page.evaluate(() => document.body.classList.contains("modal-open")), true);
+  // "Tu pedido": revisar, sumar / quitar, montos por forma de pago
+  assert.equal(await page.locator("#cartList .cart-item").count(), 2);
+  assert.match(await page.innerText("#cartTotal"), /3 cajas · 40,00 \$/);
+  assert.deepEqual(await page.locator("#pagosWeb .pago-monto strong").allInnerTexts(), ["40,00 $", "36,00 $", "28,00 $", "24,00 $"]);
+  await page.locator('#cartList .qty-btn[data-act="plus"][data-code="KT-01"]').click();
+  assert.match(await page.innerText("#cartTotal"), /4 cajas · 60,00 \$/);
+  assert.equal(await page.inputValue('.card[data-card="KT-01"] .qty-input'), "2");
+  await page.locator('#cartList [data-quitar="KT-01"]').click();
+  assert.equal(await page.locator("#cartList .cart-item").count(), 1);
+  await page.locator('#cartList .qty-btn[data-act="plus"][data-code="BC-01"]').click();
+  assert.match(await page.innerText("#cartTotal"), /3 cajas · 30,00 \$/);
+  // Enviar exige datos mínimos
+  await page.waitForFunction(() => document.querySelectorAll("#fVendedor option").length === 3);
+  await page.locator("#btnWhatsapp").click();
+  assert.match(await page.innerText("#formWarn"), /Nombre del negocio · Teléfono · Tu vendedor · Forma de pago/);
+  await page.fill("#fNegocio", "Salón Luz");
+  await page.fill("#fTelefono", "0414-5551234");
+  await page.selectOption("#fVendedor", { label: "Óscar" });
+  await page.locator('#pagosWeb input[value="efectivo_pronto"]').check();
+  assert.match(await page.innerText("#cartTotal"), /18,00 \$ Efectivo pronto pago/);
   const msg = await page.inputValue("#orderText");
-  assert.match(msg, /Babosa \(BC-01\) — 2 cajas \(12 unidades\)/);
-  assert.match(msg, /Kit 12 em 1 \(KT-01\) — 1 caja \(6 dúos\)$/m);
+  assert.match(msg, /\(WEB-[A-Z2-9]{6}\)/);
+  assert.match(msg, /• 3 × Babosa \(BC-01\) · 6,00 \$ c\/u/);
+  assert.match(msg, /Monto: 18,00 \$ \(Efectivo pronto pago\)/);
+  assert.match(msg, /Mi vendedor: Óscar/);
   assert.match(await page.getAttribute("#btnWhatsapp", "href"), /^https:\/\/wa\.me\/584247042169\?text=/);
-  ok("mensaje de WhatsApp con unidades y dúos");
+  ok("Tu pedido: sumar / quitar, montos por forma de pago, vendedor obligatorio");
 
   // Modal: campos dentro del ancho, inputs >= 16px, botón WhatsApp siempre visible
   const modal = await page.evaluate(() => {
@@ -155,6 +213,15 @@ async function probar(browser, cfg) {
   if (process.env.SCREENSHOTS) {
     await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `${cfg.nombre}-modal.png`) });
   }
+  // Enviar: abre WhatsApp y el pedido llega a la app del vendedor
+  const [popup] = await Promise.all([ctx.waitForEvent("page"), page.locator("#btnWhatsapp").click()]);
+  await popup.close().catch(() => {});
+  await page.waitForFunction(() => /enviado a Óscar/.test(document.getElementById("toast").textContent));
+  for (let i = 0; i < 50 && !gas.tabla("PedidosWeb").length; i++) await page.waitForTimeout(100);
+  const web = gas.tabla("PedidosWeb")[0];
+  assert.ok(web, "no llegó el pedido web");
+  assert.equal(web.vendedor, "Óscar"); assert.equal(web.negocio, "Salón Luz"); assert.equal(web.total, 18); assert.equal(web.tipo_pago, "efectivo_pronto");
+  ok("enviar: WhatsApp + pedido web en la app del vendedor elegido");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#orderModal").isHidden(), true);
   assert.equal(await page.evaluate(() => document.body.classList.contains("modal-open")), false);

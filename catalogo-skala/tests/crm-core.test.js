@@ -122,15 +122,15 @@ test("despachador: en ruta / entregado solo en los asignados", () => {
 
 test("pestañas del panel por rol", () => {
   const ids = (rol) => core.pestanasPanel(rol).map((t) => t.id);
-  assert.deepEqual(ids("vendedor"), ["pendiente", "curso", "entregado", "cobrar", "conciliados", "cancelado", "resumen"]);
-  assert.deepEqual(ids("admin"), ["pendiente", "curso", "entregado", "cobrar", "conciliar", "conciliados", "cancelado", "resumen"]);
-  assert.deepEqual(ids("master"), ["pendiente", "curso", "entregado", "cobrar", "conciliar", "conciliados", "cancelado", "resumen", "usuarios"]);
+  assert.deepEqual(ids("vendedor"), ["pendiente", "web", "curso", "entregado", "cobrar", "conciliados", "cancelado", "resumen"]);
+  assert.deepEqual(ids("admin"), ["pendiente", "web", "curso", "entregado", "cobrar", "conciliar", "conciliados", "cancelado", "resumen"]);
+  assert.deepEqual(ids("master"), ["pendiente", "web", "curso", "entregado", "cobrar", "conciliar", "conciliados", "cancelado", "resumen", "usuarios"]);
   assert.deepEqual(ids("despachador"), ["curso", "entregado"]);
   assert.equal(core.pestanasPanel("admin")[0].nombre, "Por aprobar");
   assert.equal(core.pestanasPanel("vendedor")[0].nombre, "En proceso");
   assert.equal(core.pestanasPanel("admin").find((t) => t.id === "cancelado").nombre, "Anulados");
   assert.equal(core.pestanasPanel("despachador")[0].nombre, "Por entregar");
-  assert.deepEqual(core.pestanasPanel("admin")[1].estados, ["confirmado", "en_ruta"]);
+  assert.deepEqual(core.pestanasPanel("admin")[2].estados, ["confirmado", "en_ruta"]);
 });
 
 test("puedeTomarPedidos y nombre de estado", () => {
@@ -315,4 +315,23 @@ test("mensaje al grupo con precios y monto", () => {
   const m = core.mensajeGrupo(ped, { nombre: "Bella" });
   assert.match(m, /2 × Babosa \(BC-01\) · 6,00 \$ c\/u/);
   assert.match(m, /\*Monto: 24,00 \$\* · precio al por menor/);
+});
+
+test("borrar: vendedor sus pedidos (cualquier estado), Master todos; admin y despachador no", () => {
+  const p = { vendedor_id: "U3", estado: "entregado", cobro: "conciliado" };
+  assert.equal(core.puedeBorrar("vendedor", "U3", p), true);
+  assert.equal(core.puedeBorrar("vendedor", "U4", p), false);
+  assert.equal(core.puedeBorrar("master", "U1", p), true);
+  assert.equal(core.puedeBorrar("admin", "U2", p), false);
+  assert.equal(core.puedeBorrar("despachador", "U5", p), false);
+});
+
+test("pedido web: referencia y mensaje con precios y vendedor", () => {
+  assert.match(core.refWeb(), /^WEB-[A-Z2-9]{6}$/);
+  const items = core.conPrecios([{ code: "BC-01", producto: "Babosa", cajas: 10 }], PRECIOS, "menor");
+  const m = core.mensajeWeb({ ref: "WEB-AAA111", cliente: { negocio: "Salón Luz", telefono: "0414" }, vendedor: "Óscar", items, tipo_pago: "pronto" });
+  assert.match(m, /\(WEB-AAA111\)/);
+  assert.match(m, /Mi vendedor: Óscar/);
+  assert.match(m, /• 10 × Babosa \(BC-01\) · 9,00 \$ c\/u/);
+  assert.match(m, /Monto: 90,00 \$ \(Pronto pago\)/);
 });
