@@ -300,6 +300,15 @@
     </div>
   </div>
 
+  <!-- Imagen ampliada -->
+  <div class="modal zoom-modal" id="zoomModal" hidden>
+    <div class="zoom-box" role="dialog" aria-modal="true" aria-labelledby="zoomTitulo">
+      <button type="button" class="zoom-cerrar" id="zoomCerrar" aria-label="Cerrar imagen">✕</button>
+      <img id="zoomImg" alt="" />
+      <p class="zoom-pie"><strong id="zoomTitulo"></strong><span id="zoomSub"></span></p>
+    </div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="js/producto.js"></script>

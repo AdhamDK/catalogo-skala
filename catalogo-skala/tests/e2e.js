@@ -104,7 +104,7 @@ async function probar(browser, cfg) {
   if (cfg.movil) {
     // Objetivos táctiles >= 44px y texto de inputs >= 16px (iOS no hace zoom)
     const chicos = await page.evaluate(() =>
-      [...document.querySelectorAll(".nav a, .filter, .qty-btn, .qty-input, .btn, .order-clear, .brand")]
+      [...document.querySelectorAll(".nav a, .filter, .qty-btn, .qty-input, .btn, .order-clear, .brand, .card-zoom")]
         .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (r.height < 44 || r.width < 44); })
         .map((e) => `${e.className || e.tagName} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`)
     );
@@ -145,6 +145,27 @@ async function probar(browser, cfg) {
     assert.ok(vistos >= 4, `solo ${vistos} productos a la vista`);
     ok(`${vistos} productos a la vista en la pantalla`);
   }
+
+  // --- Imagen centrada y completa; botón para ampliar (no suma al pedido) ---
+  const enCaja = await page.evaluate(() => [...document.querySelectorAll(".card-img")].filter((c) => c.offsetHeight).every((c) => {
+    const i = c.querySelector("img").getBoundingClientRect(), b = c.getBoundingClientRect();
+    return i.top >= b.top - 1 && i.bottom <= b.bottom + 1 && Math.abs((i.left + i.right) / 2 - (b.left + b.right) / 2) < 1;
+  }));
+  assert.ok(enCaja, "imagen fuera del recuadro o no centrada");
+  await tocar('.card[data-card="BC-02"] .card-zoom');
+  await page.waitForSelector("#zoomModal:not([hidden])");
+  assert.equal(await page.innerText("#zoomTitulo"), "Banana e Macuri");
+  await page.waitForFunction(() => document.getElementById("zoomImg").naturalWidth > 0);
+  assert.match(await page.getAttribute("#zoomImg", "src"), /BC-02-800\.webp$/);
+  assert.equal(await page.locator('.card[data-card="BC-02"].elegido').count(), 0);
+  if (process.env.SCREENSHOTS) await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `${cfg.nombre}-zoom.png`) });
+  await page.keyboard.press("Escape");
+  assert.ok(await page.locator("#zoomModal").isHidden());
+  assert.equal(await page.evaluate(() => document.body.classList.contains("modal-open")), false);
+  await tocar('.card[data-card="BC-02"] .card-zoom');
+  await page.locator("#zoomCerrar").click();
+  assert.ok(await page.locator("#zoomModal").isHidden());
+  ok("imágenes centradas y completas; botón Ampliar abre y cierra");
 
   // --- Pedido: tocar la tarjeta suma una caja ---
   await tocar('.card[data-card="BC-01"] .card-name');

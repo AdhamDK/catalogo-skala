@@ -54,6 +54,9 @@ function cardHTML(p, group, i = 99) {
     <div class="card-img">
       <span class="card-badge" data-badge hidden></span>
       <b class="card-n" aria-hidden="true">${q || ""}</b>
+      <button type="button" class="card-zoom" data-zoom="${p.code}" aria-label="Ampliar imagen de ${p.name}" title="Ampliar imagen">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6"/></svg>
+      </button>
       <picture>
         <source type="image/webp" srcset="${web}-400.webp 400w, ${web}-800.webp 800w" sizes="${IMG_SIZES}" />
         <img src="${img}" alt="${p.name}" width="400" height="317" ${prioridad} decoding="async"
@@ -293,6 +296,32 @@ function closeModal() {
   if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
 }
 
+/* -------------------- Ampliar imagen -------------------- */
+let zoomFoco = null;
+function abrirZoom(code) {
+  const p = allProductsMap()[code];
+  if (!p) return;
+  const m = $id("zoomModal");
+  const img = $id("zoomImg");
+  img.onerror = () => { img.onerror = null; img.src = `assets/img/${code}.png`; };
+  img.src = `assets/img/web/${code}-800.webp`;
+  img.alt = p.name;
+  $id("zoomTitulo").textContent = p.name;
+  $id("zoomSub").textContent = `${code} · ${textoUnidades(p)} · ${p.hair}`;
+  zoomFoco = document.activeElement;
+  m.hidden = false;
+  document.body.classList.add("modal-open");
+  $id("zoomCerrar").focus({ preventScroll: true });
+}
+function cerrarZoom() {
+  const m = $id("zoomModal");
+  if (!m || m.hidden) return false;
+  m.hidden = true;
+  if ($id("orderModal").hidden) document.body.classList.remove("modal-open");
+  if (zoomFoco && zoomFoco.focus) zoomFoco.focus({ preventScroll: true });
+  return true;
+}
+
 /* Vacía la selección. */
 function vaciarPedido() {
   pedido = {};
@@ -351,6 +380,8 @@ document.addEventListener("DOMContentLoaded", () => {
       setQty(code, btn.dataset.act === "plus" ? cur + 1 : cur - 1);
       return;
     }
+    const zoom = e.target.closest("[data-zoom]");
+    if (zoom) { abrirZoom(zoom.dataset.zoom); return; }
     const quitar = e.target.closest("[data-quitar]");
     if (quitar) { setQty(quitar.dataset.quitar, 0); return; }
     /* Tocar la tarjeta suma una caja */
@@ -377,7 +408,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $id("btnClose").addEventListener("click", closeModal);
   $id("orderModal").addEventListener("click", (e) => { if (e.target.id === "orderModal") closeModal(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !cerrarZoom()) closeModal(); });
+  $id("zoomModal").addEventListener("click", (e) => { if (e.target.id === "zoomModal" || e.target.closest("#zoomCerrar")) cerrarZoom(); });
 
   const btnCopy = $id("btnCopy");
   btnCopy.addEventListener("click", async () => {
