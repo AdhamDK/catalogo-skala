@@ -352,6 +352,19 @@ function clientePublico_(c) {
 }
 
 function soloDigitos_(s) { return String(s || '').replace(/\D/g, ''); }
+/* Mismo teléfono escrito distinto: +58 424 7387202 · +584247387202 · 04247387202 · 0424-738.72.02
+   → se comparan los últimos 10 números (4247387202). */
+function telClave_(s) { var d = soloDigitos_(s); return d.length >= 10 ? d.slice(-10) : d; }
+function mismoTel_(a, b) { var x = telClave_(a), y = telClave_(b); return x.length >= 7 && x === y; }
+/* Mismo RIF / cédula escrito distinto: V-280725421 · v28072542-1 · V-28072542-1 · 280725421
+   (sin letras, guiones ni puntos). También la cédula sin el dígito final del RIF: V-28072542 = V-28072542-1. */
+function mismoRif_(a, b) {
+  var x = soloDigitos_(a), y = soloDigitos_(b);
+  if (x.length < 6 || y.length < 6) return false;
+  if (x === y) return true;
+  var largo = x.length > y.length ? x : y, corto = x.length > y.length ? y : x;
+  return largo.length - corto.length === 1 && corto.length >= 7 && largo.slice(0, -1) === corto;
+}
 
 function accionClientes_(p) {
   var q = txt_(p.q, 60).toLowerCase();
@@ -362,8 +375,10 @@ function accionClientes_(p) {
     var texto = [c.nombre, c.contacto, c.rif_cedula, c.direccion].join(' ').toLowerCase();
     if (texto.indexOf(q) !== -1) return true;
     if (qd.length >= 4) {
-      return soloDigitos_(c.telefono).indexOf(qd) !== -1 || soloDigitos_(c.telefono2).indexOf(qd) !== -1 ||
-             soloDigitos_(c.rif_cedula).indexOf(qd) !== -1;
+      // teléfono con o sin +58 / 0 adelante: se busca por sus últimos números
+      var qt = telClave_(qd);
+      var enTel = function (t) { return soloDigitos_(t).indexOf(qd) !== -1 || telClave_(t).indexOf(qt) !== -1; };
+      return enTel(c.telefono) || enTel(c.telefono2) || soloDigitos_(c.rif_cedula).indexOf(qd) !== -1;
     }
     return false;
   });
@@ -403,8 +418,8 @@ function guardarCliente_(c, ses, opciones) {
   var rif = soloDigitos_(datos.rif_cedula);
   var existente = null;
   if (c.id) existente = todos.filter(function (x) { return String(x.id) === String(c.id); })[0];
-  if (!existente && tel.length >= 7) existente = todos.filter(function (x) { return soloDigitos_(x.telefono) === tel; })[0];
-  if (!existente && rif.length >= 6) existente = todos.filter(function (x) { return soloDigitos_(x.rif_cedula) === rif; })[0];
+  if (!existente && tel.length >= 7) existente = todos.filter(function (x) { return mismoTel_(x.telefono, tel) || mismoTel_(x.telefono2, tel); })[0];
+  if (!existente && rif.length >= 6) existente = todos.filter(function (x) { return mismoRif_(x.rif_cedula, rif); })[0];
   // Sin teléfono ni RIF: mismo nombre de negocio = mismo cliente (evita duplicar al traspasar)
   if (!existente && tel.length < 7 && rif.length < 6) {
     var n = datos.nombre.toLowerCase();
@@ -1077,14 +1092,12 @@ function accionBuscarClienteWeb_(p) {
   var n = Number(cache.get('busq_web') || 0);
   if (n >= BUSQ_MAX_MIN) return { ok: false, error: 'Muchas búsquedas. Probá en un minuto.', code: 'limite' };
   cache.put('busq_web', String(n + 1), 60);
-  var finTel = function (t) { return t.length >= 7 && (t === q || (q.length >= 10 && t.slice(-10) === q.slice(-10))); };
   var porTel = false;
-  var c = leer_('Clientes').filter(function (x) {
-    if (String(x.deleted) === '1' || x.deleted === true) return false;
-    if (finTel(soloDigitos_(x.telefono)) || finTel(soloDigitos_(x.telefono2))) { porTel = true; return true; }
-    var rif = soloDigitos_(x.rif_cedula);
-    return rif.length >= 6 && rif === q;
-  })[0];
+  var vivos = leer_('Clientes').filter(function (x) { return !(String(x.deleted) === '1' || x.deleted === true); });
+  // primero por teléfono; si no, por RIF / cédula
+  var c = vivos.filter(function (x) { return mismoTel_(x.telefono, q) || mismoTel_(x.telefono2, q); })[0];
+  if (c) porTel = true;
+  else c = vivos.filter(function (x) { return mismoRif_(x.rif_cedula, q); })[0];
   if (!c) return { ok: true, cliente: null };
   // el teléfono solo se devuelve si lo escribió él (búsqueda por teléfono)
   return { ok: true, cliente: { id: String(c.id), negocio: String(c.nombre), contacto: String(c.contacto), direccion: String(c.direccion),

@@ -940,3 +940,24 @@ test("el cliente del catálogo se busca por teléfono o RIF exacto; el pedido we
   for (let i = 0; i < 30; i++) g.post({ action: "buscarClienteWeb", q: "04149999999" });
   assert.equal(g.post({ action: "buscarClienteWeb", q: "04149999999" }).code, "limite");
 });
+
+test("teléfonos y RIF escritos de distintas formas: se encuentran y no se duplican", () => {
+  const g = preparar();
+  const tv = login(g);
+  const ta = login(g, "ana", "Ana*2222");
+  // cliente guardado con +58 y espacios, y RIF con guiones
+  assert.equal(g.post({ action: "guardarCliente", token: ta, cliente: { negocio: "Tienda Sol", telefono: "+58 424 7387202", rif_cedula: "V-28072542-1" } }).ok, true);
+  const buscar = (q) => (g.post({ action: "buscarClienteWeb", q }).cliente || {}).negocio || null;
+  for (const q of ["+58 424 7387202", "+584247387202", "04247387202", "0424-738.72.02", "4247387202", "58 0424 7387202"]) assert.equal(buscar(q), "Tienda Sol", q);
+  for (const q of ["v-280725421", "v28072542-1", "V-28072542-1", "280725421", "V-28.072.542-1", "28072542", "V-28072542"]) assert.equal(buscar(q), "Tienda Sol", q);
+  assert.equal(buscar("04247387203"), null);
+  assert.equal(buscar("280725422"), null);
+  assert.equal(buscar("2807254"), null); // un número más corto no alcanza
+  // el mismo cliente con el teléfono escrito de otra forma no se duplica
+  assert.equal(g.post({ action: "guardarCliente", token: ta, cliente: { negocio: "Tienda Sol", telefono: "04247387202" } }).existia, true);
+  pedir(g, tv, { tipo_pago: "pronto", cliente: { negocio: "Tienda Sol", telefono: "+584247387202" } });
+  // en el panel, el vendedor también lo encuentra escriba como escriba
+  for (const q of ["04247387202", "+58 424 7387202", "738 7202", "v-28072542"]) assert.equal(g.post({ action: "clientes", token: tv, q }).clientes.length, 1, q);
+  pedir(g, tv, { tipo_pago: "pronto", cliente: { negocio: "Tienda Sol", telefono: "0414-0000000", rif_cedula: "v28072542-1" } });
+  assert.equal(g.tabla("Clientes").length, 1);
+});

@@ -450,3 +450,10 @@ test("al mayor usa sus propios precios por forma de pago", () => {
   assert.match(m, /Ubicación: https:\/\/maps\.google\.com\/\?q=8\.6,-71\.6/);
 });
 const r2 = (n) => Math.round(n * 100) / 100;
+
+test("sin señal: el cliente se encuentra con el teléfono escrito de cualquier forma", () => {
+  const cl = [{ id: "C1", nombre: "Tienda Sol", telefono: "+58 424 7387202", rif_cedula: "V-28072542-1" }];
+  for (const q of ["04247387202", "+584247387202", "0424-738.72.02", "v-28072542"]) assert.equal(core.buscarClientesLocal(cl, q).length, 1, q);
+  assert.equal(core.telefonoWhatsapp("+58 424 7387202"), "584247387202");
+  assert.equal(core.telefonoWhatsapp("04247387202"), "584247387202");
+});

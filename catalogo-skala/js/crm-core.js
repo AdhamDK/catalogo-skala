@@ -358,7 +358,9 @@ function buscarClientesLocal(clientes, q, limite = 20) {
     if (!t) return true;
     if ([c.nombre, c.contacto, c.rif_cedula, c.direccion].join(" ").toLowerCase().includes(t)) return true;
     const dig = (v) => String(v || "").replace(/\D/g, "");
-    return qd.length >= 4 && (dig(c.telefono).includes(qd) || dig(c.telefono2).includes(qd) || dig(c.rif_cedula).includes(qd));
+    const clave = (v) => { const d = dig(v); return d.length >= 10 ? d.slice(-10) : d; }; // +58 / 0 adelante da igual
+    const enTel = (t) => dig(t).includes(qd) || clave(t).includes(clave(qd));
+    return qd.length >= 4 && (enTel(c.telefono) || enTel(c.telefono2) || dig(c.rif_cedula).includes(qd));
   }).slice(0, Math.min(Math.max(Number(limite) || 20, 1), 200));
 }
 
