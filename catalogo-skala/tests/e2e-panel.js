@@ -45,9 +45,10 @@ function servidor() {
     viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
     geolocation: { latitude: 8.6123456, longitude: -71.6543219, accuracy: 12 }, permissions: ["geolocation"],
   });
-  let sinSenal = false;
+  let sinSenal = false, retraso = 0;
   await ctx.route(API, async (route) => {
     if (sinSenal) return route.abort("internetdisconnected");
+    if (retraso) await new Promise((r) => setTimeout(r, retraso));
     const body = JSON.parse(route.request().postData() || "{}");
     await route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(gas.post(body)) });
   });
@@ -244,6 +245,7 @@ function servidor() {
   /* ---------- Inicio, pedidos, detalle ---------- */
   await page.click('.app-nav a[href="#/inicio"]');
   await esperarRuta("#/inicio");
+  assert.ok(await page.locator("#vista.entra").count(), "sin transición al cambiar de página");
   await page.waitForSelector("#iLista .fila-ped");
   // pedidos hoy · cajas hoy · en proceso · en despacho · crédito vencido · por cobrar
   assert.deepEqual(await page.locator("#iStats .stat strong").allInnerTexts(), ["1", "9", "1", "0", "0", "1"]);
@@ -320,8 +322,14 @@ function servidor() {
   await esperarRuta("#/nuevo");
   await page.waitForSelector("#fichaCli");                   // el pedido a medio armar recuerda el cliente
   await page.click("#btnCambiarCli");
+  retraso = 1200; // señal lenta: el ícono girando y la barrita avisan que está cargando
   await page.fill("#cBuscar", "max");
+  await page.waitForSelector("#cResultados .spinner");
+  await page.waitForSelector("#barraCarga:not([hidden])");
+  assert.match(await page.innerText("#cResultados"), /Buscando cliente/);
   await page.waitForSelector("#cResultados .res-cli");
+  retraso = 0;
+  await page.waitForSelector("#barraCarga", { state: "hidden" });
   await page.click("#cResultados .res-cli");
   await page.waitForSelector("#fichaCli");
   assert.match(await page.innerText("#fichaCli"), /Barbería Max/);

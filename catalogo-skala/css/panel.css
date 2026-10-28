@@ -401,3 +401,39 @@ html[data-tema="oscuro"] .aviso-web-inicio strong { color: #f7a8c8; }
 .aviso-web .link-btn { min-height: 44px; }
 .btn-peligro { color: #b3261e; border-color: rgba(179, 38, 30, 0.45); }
 html[data-tema="oscuro"] .btn-peligro { color: #ff8a80; border-color: rgba(255, 138, 128, 0.5); }
+
+/* ---------- Cargando: ícono girando, barrita arriba y transición de página ---------- */
+.cargando { display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--tinta-suave); padding: 24px 0; }
+.spinner {
+  width: 22px; height: 22px; flex: 0 0 auto; border-radius: 50%;
+  border: 3px solid var(--borde); border-top-color: var(--rosa);
+  animation: girar .8s linear infinite;
+}
+@keyframes girar { to { transform: rotate(360deg); } }
+.btn.ocupado::before {
+  content: ""; width: 16px; height: 16px; margin-right: 8px; border-radius: 50%;
+  border: 2px solid currentColor; border-top-color: transparent; animation: girar .8s linear infinite;
+}
+.barra-carga {
+  position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; overflow: hidden; background: transparent;
+}
+.barra-carga::before {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 40%; background: var(--rosa); border-radius: 3px;
+  animation: barra 1s ease-in-out infinite;
+}
+@keyframes barra { from { left: -40%; } to { left: 100%; } }
+.app-main.entra { animation: entra .22s ease-out; }
+@keyframes entra { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* Respuesta al tocar: botones de la barra inferior, accesos y cifras */
+.app-nav a { transition: color .15s ease; }
+.app-nav a svg { transition: transform .15s ease; }
+.app-nav a:active svg { transform: scale(0.85); }
+.app-nav a.activa svg { animation: salto .3s ease; }
+@keyframes salto { 40% { transform: translateY(-3px) scale(1.08); } }
+.acceso, a.stat, .fila-ped, .menu-mas a, .pcard-tap { transition: transform .12s ease, background-color .15s ease; }
+.acceso:active, a.stat:active, .fila-ped:active, .menu-mas a:active { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .app-main.entra, .app-nav a.activa svg { animation: none; }
+  .spinner, .btn.ocupado::before { animation: girar 1.6s linear infinite !important; }
+  .barra-carga::before { animation: barra 2s ease-in-out infinite !important; }
+}

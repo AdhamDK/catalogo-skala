@@ -5,7 +5,19 @@
    Datos: Google Sheets vía js/crm-api.js. Permisos: el servidor valida cada acción.
    ============================================================ */
 (function () {
-  const { api, sesion, ErrorRed, leerLS, guardarLS, borrarLS } = SkalaAPI;
+  const { sesion, ErrorRed, leerLS, guardarLS, borrarLS } = SkalaAPI;
+  /* Toda llamada al CRM muestra la barrita de carga arriba (si tarda más de 150 ms) */
+  let enCurso = 0, tCarga = null;
+  function cargando(mas) {
+    enCurso = Math.max(0, enCurso + mas);
+    const b = document.getElementById("barraCarga");
+    if (!b) return;
+    clearTimeout(tCarga);
+    if (enCurso) tCarga = setTimeout(() => { b.hidden = false; }, 150);
+    else b.hidden = true;
+  }
+  const api = (...a) => { cargando(1); return SkalaAPI.api(...a).finally(() => cargando(-1)); };
+  const spin = (texto = "Cargando…") => `<div class="cargando" role="status"><span class="spinner" aria-hidden="true"></span><span>${texto}</span></div>`;
   const $ = (id) => document.getElementById(id);
   const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   /* "1.234,56" · "1234.56" · "120,5" → número con 2 decimales (0 si no es válido) */
@@ -71,7 +83,7 @@
   }
   const ir = (h) => { if (location.hash === h) render(); else location.hash = h; };
 
-  let renderId = 0;
+  let renderId = 0, ultimaClave = "";
   async function render() {
     const id = ++renderId;
     delete document.body.dataset.lista; // marca de "página lista" (la usan las pruebas)
@@ -91,7 +103,8 @@
     pintarNav(def.nav);
     pintarCola();
     const vista = $("vista");
-    vista.innerHTML = '<p class="cargando">Cargando…</p>';
+    vista.classList.remove("entra");
+    vista.innerHTML = spin();
     window.scrollTo(0, 0);
     try {
       await def.render(vista, param, query, () => id === renderId);
@@ -100,7 +113,13 @@
       if (e.code === "auth") { sessionStorage.setItem(K_DESTINO, location.hash); return ir("#/ingresar"); }
       vista.innerHTML = `<div class="aviso-error"><p>${esc(e.message)}</p><button type="button" class="btn btn-ghost" data-reintentar>Reintentar</button></div>`;
     }
-    if (id === renderId) { vista.focus({ preventScroll: true }); document.body.dataset.lista = location.hash; }
+    if (id === renderId) {
+      // transición suave al cambiar de página
+      if (clave !== ultimaClave) { void vista.offsetWidth; vista.classList.add("entra"); }
+      ultimaClave = clave;
+      vista.focus({ preventScroll: true });
+      document.body.dataset.lista = location.hash;
+    }
   }
 
   function pintarNav(activa) {
@@ -217,7 +236,7 @@
       const err = !usuario ? "Escribí tu usuario." : !clave ? "Escribí tu clave." : "";
       if (err) { $("lError").textContent = err; $("lError").hidden = false; return; }
       const btn = $("btnLogin");
-      btn.disabled = true; btn.textContent = "Entrando…";
+      btn.disabled = true; btn.classList.add("ocupado"); btn.textContent = "Entrando…";
       try {
         // "pin" también, por compatibilidad con un servidor publicado sin actualizar
         const r = await api("login", { usuario, clave, pin: clave });
@@ -231,7 +250,7 @@
       } catch (e2) {
         $("lError").textContent = e2.message; $("lError").hidden = false;
         $("lClave").value = "";
-        btn.disabled = false; btn.textContent = "Entrar";
+        btn.disabled = false; btn.classList.remove("ocupado"); btn.textContent = "Entrar";
       }
     };
   }
@@ -484,10 +503,10 @@
   function tomarGps(boton, alListo) {
     if (!navigator.geolocation) return toast("Este teléfono no permite GPS en el navegador.");
     const texto = boton.textContent;
-    boton.disabled = true; boton.textContent = "Buscando GPS…";
+    boton.disabled = true; boton.classList.add("ocupado"); boton.textContent = "Buscando GPS…";
     navigator.geolocation.getCurrentPosition(
-      (pos) => { boton.disabled = false; boton.textContent = texto; alListo(pos.coords.latitude.toFixed(6), pos.coords.longitude.toFixed(6), pos.coords.accuracy); },
-      (err) => { boton.disabled = false; boton.textContent = texto; toast(err.code === 1 ? "Permiso de ubicación negado. Activalo en el navegador." : "No se pudo obtener el GPS. Probá al aire libre."); },
+      (pos) => { boton.disabled = false; boton.classList.remove("ocupado"); boton.textContent = texto; alListo(pos.coords.latitude.toFixed(6), pos.coords.longitude.toFixed(6), pos.coords.accuracy); },
+      (err) => { boton.disabled = false; boton.classList.remove("ocupado"); boton.textContent = texto; toast(err.code === 1 ? "Permiso de ubicación negado. Activalo en el navegador." : "No se pudo obtener el GPS. Probá al aire libre."); },
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
   }
 
@@ -509,6 +528,7 @@
           clearTimeout(t);
           const q = $("cBuscar").value.trim();
           if (q.length < 2) { $("cResultados").innerHTML = ""; return; }
+          $("cResultados").innerHTML = `<li>${spin("Buscando cliente…")}</li>`;
           t = setTimeout(async () => {
             ultimaQ = q;
             try {
@@ -702,7 +722,7 @@
         dias_credito: esCredito() ? dias : 0, nota: $("eNota").value.trim() };
       if (web) datos.web_id = web.id;
       const btn = $("btnEnviar");
-      btn.disabled = true; btn.textContent = "Enviando…";
+      btn.disabled = true; btn.classList.add("ocupado"); btn.textContent = "Enviando…";
       const terminar = (listo) => {
         guardarCarrito({});
         guardarLS(K_MAYOR, false);
@@ -715,7 +735,7 @@
         const r = await api("guardarPedido", datos);
         terminar({ pedido: r.pedido, cliente: r.cliente || cliente });
       } catch (e2) {
-        btn.disabled = false; btn.textContent = "Enviar pedido";
+        btn.disabled = false; btn.classList.remove("ocupado"); btn.textContent = "Enviar pedido";
         if (e2 instanceof ErrorRed) { SkalaAPI.encolar(datos); return terminar({ offline: true, cliente }); }
         if (e2.code === "auth") throw e2;
         mostrar(e2.message);
@@ -790,7 +810,7 @@
       <div class="periodos" role="tablist">${tabs.map((t) => `<a role="tab" class="tab${t.id === tab.id ? " active" : ""}" aria-selected="${t.id === tab.id}" href="${base}?tab=${t.id}">${esc(t.nombre)}</a>`).join("")}</div>
       ${tab.periodo ? `<div class="periodos periodos-chicos" aria-label="Período">${PERIODOS.map(([d, t]) => `<a class="tab${d === dias ? " active" : ""}"${d === dias ? ' aria-current="true"' : ""} href="${base}?tab=${tab.id}&dias=${d}">${t}</a>`).join("")}</div>
       <div id="pResumen"></div>` : ""}
-      <p class="modal-sub" id="pInfo">Cargando…</p>
+      <div class="modal-sub" id="pInfo">${spin()}</div>
       ${conCarga ? '<div class="fila-elegir" id="pElegir" hidden><label class="check"><input type="checkbox" id="pTodos" /> Elegir todos</label></div>' : ""}
       <ul class="lista-ped" id="pLista"></ul>
       ${conCarga ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}`;
@@ -1159,7 +1179,7 @@
       <a class="btn btn-primary btn-bloque" href="#/cliente/nuevo" id="btnAnadirCliente">Añadir cliente</a>
       <div class="buscador"><input type="search" id="kBuscar" placeholder="Buscar por nombre, negocio o teléfono" autocomplete="off" enterkeyhint="search" /></div>
       <p class="modal-sub" id="kInfo"></p>
-      <ul class="lista-cli" id="kLista"><li class="cargando">Cargando…</li></ul>`;
+      <ul class="lista-cli" id="kLista"><li>${spin()}</li></ul>`;
     let t = null;
     const cargar = async (q) => {
       const r = await api("clientes", { q, limite: 100 });
@@ -1204,7 +1224,7 @@
         <a class="btn btn-ghost btn-bloque" href="#/cliente/${encodeURIComponent(c.id)}?editar=1" id="btnEditarCliente">Editar datos</a>
       </section>
       <h3 class="sub-titulo">Pedidos</h3>
-      <ul class="lista-ped" id="kPedidos"><li class="cargando">Cargando…</li></ul>`;
+      <ul class="lista-ped" id="kPedidos"><li>${spin()}</li></ul>`;
     $("btnPedirCliente").addEventListener("click", () => {
       fijarCliente({ id: c.id, contacto: c.contacto, negocio: c.nombre, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: c.telefono2, direccion: c.direccion, latitud: c.latitud, longitud: c.longitud });
       ir("#/nuevo/productos");
@@ -1308,7 +1328,7 @@
   async function vResumen(v, _p, _q, vigente) {
     const chips = `<div class="periodos">${[[1, "Hoy"], [7, "7 días"], [30, "30 días"], [90, "90 días"]].map(([d, t]) =>
       `<button type="button" class="tab${d === diasResumen ? " active" : ""}" data-dias="${d}">${t}</button>`).join("")}</div>`;
-    v.innerHTML = chips + '<p class="cargando">Cargando…</p>';
+    v.innerHTML = chips + spin();
     v.querySelector(".periodos").addEventListener("click", (e) => { const b = e.target.closest("[data-dias]"); if (b) { diasResumen = Number(b.dataset.dias); render(); } });
     const r = await api("resumen", { dias: diasResumen });
     if (!vigente()) return;
