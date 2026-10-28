@@ -16,6 +16,20 @@ var MAX_INTENTOS = 5;
 var BLOQUEO_SEG = 600;
 
 var ROLES = ['master', 'admin', 'vendedor', 'despachador'];
+/* Un usuario puede tener varios roles: en la hoja, separados por coma ("vendedor, despachador").
+   Puede hacer todo lo de cada uno de sus roles. El "rol" principal es el de más rango. */
+function rolesDe_(v) {
+  var lista = Array.isArray(v) ? v : String(v === undefined || v === null ? '' : v).split(/[,;\/+]| y /);
+  var set = {};
+  lista.forEach(function (r) {
+    var k = String(r).trim().toLowerCase().replace('administración', 'admin').replace('administracion', 'admin');
+    if (ROLES.indexOf(k) !== -1) set[k] = 1;
+  });
+  return ROLES.filter(function (r) { return set[r]; });
+}
+function tiene_(ses, rol) { return !!ses && (ses.roles || rolesDe_(ses.rol)).indexOf(rol) !== -1; }
+function tieneAlguno_(ses, lista) { return lista.some(function (r) { return tiene_(ses, r); }); }
+function nombreRoles_(roles) { return roles.map(function (r) { return NOMBRE_ROL[r] || r; }).join(' · '); }
 var NOMBRE_ROL = { master: 'Master', admin: 'Administración', vendedor: 'Vendedor', despachador: 'Despachador' };
 var ESTADOS = ['pendiente', 'confirmado', 'en_ruta', 'entregado', 'cancelado'];
 var DOCUMENTOS = ['Nota de entrega', 'Factura'];
@@ -143,7 +157,7 @@ function manejar_(p) {
     if (def[1]) {
       ses = verificarToken_(p.token);
       if (!ses) return { ok: false, error: 'Sesión vencida. Ingresá de nuevo.', code: 'auth' };
-      if (def[1].indexOf(ses.rol) === -1) return { ok: false, error: 'Tu usuario no tiene permiso para esto.', code: 'forbidden' };
+      if (!tieneAlguno_(ses, def[1])) return { ok: false, error: 'Tu usuario no tiene permiso para esto.', code: 'forbidden' };
     }
     return def[0](p, ses);
   } catch (err) {
@@ -218,13 +232,13 @@ function actualizar_(nombre, fila, obj) {
 }
 
 function historial_(pedidoId, ses, accion, detalle) {
-  agregar_('Historial', { fecha: ahora_(), pedido_id: pedidoId, usuario: ses ? ses.nombre + ' (' + NOMBRE_ROL[ses.rol] + ')' : '', accion: accion, detalle: detalle || '' });
+  agregar_('Historial', { fecha: ahora_(), pedido_id: pedidoId, usuario: ses ? ses.nombre + ' (' + nombreRoles_(ses.roles || [ses.rol]) + ')' : '', accion: accion, detalle: detalle || '' });
 }
 
 function ahora_() { return new Date().toISOString(); }
 function txt_(v, max) { return String(v === undefined || v === null ? '' : v).trim().slice(0, max || 200); }
 function uuid_() { return Utilities.getUuid(); }
-function esGestion_(ses) { return GESTION.indexOf(ses.rol) !== -1; }
+function esGestion_(ses) { return tieneAlguno_(ses, GESTION); }
 function borrado_(x) { return x.borrado === true || String(x.borrado) === 'true'; }
 
 /* -------------------- Seguridad -------------------- */
@@ -261,7 +275,8 @@ function activo_(u) {
 }
 
 function usuarioPublico_(u) {
-  return { id: String(u.id), usuario: String(u.usuario), nombre: String(u.nombre), rol: String(u.rol), rol_nombre: NOMBRE_ROL[u.rol] || String(u.rol) };
+  var roles = rolesDe_(u.rol);
+  return { id: String(u.id), usuario: String(u.usuario), nombre: String(u.nombre), rol: roles[0] || String(u.rol), roles: roles, rol_nombre: nombreRoles_(roles) || String(u.rol) };
 }
 
 /* El rol se lee de la hoja en cada llamada: cambios aplican al instante. */
@@ -272,7 +287,7 @@ function verificarToken_(token) {
   if (firmar_(base) !== partes[2]) return null;
   if (Number(partes[1]) < Date.now()) return null;
   var u = leer_('Usuarios').filter(function (x) { return String(x.id) === partes[0] && activo_(x); })[0];
-  if (!u || ROLES.indexOf(String(u.rol)) === -1) return null;
+  if (!u || !rolesDe_(u.rol).length) return null;
   return usuarioPublico_(u);
 }
 
@@ -722,10 +737,8 @@ function accionGuardarPedido_(p, ses) {
 function puedeVer_(ses, x) {
   if (borrado_(x)) return false;
   if (esGestion_(ses)) return true;
-  if (ses.rol === 'vendedor') return String(x.vendedor_id) === ses.id;
-  if (ses.rol === 'despachador') {
-    return String(x.despachador_id) === ses.id && ['confirmado', 'en_ruta', 'entregado'].indexOf(String(x.estado)) !== -1;
-  }
+  if (tiene_(ses, 'vendedor') && String(x.vendedor_id) === ses.id) return true;
+  if (tiene_(ses, 'despachador') && String(x.despachador_id) === ses.id && ['confirmado', 'en_ruta', 'entregado'].indexOf(String(x.estado)) !== -1) return true;
   return false;
 }
 
@@ -844,20 +857,31 @@ function accionPedido_(p, ses) {
   return { ok: true, pedido: o };
 }
 
-/* Reglas de cambio de estado por rol. Devuelve '' si se permite, o el motivo del rechazo. */
+/* Reglas de cambio de estado. Con varios roles basta con que uno lo permita.
+   Devuelve '' si se permite, o el motivo del rechazo. */
 function reglaEstado_(ses, ped, nuevo) {
+  if (String(ped.estado) === nuevo) return 'El pedido ya está en ese estado.';
+  var roles = ses.roles || rolesDe_(ses.rol);
+  var motivo = 'Sin permiso.';
+  for (var i = 0; i < roles.length; i++) {
+    var m = reglaRol_(roles[i], ses, ped, nuevo);
+    if (!m) return '';
+    if (i === 0) motivo = m;
+  }
+  return motivo;
+}
+function reglaRol_(rol, ses, ped, nuevo) {
   var actual = String(ped.estado);
-  if (actual === nuevo) return 'El pedido ya está en ese estado.';
-  if (esGestion_(ses)) {
+  if (GESTION.indexOf(rol) !== -1) {
     if (nuevo === 'confirmado' && actual !== 'pendiente' && actual !== 'en_ruta') return 'Solo se aprueba un pedido en proceso.';
     return '';
   }
-  if (ses.rol === 'vendedor') {
+  if (rol === 'vendedor') {
     if (String(ped.vendedor_id) !== ses.id) return 'Este pedido es de otro vendedor.';
     if (nuevo === 'cancelado' && actual === 'pendiente') return '';
     return 'Como vendedor solo podés anular tus pedidos en proceso.';
   }
-  if (ses.rol === 'despachador') {
+  if (rol === 'despachador') {
     if (String(ped.despachador_id) !== ses.id) return 'Este pedido no está asignado a vos.';
     if (nuevo === 'en_ruta' && actual === 'confirmado') return '';
     if (nuevo === 'entregado' && (actual === 'confirmado' || actual === 'en_ruta')) return '';
@@ -897,7 +921,7 @@ function accionEstado_(p, ses) {
     // Confirmar (o reasignar) exige despachador activo
     if (nuevo === 'confirmado' || reasignar) {
       var dId = txt_(p.despachador_id || ped.despachador_id, 40);
-      var d = leer_('Usuarios').filter(function (u) { return String(u.id) === dId && String(u.rol) === 'despachador' && activo_(u); })[0];
+      var d = leer_('Usuarios').filter(function (u) { return String(u.id) === dId && rolesDe_(u.rol).indexOf('despachador') !== -1 && activo_(u); })[0];
       if (!d) return { ok: false, error: 'Elegí un despachador activo.', code: 'despachador' };
       ped.despachador_id = String(d.id);
       ped.despachador = String(d.nombre);
@@ -923,17 +947,17 @@ function accionEstado_(p, ses) {
 }
 
 function accionDespachadores_() {
-  var lista = leer_('Usuarios').filter(function (u) { return String(u.rol) === 'despachador' && activo_(u); })
+  var lista = leer_('Usuarios').filter(function (u) { return rolesDe_(u.rol).indexOf('despachador') !== -1 && activo_(u); })
     .map(function (u) { return { id: String(u.id), nombre: String(u.nombre) }; });
   return { ok: true, despachadores: lista };
 }
 
 /* -------------------- Pedidos web (los arma el cliente en el catálogo) -------------------- */
 var WEB_MAX_HORA = 5; // por teléfono, para frenar abusos
-function puedeTomarWeb_(ses, w) { return ses.rol === 'master' || (ses.rol === 'vendedor' && String(w.vendedor_id) === ses.id); }
+function puedeTomarWeb_(ses, w) { return tiene_(ses, 'master') || (tiene_(ses, 'vendedor') && String(w.vendedor_id) === ses.id); }
 
 function accionVendedores_() {
-  var lista = leer_('Usuarios').filter(function (u) { return String(u.rol) === 'vendedor' && activo_(u); })
+  var lista = leer_('Usuarios').filter(function (u) { return rolesDe_(u.rol).indexOf('vendedor') !== -1 && activo_(u); })
     .map(function (u) { return { id: String(u.id), nombre: String(u.nombre) }; });
   lista.sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
   return { ok: true, vendedores: lista };
@@ -947,7 +971,7 @@ function accionPedidoWeb_(p) {
   if (soloDigitos_(datos.telefono).length < 7) return { ok: false, error: 'Escribí tu teléfono (para que el vendedor te contacte).', code: 'telefono' };
   var items = limpiarItems_(p.items);
   if (!items.length) return { ok: false, error: 'El pedido no tiene productos.', code: 'empty' };
-  var v = leer_('Usuarios').filter(function (u) { return String(u.id) === String(p.vendedor_id) && String(u.rol) === 'vendedor' && activo_(u); })[0];
+  var v = leer_('Usuarios').filter(function (u) { return String(u.id) === String(p.vendedor_id) && rolesDe_(u.rol).indexOf('vendedor') !== -1 && activo_(u); })[0];
   if (!v) return { ok: false, error: 'Elegí tu vendedor.', code: 'vendedor' };
   var ref = txt_(p.ref, 40).toUpperCase().replace(/[^A-Z0-9-]/g, '');
   if (!/^WEB-[A-Z0-9]{4,12}$/.test(ref)) ref = 'WEB-' + uuid_().replace(/-/g, '').slice(0, 8).toUpperCase();
@@ -1029,8 +1053,8 @@ function accionBorrarPedido_(p, ses) {
   try {
     var ped = leer_('Pedidos').filter(function (x) { return String(x.id) === String(p.pedido_id); })[0];
     if (!ped || !puedeVer_(ses, ped)) return { ok: false, error: 'Pedido no encontrado.', code: 'not_found' };
-    var propio = ses.rol === 'vendedor' && String(ped.vendedor_id) === ses.id;
-    if (!propio && ses.rol !== 'master') return { ok: false, error: 'Solo el vendedor del pedido o el Master pueden borrarlo.', code: 'forbidden' };
+    var propio = tiene_(ses, 'vendedor') && String(ped.vendedor_id) === ses.id;
+    if (!propio && !tiene_(ses, 'master')) return { ok: false, error: 'Solo el vendedor del pedido o el Master pueden borrarlo.', code: 'forbidden' };
     var t = ahora_();
     ped.borrado = true; ped.borrado_motivo = motivo; ped.borrado_por = ses.nombre; ped.borrado_at = t; ped.updated_at = t;
     actualizar_('Pedidos', ped._fila, ped);
@@ -1063,7 +1087,7 @@ function accionConfig_() { return { ok: true, config: leerConfig_() }; }
 
 /* Todo lo que el usuario necesita ver sin señal: precios y stock, clientes, sus pedidos y pedidos web */
 function accionSincronizar_(p, ses) {
-  var toma = TOMAN_PEDIDOS.indexOf(ses.rol) !== -1;
+  var toma = tieneAlguno_(ses, TOMAN_PEDIDOS);
   var cat = accionCatalogo_({ token: p.token });
   var pedidos = accionPedidos_({ dias: 60 }, ses).pedidos;
   var porCobrar = toma ? accionPedidos_({ por_cobrar: true }, ses).pedidos : [];
@@ -1129,8 +1153,11 @@ function accionUsuarios_() {
 
 function guardarUsuario_(d, ses) {
   var usuarios = leer_('Usuarios');
-  var rol = String(d.rol || '');
-  if (ROLES.indexOf(rol) === -1) throw new Error('Rol inválido.');
+  var roles = rolesDe_(d.roles !== undefined ? d.roles : d.rol);
+  if (!roles.length) throw new Error('Rol inválido.');
+  var rol = roles[0]; // el de más rango (para la regla de la clave)
+  var esMaster = roles.indexOf('master') !== -1;
+  var eraMaster = function (u) { return rolesDe_(u.rol).indexOf('master') !== -1; };
   var usuario = normUsuario_(d.usuario);
   if (usuario.length < 3) throw new Error('El usuario debe tener al menos 3 letras o números (sin espacios).');
   var nombre = txt_(d.nombre, 60);
@@ -1142,17 +1169,17 @@ function guardarUsuario_(d, ses) {
     throw new Error('Ese usuario ya existe.');
   }
   // Nunca quedarse sin un Master activo
-  if (existente && String(existente.rol) === 'master' && activo_(existente) && (rol !== 'master' || !activo)) {
-    var otros = usuarios.filter(function (u) { return String(u.rol) === 'master' && activo_(u) && String(u.id) !== String(existente.id); });
+  if (existente && eraMaster(existente) && activo_(existente) && (!esMaster || !activo)) {
+    var otros = usuarios.filter(function (u) { return eraMaster(u) && activo_(u) && String(u.id) !== String(existente.id); });
     if (!otros.length) throw new Error('Debe quedar al menos un Master activo.');
   }
   var nueva = d.clave !== undefined ? d.clave : d.pin;
   var pin = nueva ? validarPin_(nueva, rol) : '';
   if (!existente && !pin) throw new Error('Asigná una clave al usuario nuevo.');
-  if (existente && rol === 'master' && String(existente.rol) !== 'master' && !pin) throw new Error('Para pasar a Master asigná una clave nueva de al menos 8 caracteres.');
+  if (existente && esMaster && !eraMaster(existente) && !pin) throw new Error('Para pasar a Master asigná una clave nueva de al menos 8 caracteres.');
 
   var u = existente || { id: 'U' + String(usuarios.reduce(function (m, x) { return Math.max(m, Number(String(x.id).replace(/\D/g, '')) || 0); }, 0) + 1), created_at: ahora_() };
-  u.usuario = usuario; u.nombre = nombre; u.rol = rol; u.activo = activo;
+  u.usuario = usuario; u.nombre = nombre; u.rol = roles.join(', '); u.activo = activo;
   if (pin) u.pin_hash = hashPin_(String(u.id), pin);
   if (existente) actualizar_('Usuarios', existente._fila, u); else agregar_('Usuarios', u);
   return u;
@@ -1202,7 +1229,7 @@ function prepararHojas() {
   }
   var msg = 'Listo: hojas Usuarios, Clientes, Pedidos, PedidoItems, Historial, Precios, Inventario, PedidosWeb y Config.\nCargá los precios en la hoja Precios ($ por caja).' +
     (migrados ? '\n' + migrados + ' vendedor(es) pasados a Usuarios (misma clave/PIN; el usuario es su nombre en minúsculas). Podés borrar la hoja Vendedores.' : '') +
-    (leer_('Usuarios').some(function (u) { return u.rol === 'master'; }) ? '' : '\nAhora creá el usuario Master (menú 2).');
+    (leer_('Usuarios').some(function (u) { return rolesDe_(u.rol).indexOf('master') !== -1; }) ? '' : '\nAhora creá el usuario Master (menú 2).');
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
   return msg;
 }
@@ -1215,7 +1242,7 @@ function crearUsuario(usuario, nombre, rol, pin) {
 function cambiarPin(usuario, pin) {
   var u = leer_('Usuarios').filter(function (x) { return normUsuario_(x.usuario) === normUsuario_(usuario); })[0];
   if (!u) throw new Error('No existe el usuario ' + usuario);
-  u.pin_hash = hashPin_(String(u.id), validarPin_(pin, String(u.rol)));
+  u.pin_hash = hashPin_(String(u.id), validarPin_(pin, rolesDe_(u.rol)[0]));
   actualizar_('Usuarios', u._fila, u);
   return true;
 }
@@ -1225,11 +1252,11 @@ function menuCrearUsuario() {
   var pedir = function (t, m) { var r = ui.prompt(t, m, ui.ButtonSet.OK_CANCEL); return r.getSelectedButton() === ui.Button.OK ? r.getResponseText().trim() : null; };
   var usuario = pedir('Crear usuario (1/4)', 'Usuario para ingresar (ej. oscar):'); if (usuario === null) return;
   var nombre = pedir('Crear usuario (2/4)', 'Nombre para mostrar (ej. Óscar):'); if (nombre === null) return;
-  var rol = pedir('Crear usuario (3/4)', 'Rol: master, admin, vendedor o despachador'); if (rol === null) return;
+  var rol = pedir('Crear usuario (3/4)', 'Rol: master, admin, vendedor o despachador (varios separados por coma: vendedor, despachador)'); if (rol === null) return;
   var pin = pedir('Crear usuario (4/4)', 'Clave: letras y números, mínimo 6 (Master: 8). Puede llevar símbolos.'); if (pin === null) return;
   try {
     crearUsuario(usuario, nombre, rol.toLowerCase(), pin);
-    ui.alert('Usuario "' + normUsuario_(usuario) + '" creado como ' + (NOMBRE_ROL[rol.toLowerCase()] || rol) + '.');
+    ui.alert('Usuario "' + normUsuario_(usuario) + '" creado como ' + (nombreRoles_(rolesDe_(rol)) || rol) + '.');
   } catch (err) { ui.alert('No se pudo crear: ' + err.message); }
 }
 

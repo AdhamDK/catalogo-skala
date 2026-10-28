@@ -77,7 +77,16 @@
   const K_WEB = "skala_tomando_web";      // pedido web que se está tomando (id, cliente, forma de pago)
   const TODOS = ["master", "admin", "vendedor", "despachador"];
   const TOMAN = ["master", "admin", "vendedor"];
-  const rol = () => (sesion() || { usuario: {} }).usuario.rol;
+  const rol = () => (sesion() || { usuario: {} }).usuario.rol; // el de más rango
+  /* Varios roles: el usuario puede hacer todo lo de cada uno */
+  const roles = () => { const u = (sesion() || { usuario: {} }).usuario; return u.roles && u.roles.length ? u.roles : u.rol ? [u.rol] : []; };
+  const tiene = (...rs) => rs.some((r) => roles().includes(r));
+  const vende = () => tiene("master", "admin", "vendedor");     // toma pedidos, clientes, cobros
+  const gestion = () => tiene("master", "admin");
+  const soloDespacha = () => tiene("despachador") && !vende();
+  const enEntregas = () => location.hash.startsWith("#/entregas");
+  /* Rol con el que se arman las pestañas de Pedidos (el de más rango entre los que venden) */
+  const rolPedidos = () => ["master", "admin", "vendedor"].find((r) => tiene(r)) || "despachador";
   const yo = () => (sesion() || { usuario: {} }).usuario;
 
   /* -------------------- Íconos (SVG simples) -------------------- */
@@ -133,7 +142,7 @@
     const s = sesion();
     if (!def) return ir(s ? "#/inicio" : "#/ingresar");
     if (!def.publica && !s) { sessionStorage.setItem(K_DESTINO, location.hash); return ir("#/ingresar"); }
-    if (def.roles && !def.roles.includes(s.usuario.rol)) return ir("#/inicio");
+    if (def.roles && !def.roles.some((r) => roles().includes(r))) return ir("#/inicio");
     if (clave === "ingresar" && s) return ir("#/inicio");
 
     document.title = `${def.titulo} · Skala Equipo`;
@@ -169,11 +178,10 @@
 
   function pintarNav(activa) {
     const nav = $("appNav");
-    const r = rol();
-    if (!r) { nav.hidden = true; document.body.classList.remove("con-nav"); return; }
-    const items = r === "despachador"
-      ? [["inicio", "Inicio"], ["entregas", "Entregas"]]
-      : [["inicio", "Inicio"], ["nuevo", "Nuevo"], ["pedidos", "Pedidos"], ["clientes", "Clientes"]];
+    if (!rol()) { nav.hidden = true; document.body.classList.remove("con-nav"); return; }
+    const items = [["inicio", "Inicio"]];
+    if (vende()) items.push(["nuevo", "Nuevo"], ["pedidos", "Pedidos"], ["clientes", "Clientes"]);
+    if (tiene("despachador")) items.push(["entregas", "Entregas"]);
     const n = cajasCarrito();
     nav.innerHTML = items.map(([k, t]) =>
       `<a href="#/${k}" class="${k === activa ? "activa" : ""}"${k === activa ? ' aria-current="page"' : ""}>${icono(k)}<span>${t}</span>${k === "nuevo" && n ? `<b class="badge">${n}</b>` : ""}</a>`).join("");
@@ -306,12 +314,12 @@
   /* ---------- Inicio ---------- */
   async function vInicio(v, _p, _q, vigente) {
     const u = yo();
-    const r = u.rol;
+    const r = rolPedidos();
     const hora = new Date().getHours();
     const saludo = hora < 12 ? "Buenos días" : hora < 19 ? "Buenas tardes" : "Buenas noches";
-    const accesos = r === "despachador"
-      ? [["#/entregas", "Mis entregas", "entregas"]]
-      : [["#/nuevo", "Nuevo pedido", "nuevo"], ["#/pedidos", "Pedidos", "pedidos"], ["#/clientes", "Clientes", "clientes"]];
+    const accesos = [];
+    if (vende()) accesos.push(["#/nuevo", "Nuevo pedido", "nuevo"], ["#/pedidos", "Pedidos", "pedidos"], ["#/clientes", "Clientes", "clientes"]);
+    if (tiene("despachador")) accesos.push(["#/entregas", "Mis entregas", "entregas"]);
     v.innerHTML = `
       <section class="saludo"><h2>${saludo}, ${esc(u.nombre.split(" ")[0])}</h2><p>${esc(u.rol_nombre)}</p></section>
       <div class="stats" id="iStats"><div class="stat"><strong>…</strong><span>cargando</span></div></div>
@@ -324,20 +332,25 @@
     const c = { pendiente: 0, confirmado: 0, en_ruta: 0 };
     abiertos.pedidos.forEach((p) => (c[p.estado] = (c[p.estado] || 0) + 1));
     const tile = (n, t, h) => `<a class="stat" href="${h}"><strong>${n}</strong><span>${t}</span></a>`;
-    let tiles;
+    let tiles = "";
     let destacados = [];
-    if (r === "despachador") {
-      tiles = tile(c.confirmado, "preparando despacho", "#/entregas") + tile(c.en_ruta, "en ruta", "#/entregas");
-      destacados = abiertos.pedidos;
-      $("iListaTit").textContent = destacados.length ? "Para entregar" : "";
-      const carga = totalCarga(abiertos.pedidos);
+    let destacadoHtml = "";
+    if (tiene("despachador")) {
+      // Sus entregas (con varios roles, solo las asignadas a él)
+      const mias = abiertos.pedidos.filter((p) => String(p.despachador_id) === String(u.id) && ["confirmado", "en_ruta"].includes(p.estado));
+      const carga = totalCarga(mias);
       if (carga.cajas) {
-        $("iDestacado").innerHTML = `<section class="tarjeta carga-hoy"><p>Hoy tenés por entregar</p>
+        destacadoHtml += `<section class="tarjeta carga-hoy"><p>Hoy tenés por entregar</p>
           <p class="carga-grande"><strong>${carga.cajas}</strong> cajas</p><p class="ped-det">${carga.pedidos} pedido(s)${carga.unidades ? " · " + esc(carga.unidades) : ""}</p>
           <button type="button" class="btn btn-primary btn-bloque" id="btnCargaTodo">Ver total de carga</button></section>`;
-        $("btnCargaTodo").addEventListener("click", () => { sessionStorage.removeItem(K_CARGA); ir("#/carga"); });
       }
-    } else {
+      if (soloDespacha()) {
+        tiles = tile(mias.filter((p) => p.estado === "confirmado").length, "preparando despacho", "#/entregas") + tile(mias.filter((p) => p.estado === "en_ruta").length, "en ruta", "#/entregas");
+        destacados = mias;
+        $("iListaTit").textContent = destacados.length ? "Para entregar" : "";
+      }
+    }
+    if (vende()) {
       const gestion = r !== "vendedor";
       const [hoy, porCobrar, porConciliar, web] = await Promise.all([
         api("resumen", { dias: 1 }),
@@ -348,7 +361,7 @@
       if (!vigente()) return;
       if (web.pedidos.length) {
         const n = web.pedidos.length;
-        $("iDestacado").innerHTML = `<a class="tarjeta aviso-web-inicio" href="#/pedidos?tab=web" id="iWeb"><strong>${n} pedido${n === 1 ? "" : "s"} web</strong><span>${r === "vendedor" ? "Tus clientes los armaron en el catálogo: revisalos y envialos a Administración." : "Armados por clientes en el catálogo, esperando a su vendedor."}</span></a>`;
+        destacadoHtml += `<a class="tarjeta aviso-web-inicio" href="#/pedidos?tab=web" id="iWeb"><strong>${n} pedido${n === 1 ? "" : "s"} web</strong><span>${r === "vendedor" ? "Tus clientes los armaron en el catálogo: revisalos y envialos a Administración." : "Armados por clientes en el catálogo, esperando a su vendedor."}</span></a>`;
       }
       const vencidos = porCobrar.pedidos.filter((p) => { const ec = estadoCredito(p); return ec && (ec.nivel === "vencido" || ec.nivel === "muy_vencido"); }).length;
       const proximos = porCobrar.pedidos.filter((p) => { const ec = estadoCredito(p); return ec && ec.nivel === "proximo"; }).length;
@@ -360,6 +373,9 @@
       destacados = abiertos.pedidos.filter((p) => p.estado === "pendiente").slice(0, 5);
       $("iListaTit").textContent = destacados.length ? (r === "vendedor" ? "Tus pedidos en proceso" : "Por aprobar") : "";
     }
+    $("iDestacado").innerHTML = destacadoHtml;
+    const bc = $("btnCargaTodo");
+    if (bc) bc.addEventListener("click", () => { sessionStorage.removeItem(K_CARGA); ir("#/carga"); });
     $("iStats").innerHTML = tiles;
     $("iLista").innerHTML = destacados.map((p) => filaPedido(p)).join("");
   }
@@ -716,7 +732,7 @@
       const its = conPrecio();
       const hayPrecio = its.some((it) => it.precio > 0);
       const tipo = pagoSel() || "credito";
-      $("eItems").innerHTML = its.map((it) => `<li><span>${it.cajas} × ${esc(it.producto)}${it.total_unidades ? ` <span class="ped-det">${it.total_unidades} ${esc(it.unidad)}</span>` : ""}</span><em>${it.precio ? `${dinero(precioUnitario(it, tipo))} c/u · <strong>${dinero(it.cajas * precioUnitario(it, tipo))}</strong>` : "sin precio"}</em></li>`).join("");
+      $("eItems").innerHTML = its.map((it) => `<li class="con-foto"><picture class="item-foto"><source type="image/webp" srcset="assets/img/web/${it.code}-400.webp" /><img src="assets/img/${it.code}.png" alt="" width="36" height="36" loading="lazy" decoding="async" /></picture><span>${it.cajas} × ${esc(it.producto)}${it.total_unidades ? ` <span class="ped-det">${it.total_unidades} ${esc(it.unidad)}</span>` : ""}</span><em>${it.precio ? `${dinero(precioUnitario(it, tipo))} c/u · <strong>${dinero(it.cajas * precioUnitario(it, tipo))}</strong>` : "sin precio"}</em></li>`).join("");
       const nivel = nivelPrecio(total, excepcionMayor());
       $("eNivel").textContent = nivel === "mayor" ? (total >= CAJAS_MAYOR ? "Precio al mayor." : "Precio al mayor por excepción.") : `Precio al por menor (menos de ${CAJAS_MAYOR} cajas).`;
       const sel = pagoSel();
@@ -828,13 +844,13 @@
     return { clase: "por_cobrar", texto: "Por cobrar" };
   }
   const chipBandera = (p) => {
-    if (rol() === "despachador") return ""; // el cobro no le corresponde al despachador
+    if (!vende()) return ""; // el cobro no le corresponde al despachador
     const b = bandera(p);
     return b ? `<span class="bandera b-${esc(b.clase)}"><i aria-hidden="true"></i>${esc(b.texto)}</span>` : "";
   };
 
   function filaPedido(p, elegible) {
-    const r = rol();
+    const r = enEntregas() ? "despachador" : rolPedidos();
     const extra = r === "vendedor" ? (p.despachador ? `Despacha: ${p.despachador}` : "")
       : r === "despachador" ? ((p.cliente_datos || {}).direccion || "") : `Vendedor: ${p.vendedor}${p.despachador ? ` · Despacha: ${p.despachador}` : ""}`;
     return `<li class="${elegible ? "con-check" : ""}">${elegible ? `<label class="check-ped"><input type="checkbox" value="${esc(p.id)}" aria-label="Elegir ${esc(p.negocio)} para la carga" /></label>` : ""}
@@ -848,10 +864,11 @@
   }
 
   async function vPedidos(v, _p, query, vigente) {
-    const tabs = pestanasPanel(rol()).filter((t) => t.estados || t.filtro || t.web);
+    const entregas = enEntregas();
+    const tabs = pestanasPanel(entregas ? "despachador" : rolPedidos()).filter((t) => t.estados || t.filtro || t.web);
     const tab = tabs.find((t) => t.id === query.get("tab")) || tabs[0];
-    const base = rol() === "despachador" ? "#/entregas" : "#/pedidos";
-    const conCarga = tab.id === "curso" && ["despachador", "admin", "master"].includes(rol());
+    const base = entregas ? "#/entregas" : "#/pedidos";
+    const conCarga = tab.id === "curso" && (entregas || gestion());
     const PERIODOS = [[1, "Hoy"], [7, "7 días"], [30, "30 días"], [90, "90 días"]];
     const dias = tab.periodo ? (PERIODOS.find(([d]) => d === Number(query.get("dias"))) || [30])[0] : 60;
     v.innerHTML = `
@@ -873,6 +890,8 @@
     const r = await api("pedidos", { ...filtro, dias });
     if (!vigente()) return;
     let lista = r.pedidos;
+    // Entregas: con varios roles, solo los pedidos asignados a este usuario
+    if (entregas) lista = lista.filter((p) => String(p.despachador_id) === String(yo().id));
     if (tab.filtro === "conciliados") {
       lista = lista.slice().sort((a, b) => String(b.conciliado_at).localeCompare(String(a.conciliado_at)));
       $("pResumen").innerHTML = resumenConciliadosHtml(resumenConciliados(lista), dias);
@@ -908,7 +927,7 @@
     const tabla = (filas, titulo) => `<table class="tabla"><thead><tr><th>${titulo}</th><th>Ped.</th><th>Cajas</th><th class="num">Monto</th></tr></thead><tbody>${filas.map((g) =>
       `<tr><td>${esc(g.nombre)}</td><td>${g.pedidos}</td><td>${g.cajas}</td><td class="num">${dinero(g)}</td></tr>`).join("")}</tbody></table>`;
     if (!t.pedidos) return `<section class="tarjeta conciliados-total vacio"><p class="modal-sub">Nada conciliado ${periodo}.</p></section>`;
-    const verVendedor = rol() !== "vendedor";
+    const verVendedor = gestion();
     return `<section class="tarjeta conciliados-total" id="concTotal">
         <p class="sub-titulo">Total conciliado · ${periodo}</p>
         <div class="montos">
@@ -932,7 +951,7 @@
       <div class="fila-top"><strong>${esc(w.cliente.negocio)}</strong><span class="chip-estado est-web">Pedido web</span></div>
       <div class="ped-det">${esc(w.id)} · ${esc(fechaLegible(w.fecha))}</div>
       <div class="ped-det">${w.total_cajas} caja(s)${monto ? ` · <strong>${esc(dinero(monto))}</strong>` : ""} · ${esc((pagoPorId(w.tipo_pago) || {}).nombre || "")}</div>
-      ${rol() === "vendedor" ? "" : `<div class="ped-det">Para: ${esc(w.vendedor)}</div>`}
+      ${gestion() ? `<div class="ped-det">Para: ${esc(w.vendedor)}</div>` : ""}
     </a></li>`;
   }
 
@@ -1043,10 +1062,10 @@
     const tel = telLink(c.telefono), tel2 = telLink(c.telefono2);
     const wa = telefonoWhatsapp(c.telefono);
     const mapa = linkMapa(c.latitud, c.longitud);
-    const acciones = accionesPedido(rol(), yo().id, p);
+    const acciones = accionesPedido(roles(), yo().id, p);
     const principal = ["confirmar", "en_ruta", "entregado", "cobrar", "conciliar"];
     const ec = estadoCredito(p);
-    const conPrecio = rol() !== "despachador" && p.items.some((it) => Number(it.precio) > 0);
+    const conPrecio = vende() && p.items.some((it) => Number(it.precio) > 0);
     const tipoAcordado = p.tipo_pago || tipoPagoDe(p.pago);
     v.innerHTML = `
       <section class="tarjeta">
@@ -1083,7 +1102,7 @@
         </dl>
       </section>
       <button type="button" class="btn btn-ghost btn-bloque" id="btnReenviar">Reenviar al grupo de WhatsApp</button>
-      ${puedeBorrar(rol(), yo().id, p) ? '<button type="button" class="btn btn-ghost btn-bloque btn-peligro" id="btnBorrarPed">Borrar pedido</button>' : ""}
+      ${puedeBorrar(roles(), yo().id, p) ? '<button type="button" class="btn btn-ghost btn-bloque btn-peligro" id="btnBorrarPed">Borrar pedido</button>' : ""}
       ${p.historial && p.historial.length ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3><ol class="historial">${p.historial.map((h) =>
         `<li><strong>${esc({ creado: "Enviado (en proceso)", reasignado: "Despachador cambiado", pendiente: "Vuelto a En proceso", confirmado: "Aprobado",
           cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", borrado: "Borrado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
@@ -1487,7 +1506,7 @@
     if (!vigente()) return;
     cacheUsuarios = r.usuarios;
     const orden = { master: 0, admin: 1, vendedor: 2, despachador: 3 };
-    const lista = r.usuarios.slice().sort((a, b) => orden[a.rol] - orden[b.rol] || a.nombre.localeCompare(b.nombre));
+    const lista = r.usuarios.slice().sort((a, b) => (orden[a.rol] ?? 9) - (orden[b.rol] ?? 9) || a.nombre.localeCompare(b.nombre));
     v.innerHTML = `<a class="btn btn-primary btn-bloque" href="#/usuario/nuevo">Nuevo usuario</a>
       <ul class="usuarios-lista">${lista.map((u) => `<li class="${u.activo ? "" : "inactivo"}">
         <div><strong>${esc(u.nombre)}</strong> <span class="ped-det">@${esc(u.usuario)}</span></div>
@@ -1509,8 +1528,10 @@
     v.innerHTML = `<form class="tarjeta" id="fUsuario" novalidate>
       <label class="field field-full"><span>Usuario (para ingresar)</span><input id="uUsuario" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="ej. kevin" value="${esc(u ? u.usuario : "")}" /></label>
       <label class="field field-full"><span>Nombre</span><input id="uNombre" type="text" autocapitalize="words" autocomplete="off" placeholder="ej. Kevin Pérez" value="${esc(u ? u.nombre : "")}" /></label>
-      <label class="field field-full"><span>Rol</span><select id="uRol">${[["vendedor", "Vendedor"], ["despachador", "Despachador"], ["admin", "Administración"], ["master", "Master"]].map(([k, t]) =>
-        `<option value="${k}"${(u ? u.rol : "vendedor") === k ? " selected" : ""}>${t}</option>`).join("")}</select></label>
+      <fieldset class="pay roles-usuario" id="uRoles"><legend>Roles (puede tener varios)</legend>
+        ${[["vendedor", "Vendedor", "toma pedidos, clientes y cobros"], ["despachador", "Despachador", "entrega los pedidos que le asignan"], ["admin", "Administración", "aprueba, concilia, inventario y precios"], ["master", "Master", "todo, incluido usuarios"]].map(([k, t, d]) =>
+          `<label class="check rol-opt"><input type="checkbox" name="uRol" value="${k}"${(u ? u.roles || [u.rol] : ["vendedor"]).includes(k) ? " checked" : ""} /> <span><strong>${t}</strong> <span class="ped-det">${d}</span></span></label>`).join("")}
+      </fieldset>
       <label class="field field-full"><span>${nuevo ? "Clave" : "Clave nueva (dejar vacía para no cambiarla)"}</span>
         <span class="clave-wrap"><input id="uClave" type="password" maxlength="64" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Letras y números" />
         <button type="button" class="ver-clave" data-ver="uClave" aria-label="Mostrar clave">Ver</button></span></label>
@@ -1522,14 +1543,20 @@
     $("fUsuario").addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = $("btnGuardarUsuario");
+      const elegidos = [...document.querySelectorAll('input[name="uRol"]:checked')].map((x) => x.value);
+      if (!elegidos.length) { $("uError").textContent = "Elegí al menos un rol."; $("uError").hidden = false; return; }
       btn.disabled = true;
       try {
         const r = await api("guardarUsuario", {
           id: u ? u.id : undefined, usuario: $("uUsuario").value.trim(), nombre: $("uNombre").value.trim(),
-          rol: $("uRol").value, activo: $("uActivo").checked, clave: $("uClave").value || undefined,
+          roles: elegidos, activo: $("uActivo").checked, clave: $("uClave").value || undefined,
         });
         toast(`Usuario ${r.usuario.usuario} guardado`);
-        if (r.usuario.id === yo().id && (r.usuario.rol !== "master" || !r.usuario.activo)) { SkalaAPI.cerrarSesion(); return ir("#/ingresar"); }
+        if (r.usuario.id === yo().id) {
+          // sus propios roles cambiaron: actualizar la sesión (o salir si ya no es Master o quedó inactivo)
+          if (!r.usuario.roles.includes("master") || !r.usuario.activo) { SkalaAPI.cerrarSesion(); return ir("#/ingresar"); }
+          SkalaAPI.guardarSesion(sesion().token, r.usuario);
+        }
         ir("#/usuarios");
       } catch (e2) {
         $("uError").textContent = e2.message; $("uError").hidden = false;
@@ -1544,9 +1571,9 @@
     const u = yo();
     const r = u.rol;
     const items = [];
-    if (TOMAN.includes(r)) items.push(["#/resumen", "Resumen", "Pedidos, cajas y productos más pedidos"]);
-    if (r === "master" || r === "admin") items.push(["#/inventario", "Inventario y precios", "Existencias, entradas de mercancía y los 5 precios"]);
-    if (r === "master") items.push(["#/usuarios", "Usuarios", "Crear usuarios, claves, roles y activar"]);
+    if (vende()) items.push(["#/resumen", "Resumen", "Pedidos, cajas y productos más pedidos"]);
+    if (gestion()) items.push(["#/inventario", "Inventario y precios", "Existencias, entradas de mercancía y los 5 precios"]);
+    if (tiene("master")) items.push(["#/usuarios", "Usuarios", "Crear usuarios, claves, roles y activar"]);
     if (!APP) items.push(["index.html", "Ver catálogo", "La página que ven los clientes"]);
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const instalada = !!APP || window.matchMedia("(display-mode: standalone)").matches;

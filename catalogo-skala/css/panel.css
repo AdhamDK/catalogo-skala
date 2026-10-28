@@ -457,3 +457,16 @@ html[data-tema="oscuro"] .modo-local { background: rgba(245, 130, 42, 0.15); col
 body.app-bloqueada #vista, body.app-bloqueada #appNav { pointer-events: none; opacity: .35; }
 html[data-tema="oscuro"] .aviso-app.obligatoria { background: rgba(233, 78, 140, 0.15); }
 .usuarios-lista li .btn { min-height: 44px !important; height: auto; box-sizing: border-box; }
+
+/* ---------- Usuario con varios roles ---------- */
+.roles-usuario { display: grid; gap: 2px; }
+.roles-usuario .rol-opt { align-items: center; }
+.roles-usuario .rol-opt > span { display: flex; flex-direction: column; line-height: 1.2; }
+.roles-usuario .rol-opt .ped-det { font-size: 0.78rem; }
+
+/* Foto chica del producto en el resumen del pedido */
+.resumen-items li.con-foto { align-items: center; }
+.resumen-items li.con-foto > span { flex: 1; min-width: 0; }
+.item-foto { flex: 0 0 36px; width: 36px; height: 36px; border-radius: 8px; overflow: hidden; background: #f6fbf0; }
+.item-foto img { width: 100%; height: 100%; object-fit: contain; display: block; }
+html[data-tema="oscuro"] .item-foto { background: #2e2b26; }

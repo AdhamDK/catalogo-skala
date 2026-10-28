@@ -68,7 +68,7 @@ test("login con usuario + PIN (sin importar mayúsculas); error genérico", () =
   const g = preparar();
   const r = g.post({ action: "login", usuario: " Oscar ", pin: "Oscar.1234" });
   assert.equal(r.ok, true);
-  assert.deepEqual(r.usuario, { id: idDe(g, "oscar"), usuario: "oscar", nombre: "Óscar", rol: "vendedor", rol_nombre: "Vendedor" });
+  assert.deepEqual(r.usuario, { id: idDe(g, "oscar"), usuario: "oscar", nombre: "Óscar", rol: "vendedor", roles: ["vendedor"], rol_nombre: "Vendedor" });
   assert.equal(g.post({ action: "login", usuario: "oscar", pin: "0000" }).code, "bad_pin");
   assert.equal(g.post({ action: "login", usuario: "nadie", pin: "Oscar.1234" }).code, "bad_pin");
   assert.equal(g.post({ action: "yo", token: r.token }).usuario.rol, "vendedor");
@@ -794,4 +794,52 @@ test("sincronizar: precios, stock, clientes, pedidos del usuario y pedidos web; 
   const c = g.post({ action: "config" }).config;
   assert.equal(c.version_apk, 3);
   assert.equal(c.url_apk, "https://github.com/x/releases/download/v3/skala.apk");
+});
+
+/* ---------- Varios roles por usuario ---------- */
+test("un usuario con varios roles puede hacer todo lo de cada uno", () => {
+  const g = preparar();
+  g.ctx.crearUsuario("mixto", "Mixto", "despachador, vendedor", "Mixto1234");
+  const u = g.tabla("Usuarios").find((x) => x.usuario === "mixto");
+  assert.equal(u.rol, "vendedor, despachador"); // ordenado por rango
+  const r = g.post({ action: "login", usuario: "mixto", clave: "Mixto1234" });
+  assert.deepEqual([r.usuario.rol, r.usuario.roles, r.usuario.rol_nombre], ["vendedor", ["vendedor", "despachador"], "Vendedor · Despachador"]);
+  const tm = r.token;
+  // como vendedor: toma pedidos y busca clientes
+  const p = pedir(g, tm, { tipo_pago: "pronto" });
+  assert.equal(p.ok, true);
+  assert.equal(g.post({ action: "clientes", token: tm }).ok, true);
+  // aparece como despachador y como vendedor elegible
+  const ta = login(g, "ana", "Ana*2222");
+  assert.ok(g.post({ action: "despachadores", token: ta }).despachadores.some((d) => d.nombre === "Mixto"));
+  assert.ok(g.post({ action: "vendedores" }).vendedores.some((d) => d.nombre === "Mixto"));
+  // un pedido de otro vendedor asignado a él como despachador: lo ve y lo entrega
+  const otro = pedir(g, login(g), { tipo_pago: "pronto", cliente: { ...CLIENTE, telefono: "0416-1112233", rif_cedula: "" } }).pedido;
+  assert.equal(g.post({ action: "pedido", token: tm, pedido_id: otro.id }).code, "not_found");
+  g.post({ action: "estado", token: ta, pedido_id: otro.id, estado: "confirmado", despachador_id: u.id });
+  assert.equal(g.post({ action: "pedido", token: tm, pedido_id: otro.id }).ok, true);
+  assert.equal(g.post({ action: "estado", token: tm, pedido_id: otro.id, estado: "entregado" }).ok, true);
+  // su propio pedido: lo anula como vendedor (en proceso); el de otro no
+  assert.equal(g.post({ action: "estado", token: tm, pedido_id: p.pedido.id, estado: "cancelado", motivo: "x" }).ok, true);
+  assert.match(g.tabla("Historial").find((h) => h.accion === "entregado").usuario, /Mixto \(Vendedor · Despachador\)/);
+  // no es gestión
+  assert.equal(g.post({ action: "despachadores", token: tm }).code, "forbidden");
+  assert.equal(g.post({ action: "pedidos", token: tm }).pedidos.length, 2); // el suyo y el asignado
+});
+
+test("Master puede asignar varios roles; validaciones de roles y del último Master", () => {
+  const g = preparar();
+  const tj = login(g, "jose", "Skala#2026");
+  const luis = idDe(g, "luis");
+  let r = g.post({ action: "guardarUsuario", token: tj, id: luis, usuario: "luis", nombre: "Luis", roles: ["despachador", "vendedor"], activo: true });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.usuario.roles, ["vendedor", "despachador"]);
+  assert.equal(g.post({ action: "guardarUsuario", token: tj, id: luis, usuario: "luis", nombre: "Luis", roles: ["jefe"] }).code, "usuario");
+  assert.deepEqual(g.post({ action: "usuarios", token: tj }).usuarios.find((x) => x.id === luis).roles, ["vendedor", "despachador"]);
+  // el único Master puede sumar roles, pero no dejar de ser Master
+  const jose = idDe(g, "jose");
+  assert.equal(g.post({ action: "guardarUsuario", token: tj, id: jose, usuario: "jose", nombre: "José", roles: ["master", "vendedor"] }).ok, true);
+  assert.match(g.post({ action: "guardarUsuario", token: tj, id: jose, usuario: "jose", nombre: "José", roles: ["admin", "vendedor"] }).error, /Master activo/);
+  // sumar Master exige clave de 8
+  assert.match(g.post({ action: "guardarUsuario", token: tj, id: luis, usuario: "luis", nombre: "Luis", roles: ["master", "despachador"] }).error, /clave nueva/);
 });

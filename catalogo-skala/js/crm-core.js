@@ -81,9 +81,17 @@ function mensajeGrupo(ped, c) {
 const NOMBRES_ESTADO = { pendiente: "En proceso", confirmado: "Aprobado · Preparando despacho", en_ruta: "En ruta", entregado: "Entregado", cancelado: "Anulado" };
 function nombreEstado(e) { return NOMBRES_ESTADO[e] || String(e || ""); }
 
-function puedeTomarPedidos(rol) { return rol === "master" || rol === "admin" || rol === "vendedor"; }
+/* Un usuario puede tener varios roles: estas funciones aceptan un rol o una lista */
+const listaRoles = (r) => (Array.isArray(r) ? r : [r]).filter(Boolean);
+function puedeTomarPedidos(rol) { return listaRoles(rol).some((r) => r === "master" || r === "admin" || r === "vendedor"); }
 
+/* Botones del pedido: la suma de lo que permite cada rol, sin repetir */
 function accionesPedido(rol, uid, p) {
+  const todas = [];
+  listaRoles(rol).forEach((r) => accionesDeRol(r, uid, p).forEach((a) => { if (!todas.includes(a)) todas.push(a); }));
+  return todas;
+}
+function accionesDeRol(rol, uid, p) {
   const e = p.estado;
   const cobro = p.cobro || "";
   if (rol === "master" || rol === "admin") {
@@ -112,7 +120,8 @@ function accionesPedido(rol, uid, p) {
 
 /* Borrar (ej. pedidos de prueba): el vendedor los suyos, el Master cualquiera */
 function puedeBorrar(rol, uid, p) {
-  return rol === "master" || (rol === "vendedor" && String(p.vendedor_id) === String(uid));
+  const rs = listaRoles(rol);
+  return rs.includes("master") || (rs.includes("vendedor") && String(p.vendedor_id) === String(uid));
 }
 
 /* Pedido web: número de referencia y mensaje de WhatsApp del cliente */

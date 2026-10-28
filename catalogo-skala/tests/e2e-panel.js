@@ -657,15 +657,20 @@ function servidor() {
   await esperarRuta("#/usuario/nuevo");
   await page.fill("#uUsuario", "kevin");
   await page.fill("#uNombre", "Kevin");
-  await page.selectOption("#uRol", "despachador");
+  await page.uncheck('input[name="uRol"][value="vendedor"]');
+  await page.click("#btnGuardarUsuario");
+  assert.match(await page.innerText("#uError"), /al menos un rol/);
+  await page.check('input[name="uRol"][value="vendedor"]');
+  await page.check('input[name="uRol"][value="despachador"]'); // varios roles
   await page.fill("#uClave", "123456");
   await page.click("#btnGuardarUsuario");
-  await page.waitForSelector("#uError:not([hidden])");
-  assert.match(await page.innerText("#uError"), /letras y números/);
+  await page.waitForFunction(() => /letras y números/.test(document.getElementById("uError").textContent));
   await page.fill("#uClave", "Kevin#9876");
   await page.click("#btnGuardarUsuario");
   await esperarRuta("#/usuarios");
   await page.waitForFunction(() => document.querySelectorAll(".usuarios-lista li").length === 5);
+  assert.match(await page.innerText(".usuarios-lista"), /Kevin[\s\S]*Vendedor · Despachador/);
+  assert.equal(gas.tabla("Usuarios").find((u) => u.usuario === "kevin").rol, "vendedor, despachador");
   await foto("10-usuarios");
   await revisarDiseno("usuarios");
   ok("master: Más → Resumen y Usuarios (crear con validación de clave)");
@@ -696,6 +701,25 @@ function servidor() {
   await page.waitForFunction(() => /Anulado/.test(document.querySelector(".chip-estado")?.textContent || ""));
   assert.match(await page.innerText(".historial"), /Vuelto a En proceso[\s\S]*Anulado/);
   ok("master: vuelve a En proceso y anula con motivo; queda en el historial");
+
+  /* ---------- Usuario con varios roles: ve y hace todo lo de cada uno ---------- */
+  await salir();
+  await ingresar("kevin", "Kevin#9876");
+  await esperarRuta("#/inicio");
+  assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Nuevo", "Pedidos", "Clientes", "Entregas"]);
+  assert.match(await page.innerText("#appQuien"), /Kevin · Vendedor · Despachador/);
+  assert.deepEqual(await page.locator(".accesos .acceso span").allInnerTexts(), ["Nuevo pedido", "Pedidos", "Clientes", "Mis entregas"]);
+  await page.click('.app-nav a[href="#/entregas"]');
+  await esperarRuta("#/entregas");
+  assert.equal(await titulo(), "Mis entregas");
+  await page.click('.app-nav a[href="#/nuevo"]');
+  await esperarRuta("#/nuevo");
+  await page.waitForSelector("#btnClienteNuevo");
+  await revisarDiseno("varios roles");
+  ok("varios roles: Kevin (Vendedor + Despachador) tiene Nuevo, Pedidos, Clientes y Entregas");
+  await salir();
+  await ingresar("jose", "Skala#2026");
+  await esperarRuta("#/inicio");
 
   /* ---------- Tema oscuro ---------- */
   const contraste = () => page.evaluate(() => {

@@ -17,6 +17,8 @@ Arquitectura: catálogo estático en Netlify + Google Sheets (en Drive) con Apps
 | Resumen | todo | todo | sus ventas | — |
 
 El servidor valida el rol en **cada** acción (la interfaz solo oculta botones).
+**Varios roles:** columna `rol` con varios separados por coma; el usuario puede hacer la suma de
+lo que permite cada uno (`rolesDe_`, `tiene_` en Code.gs; `roles` en la sesión).
 El rol se lee de la hoja en cada llamada: un cambio de rol o desactivación aplica al instante.
 
 ## Estados del pedido

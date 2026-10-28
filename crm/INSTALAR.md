@@ -102,6 +102,11 @@ motivo. El pedido sale de las listas, los totales y el inventario, pero queda en
 ## App Android
 Ver `android/LEEME.md` (compilar, instalar y publicar actualizaciones con la hoja `Config`).
 
+## Varios roles por usuario
+Un usuario puede tener varios roles (ej. Vendedor + Despachador) y hace todo lo de cada uno:
+en Más → Usuarios → Editar marcá las casillas, o en la hoja `Usuarios`, columna `rol`, separados
+por coma (`vendedor, despachador`).
+
 ## Respaldo
 La hoja vive en tu Drive: **Archivo → Historial de versiones** guarda todo. La hoja
 `Historial` registra quién cambió cada pedido y cuándo.

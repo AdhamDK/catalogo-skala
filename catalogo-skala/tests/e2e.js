@@ -190,6 +190,9 @@ async function probar(browser, cfg) {
   assert.equal(await page.evaluate(() => document.body.classList.contains("modal-open")), true);
   // "Tu pedido": revisar, sumar / quitar, montos por forma de pago
   assert.equal(await page.locator("#cartList .cart-item").count(), 2);
+  // foto chica de cada producto al lado
+  await page.waitForFunction(() => [...document.querySelectorAll("#cartList .cart-foto img")].every((i) => i.complete && i.naturalWidth > 0));
+  assert.match(await page.locator("#cartList .cart-foto img").first().evaluate((i) => i.currentSrc), /BC-01-400\.webp$/);
   assert.match(await page.innerText("#cartTotal"), /3 cajas · 40,00 \$/);
   assert.deepEqual(await page.locator("#pagosWeb .pago-monto strong").allInnerTexts(), ["40,00 $", "36,00 $", "28,00 $", "24,00 $"]);
   await page.locator('#cartList .qty-btn[data-act="plus"][data-code="KT-01"]').click();

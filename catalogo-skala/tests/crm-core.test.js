@@ -389,3 +389,13 @@ test("app: aviso de versión nueva y versión mínima", () => {
   assert.deepEqual(core.estadoApp(1, cfg), { nueva: true, obligatoria: true, version: 3 });
   assert.equal(core.estadoApp(1, { version_apk: 3, url_apk: "" }).nueva, false); // sin enlace no avisa
 });
+
+test("varios roles: botones y permisos suman los de cada rol", () => {
+  const p = { estado: "confirmado", vendedor_id: "U3", despachador_id: "U3", cobro: "" };
+  assert.deepEqual(core.accionesPedido(["vendedor", "despachador"], "U3", p), ["en_ruta", "entregado"]);
+  assert.deepEqual(core.accionesPedido(["vendedor", "despachador"], "U3", { ...p, estado: "pendiente" }), ["cancelar"]);
+  assert.deepEqual(core.accionesPedido(["admin", "despachador"], "U3", p), ["en_ruta", "reasignar", "cancelar", "entregado"]);
+  assert.equal(core.puedeTomarPedidos(["despachador", "vendedor"]), true);
+  assert.equal(core.puedeTomarPedidos(["despachador"]), false);
+  assert.equal(core.puedeBorrar(["admin", "vendedor"], "U3", p), true);
+});

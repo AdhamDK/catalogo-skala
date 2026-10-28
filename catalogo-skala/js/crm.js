@@ -25,7 +25,7 @@
   function elegirModo() {
     if (totalCajas() <= 0) return;
     const s = SkalaAPI.sesion();
-    if (s && puedeTomarPedidos(s.usuario.rol)) return irAlPanel("nuevo");
+    if (s && puedeTomarPedidos(s.usuario.roles || s.usuario.rol)) return irAlPanel("nuevo");
     if (typeof closeModal === "function") closeModal();
     $("modoModal").hidden = false;
     document.body.classList.add("modal-open");

@@ -227,6 +227,8 @@ function renderCarrito() {
   const escribiendo = document.activeElement && document.activeElement.closest && document.activeElement.closest("#cartList");
   if (!escribiendo || its.length !== $id("cartList").children.length) $id("cartList").innerHTML = its.map((it) => `
     <li class="cart-item">
+      <picture class="cart-foto"><source type="image/webp" srcset="assets/img/web/${it.code}-400.webp" />
+        <img src="assets/img/${it.code}.png" alt="" width="44" height="44" loading="lazy" decoding="async" /></picture>
       <div class="cart-info"><strong>${escHTML(it.producto)}</strong>
         <span>${it.code}${it.total_unidades ? ` · ${it.total_unidades} ${escHTML(it.unidad)}` : ""}${it.precio ? ` · ${dinero(precioUnitario(it, tipo))} c/u` : ""}</span></div>
       <div class="qty qty-chica">
