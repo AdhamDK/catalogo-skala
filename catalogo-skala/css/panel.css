@@ -671,3 +671,22 @@ body.app.con-nav .barra-accion { bottom: calc(68px + env(safe-area-inset-bottom)
 .ent-items .ent-precio { margin-left: auto; font-style: normal; font-weight: 700; white-space: nowrap; }
 .apr-botones { padding: 4px 0 0; }
 .datos dd, .ent-dir, .ent-dir-full, .ped-det, .resumen-items span { overflow-wrap: anywhere; }
+
+/* ---------- Aprobar con los datos de la factura ---------- */
+.apr-factura .datos-factura { margin: 10px 0 8px; font-size: 0.9rem; }
+.falta-dato { color: #b5450a; font-weight: 700; }
+.tabla-factura { width: 100%; margin: 0 0 8px; font-size: 0.88rem; }
+.tabla-factura td:first-child, .tabla-factura th:first-child { width: 2.6em; text-align: center; }
+.tabla-factura tfoot td { border-top: 2px solid var(--borde); padding-top: 6px; }
+html[data-tema="oscuro"] .falta-dato { color: #f2b25c; }
+/* ---------- Entrega parcial ---------- */
+.chip-parcial { align-self: flex-start; margin-top: 3px; padding: 2px 8px; border-radius: 999px; background: #fff1dc; color: #8a4a0f; font-size: 0.75rem; font-weight: 700; }
+html[data-tema="oscuro"] .chip-parcial { background: rgba(242, 178, 92, 0.18); color: #f2c58a; }
+.difs { margin-top: 8px; }
+.dif-fila { display: grid; grid-template-columns: 1fr 76px; gap: 6px 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--borde-suave); }
+.dif-prod { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.dif-n { width: 76px; height: 46px; text-align: center; font-size: 16px; border: 1px solid var(--borde); border-radius: 10px; background: var(--superficie); color: var(--tinta); }
+.dif-falta { grid-column: 1 / -1; }
+.dif-destino { grid-column: 1 / -1; min-height: 44px; font-size: 16px; border: 1px solid var(--borde); border-radius: 10px; padding: 0 10px; background: var(--superficie); color: var(--tinta); }
+.dif-fila.con-falta .dif-n { border-color: #d98a1c; }
+.ent-sobrante { margin: 14px 2px 0; text-align: center; }

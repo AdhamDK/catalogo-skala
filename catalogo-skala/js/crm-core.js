@@ -78,7 +78,7 @@ function mensajeGrupo(ped, c) {
 /* -------------------- Roles (v2) --------------------
    La interfaz usa esto para mostrar botones; el servidor (crm/Code.gs) vuelve a validar todo. */
 /* Nombres que ve el equipo (las claves internas no cambian: la hoja sigue compatible) */
-const NOMBRES_ESTADO = { pendiente: "En proceso", confirmado: "Aprobado · Preparando despacho", en_ruta: "En ruta", entregado: "Entregado", cancelado: "Anulado" };
+const NOMBRES_ESTADO = { pendiente: "En proceso", confirmado: "Aprobado · Por despachar", en_ruta: "En ruta", entregado: "Entregado", cancelado: "Anulado" };
 function nombreEstado(e) { return NOMBRES_ESTADO[e] || String(e || ""); }
 
 /* Un usuario puede tener varios roles: estas funciones aceptan un rol o una lista */
@@ -96,8 +96,9 @@ function accionesDeRol(rol, uid, p) {
   const cobro = p.cobro || "";
   if (rol === "master" || rol === "admin") {
     if (e === "pendiente") return ["confirmar", "cancelar"];
-    if (e === "confirmado") return ["en_ruta", "reasignar", "cancelar"];
-    if (e === "en_ruta") return ["entregado", "reasignar", "cancelar"];
+    // sin depositario asignado, Administración despacha y entrega
+    if (e === "confirmado") return ["en_ruta", "entregado", "cancelar"];
+    if (e === "en_ruta") return ["entregado", "cancelar"];
     if (e === "entregado") {
       if (cobro === "cancelado") return ["conciliar", "rechazar"];
       if (cobro === "conciliado") return ["desconciliar"];
@@ -202,16 +203,22 @@ function estadoCredito(p, hoy = new Date()) {
 }
 
 /* -------------------- Total de carga (despachador) -------------------- */
+/* Cajas que faltan entregar de un producto (entrega parcial: ya recibió una parte) */
+function cajasPorEntregar(it) { return Math.max(0, (Number(it.cajas) || 0) - (Number(it.entregadas) || 0)); }
+function cajasPendientes(p) { return (p.items || []).reduce((a, it) => a + cajasPorEntregar(it), 0); }
+const esParcial = (p) => (p.items || []).some((it) => Number(it.entregadas) > 0) && cajasPendientes(p) > 0;
 function totalCarga(pedidos) {
   const prod = {};
   let cajas = 0;
   (pedidos || []).forEach((p) => {
     (p.items || []).forEach((it) => {
       const k = it.code;
+      const n = cajasPorEntregar(it);
+      if (!n) return;
       const x = prod[k] || (prod[k] = { code: k, producto: it.producto, cajas: 0, total_unidades: 0, unidad: it.unidad || "unidades" });
-      x.cajas += Number(it.cajas) || 0;
-      x.total_unidades += Number(it.total_unidades) || 0;
-      cajas += Number(it.cajas) || 0;
+      x.cajas += n;
+      x.total_unidades += (Number(it.unidades_caja) || 0) * n || (n === Number(it.cajas) ? Number(it.total_unidades) || 0 : 0);
+      cajas += n;
     });
   });
   const productos = Object.values(prod).sort((a, b) => b.cajas - a.cajas || a.code.localeCompare(b.code));
@@ -538,7 +545,7 @@ function nuevoRef() {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { itemsDePedido, telefonoWhatsapp, linkMapa, fechaLegible, mensajeGrupo, validarCliente, expiracionToken, nuevoRef,
-    nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, coordsDeTexto, estadoCredito, totalCarga,
+    nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, cajasPorEntregar, cajasPendientes, esParcial, coordsDeTexto, estadoCredito, totalCarga,
     monedaDePago, formatoMonto, resumenConciliados,
     CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, descuentoMaximo, sinPrecio, dinero,
     limitePronto, prontoVigente, textoStock, topeStock, puedeBorrar, refWeb, mensajeWeb,

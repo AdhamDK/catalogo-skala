@@ -207,8 +207,7 @@ test("flujo: pendiente → confirmado (asigna despachador) → en ruta → entre
   assert.equal(g.post({ action: "pedidos", token: tl }).pedidos.length, 0);
   // vendedor y despachador no confirman
   assert.equal(g.post({ action: "estado", token: tv, pedido_id: id, estado: "confirmado", despachador_id: luis }).code, "forbidden");
-  // confirmar sin despachador falla; con despachador inválido (un vendedor) también
-  assert.equal(g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado" }).code, "despachador");
+  // un despachador inválido (un vendedor) falla
   assert.equal(g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: idDe(g, "oscar") }).code, "despachador");
 
   const c = g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: luis });
@@ -231,7 +230,64 @@ test("flujo: pendiente → confirmado (asigna despachador) → en ruta → entre
   assert.equal(g.post({ action: "estado", token: tl, pedido_id: id, estado: "pendiente" }).code, "forbidden");
 
   assert.deepEqual(g.tabla("Historial").map((h) => h.accion), ["creado", "confirmado", "en_ruta", "entregado"]);
-  assert.equal(g.tabla("Historial")[1].detalle, "Despachador: Luis");
+  assert.equal(g.tabla("Historial")[1].detalle, "Facturado · Despachador: Luis");
+});
+
+test("aprobar = facturado (n° de factura opcional, sin despachador); Administración despacha y entrega", () => {
+  const g = preparar();
+  const ta = conPrecios(g), tv = login(g);
+  const id = pedir(g, tv, { tipo_pago: "pronto" }).pedido.id;
+  const a = g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", factura: " 000123 " });
+  assert.equal(a.ok, true, JSON.stringify(a));
+  assert.deepEqual([a.pedido.estado, a.pedido.factura, a.pedido.despachador, a.pedido.confirmado_por], ["confirmado", "000123", "", "Ana"]);
+  assert.match(g.tabla("Historial").at(-1).detalle, /Factura 000123/);
+  assert.equal(g.post({ action: "estado", token: ta, pedido_id: id, estado: "en_ruta" }).pedido.estado, "en_ruta");
+  const e = g.post({ action: "estado", token: ta, pedido_id: id, estado: "entregado" });
+  assert.deepEqual([e.pedido.estado, e.pedido.entregado_por, e.pedido.items.map((it) => it.entregadas)], ["entregado", "Ana", [2, 1]]);
+  // sin número de factura también se aprueba
+  const id2 = pedir(g, tv).pedido.id;
+  assert.equal(g.post({ action: "estado", token: ta, pedido_id: id2, estado: "confirmado" }).pedido.factura, "");
+});
+
+test("entrega con diferencias: lo que falta se entrega después o vuelve al depósito (nota de crédito)", () => {
+  const g = preparar();
+  const ta = conPrecios(g), tv = login(g);
+  g.post({ action: "cargarInventario", token: ta, tipo: "conteo", items: [{ code: "BC-01", cajas: 20 }, { code: "KT-01", cajas: 10 }] });
+  const fis = (code) => g.post({ action: "inventario", token: ta }).productos.find((x) => x.code === code);
+  // 1) Se entrega después: Babosa 2 pedidas, recibió 1
+  const id = pedir(g, tv, { tipo_pago: "pronto" }).pedido.id; // pronto: BC-01 ×2 (9 $), KT-01 ×1 (18 $) = 36 $
+  g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado" });
+  g.post({ action: "estado", token: ta, pedido_id: id, estado: "en_ruta" });
+  const dif = [{ code: "BC-01", entregadas: 1, destino: "despues" }];
+  assert.match(g.post({ action: "estado", token: ta, pedido_id: id, estado: "entregado", diferencias: dif }).error, /motivo/);
+  assert.match(g.post({ action: "estado", token: ta, pedido_id: id, estado: "entregado", diferencias: [{ code: "XX-1", entregadas: 0 }], motivo_entrega: "x" }).error, /no está en el pedido/);
+  let r = g.post({ action: "estado", token: ta, pedido_id: id, estado: "entregado", diferencias: dif, motivo_entrega: "Faltó cargar una caja" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual([r.pedido.estado, r.pedido.entregado_at, r.pedido.total, r.pedido.items.map((it) => [it.cajas, it.entregadas])], ["confirmado", "", 36, [[2, 1], [1, 1]]]);
+  assert.equal(g.tabla("Historial").at(-1).accion, "entrega_parcial");
+  assert.match(g.tabla("Historial").at(-1).detalle, /Entregó 2 caja\(s\) · 1 de Babosa se entrega\(n\) después · Faltó cargar una caja/);
+  assert.deepEqual([fis("BC-01").fisico, fis("BC-01").disponible], [19, 18]); // salió 1, la otra sigue apartada
+  // segundo viaje: se entrega lo que faltaba → entregado, empieza la cuenta por cobrar
+  g.post({ action: "estado", token: ta, pedido_id: id, estado: "en_ruta" });
+  r = g.post({ action: "estado", token: ta, pedido_id: id, estado: "entregado" });
+  assert.deepEqual([r.pedido.estado, !!r.pedido.entregado_at, r.pedido.items.map((it) => it.entregadas)], ["entregado", true, [2, 1]]);
+  assert.equal(fis("BC-01").fisico, 18);
+  // 2) No se entrega: el kit vuelve al depósito, baja el monto y queda la nota de crédito
+  const id2 = pedir(g, tv, { tipo_pago: "pronto" }).pedido.id;
+  g.post({ action: "estado", token: ta, pedido_id: id2, estado: "confirmado", factura: "456" });
+  g.post({ action: "estado", token: ta, pedido_id: id2, estado: "en_ruta" });
+  assert.equal(fis("KT-01").fisico, 8);
+  r = g.post({ action: "estado", token: ta, pedido_id: id2, estado: "entregado", diferencias: [{ code: "KT-01", entregadas: 0, destino: "devuelve" }], motivo_entrega: "El cliente no lo quiso" });
+  assert.deepEqual([r.pedido.estado, r.pedido.total, r.pedido.nota_credito, r.pedido.total_cajas], ["entregado", 18, 18, 2]);
+  assert.deepEqual(r.pedido.items.map((it) => [it.code, it.cajas, it.entregadas, it.devueltas]), [["BC-01", 2, 2, 0], ["KT-01", 0, 0, 1]]);
+  assert.match(g.tabla("Historial").at(-1).detalle, /1 de Kit 12 em 1 vuelve\(n\) al depósito · El cliente no lo quiso · nota de crédito 18 \$/);
+  assert.deepEqual([fis("KT-01").fisico, fis("KT-01").disponible], [9, 9]); // volvió al depósito
+  // 3) Volvió una caja de más en el camión: solo constancia, el stock no cambia
+  assert.equal(g.post({ action: "movimiento", token: ta, tipo: "sobrante", code: "BC-01", cajas: 1, nota: "viaje de la tarde" }).ok, true);
+  const m = g.tabla("Inventario").at(-1);
+  assert.deepEqual([m.tipo, m.cajas], ["sobrante", 0]);
+  assert.match(m.nota, /Volvieron 1 caja\(s\) de más en el camión \(no cambia el stock\) · viaje de la tarde/);
+  assert.equal(fis("BC-01").fisico, 16);
 });
 
 test("reasignar despachador y reabrir (solo gestión)", () => {

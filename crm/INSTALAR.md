@@ -51,16 +51,28 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
 - **Vendedor**: **Nuevo** → 1) **Buscar cliente** o **Cliente nuevo** (si existe, ficha con ✏️
   para corregir datos) → 2) productos con + / − → 3) **¿Nota de entrega o factura?** (factura pide
   RIF), pago y nota → **Enviar pedido** → **Enviar al grupo**.
-- **Administración**: **Pedidos → Por hacer → Por aprobar**: tocar las tarjetas elige varios y
-  **Aprobar N** los aprueba juntos con un mismo despachador (si a uno le falta stock, queda y avisa).
-  La flecha de cada tarjeta muestra productos, montos y cliente, con su botón **Aprobar**.
-  Desde el pedido completo también se puede **Anular** (con motivo).
-- **Despachador**: en Inicio ve "Hoy tenés por entregar N cajas". **Entregas** muestra arriba cajas
-  por entregar, por cargar y en ruta. En *Por cargar* toca las tarjetas de los pedidos que lleva →
-  **Ver total de carga** (cajas por producto). Al marcar todo lo cargado sale **¡Completo!** y
-  *¡Saliendo a despachar!* pasa esos pedidos a *En ruta*. Cada tarjeta muestra Mapa y el botón
-  *Salió en ruta* / *Entregado*; la flecha despliega productos y dirección, y *Más detalles* el
-  botón para llamar. La pestaña *Entregados* los agrupa por día.
+- **Administración** (aprobar = facturar): **Pedidos → Por hacer → Por aprobar**. La flecha de cada
+  tarjeta abre la **carta del pedido** con todo lo de la factura: cliente, RIF, teléfonos, dirección,
+  documento, forma de pago y nivel de precio, y cada producto con precio y subtotal, más el total.
+  **Copiar datos** los copia para pegarlos en el sistema de facturación. **Aprobado** pide el
+  **N° de factura** (opcional) y pasa el pedido a *Aprobado · Por despachar*. Tocar varias tarjetas
+  y **Aprobar N** aprueba juntos (un n° de factura por pedido; si a uno le falta stock, queda y avisa).
+- **Despacho** (por ahora lo hace Administración; el rol *Despachador* está desactivado y más
+  adelante será *Depositario*): menú **Despacho**. Arriba: cajas por entregar, por cargar y en ruta.
+  En *Por cargar* se tocan los pedidos que van al camión → **Ver total de carga** (cajas por
+  producto). Al marcar todo lo cargado sale **¡Completo!** y *¡Saliendo a despachar!* los pasa a
+  *En ruta*. Cada tarjeta: Mapa y *Salió en ruta* / *Entregado*; la flecha muestra productos y
+  dirección, y *Más detalles* el botón para llamar. Al marcar **Entregado** pasa a cuentas por cobrar.
+- **Entrega con diferencias** (al marcar Entregado → *Con diferencias*): por producto se escribe
+  cuántas cajas recibió el cliente y qué pasa con lo que falta:
+  - *Se entrega después*: queda pendiente en el mismo pedido y factura; vuelve a *Por despachar*
+    mostrando solo lo que falta ("Entrega parcial · faltan N"). La cuenta por cobrar empieza cuando
+    se entrega todo.
+  - *No se entrega · vuelve al depósito*: el stock vuelve solo, baja el monto del pedido y queda
+    anotada la **nota de crédito** que hay que hacer (sale en el pedido y en el historial).
+  - Una caja **dañada o perdida** se registra como *No se entrega* y luego un *Ajuste* en Inventario.
+  - **Volvieron cajas de más** (se cargaron por error): en Despacho, *¿Volvieron cajas de más en el
+    camión?* deja la constancia en Inventario → Últimos movimientos; el stock no cambia.
 - **Fecha de entrega**: al marcar *Entregado* se elige **Hoy**, **Ayer** u **Otro día** (no puede ser
   futura ni anterior al pedido). Sirve cuando se entregó antes y se olvidó registrarlo.
 - **Cobro**: el vendedor, con el pedido entregado y pagado, toca **Marcar cancelado (pagado)** y
@@ -75,7 +87,7 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
 - **Añadir cliente** (Clientes → Añadir cliente): para pasar la base de clientes sin pedidos.
   Ubicación: pegá coordenadas (`8.6123, -71.6543`) o un enlace largo de Google Maps; "Usar mi
   ubicación actual" solo si estás en el local del cliente. "Guardar y añadir otro" para ir rápido.
-- **Estados**: En proceso → Aprobado · Preparando despacho → En ruta → Entregado (o Anulado con motivo).
+- **Estados**: En proceso → Aprobado · Por despachar (facturado) → En ruta → Entregado (o Anulado con motivo).
 - **Tema oscuro**: Más → Tema (Automático / Claro / Oscuro).
 - Claves: mínimo 6 caracteres con letras y números (Master: 8); pueden llevar símbolos.
 - Si alguien olvida la clave: el Master le pone una nueva (Usuarios → Editar).

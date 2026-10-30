@@ -44,7 +44,7 @@ function servidor() {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({
     viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
-    geolocation: { latitude: 8.6123456, longitude: -71.6543219, accuracy: 12 }, permissions: ["geolocation"],
+    geolocation: { latitude: 8.6123456, longitude: -71.6543219, accuracy: 12 }, permissions: ["geolocation", "clipboard-read", "clipboard-write"],
   });
   let sinSenal = false, retraso = 0;
   await ctx.route(API, async (route) => {
@@ -464,7 +464,14 @@ function servidor() {
   await page.click("#aTodos");
   assert.ok(await page.locator("#aBarra").isHidden());
   await page.click(`${p1} [data-ap-ver]`);
-  assert.match(await page.innerText(`${p1} .ent-detalle`), /5\s+Kit Aguacate[\s\S]*Peluquería Bella/);
+  // la carta del pedido: todo lo que hace falta para la factura
+  const carta = await page.innerText(`${p1} .ent-detalle`);
+  assert.match(carta, /Cliente\s+Peluquería Bella[\s\S]*RIF[\s\S]*Teléfono\s+0412-1234567[\s\S]*Dirección\s+Av\. Bolívar, El Vigía[\s\S]*Pago\s+Crédito/);
+  assert.match(carta, /5\s+Kit Aguacate[\s\S]*20,00 \$\s+100,00 \$[\s\S]*Total\s+152,00 \$/);
+  await page.click(`${p1} [data-ap-copiar]`);
+  await page.waitForFunction(() => /Datos copiados/.test(document.getElementById("toast")?.textContent || ""));
+  assert.match(await page.evaluate(() => navigator.clipboard.readText()), /PEDIDO SKL-\d{6}-001[\s\S]*Teléfono: 0412-1234567[\s\S]*5 × Kit Aguacate \(KT-02\) · 20,00 \$ c\/u = 100,00 \$[\s\S]*Total: 9 cajas · 152,00 \$/);
+  await foto("06d-carta-factura");
   await page.click(`${p1} .ent-detalle a[href^="#/pedido/"]`);
   await esperarRuta("#/pedido/");
   assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Aprobar", "Anular pedido"]);
@@ -472,15 +479,13 @@ function servidor() {
   await page.waitForSelector(`${p1}.abierta [data-ap="confirmar"]`); // vuelve con los detalles abiertos
   await page.click(`${p1} [data-ap="confirmar"]`);
   await page.waitForSelector("#hoja:not([hidden])");
-  await page.click("#hojaOk");
-  assert.match(await page.innerText("#hojaError"), /Elegí un despachador/);
-  await page.selectOption("#hDesp", { label: "Luis" });
+  assert.match(await page.innerText("#hoja"), /ya se hizo la factura[\s\S]*N° de factura/);
+  await page.fill('#hoja input[name="factura_0"]', "000123");
   await foto("07-confirmar");
   await page.click("#hojaOk");
   await page.waitForFunction((s) => !document.querySelector(s), p1);
-  assert.equal(gas.tabla("Pedidos")[0].estado, "confirmado");
-  assert.equal(gas.tabla("Pedidos")[0].despachador, "Luis");
-  ok("administración aprueba desde los detalles de la tarjeta (Aprobado · Preparando despacho) y asigna despachador");
+  assert.deepEqual(["estado", "factura", "despachador"].map((k) => gas.tabla("Pedidos")[0][k]), ["confirmado", "000123", ""]);
+  ok("administración ve la carta del pedido (RIF, teléfono, dirección, precios), copia los datos y aprueba con n° de factura");
   await page.goto(BASE + "/panel.html#/inventario");
   await esperarRuta("#/inventario");
   const kt = '.inv-fila[data-code="KT-02"]';
@@ -598,16 +603,14 @@ function servidor() {
   ok("inventario: conteo total y carga de mercancía con fotos (borrador guardado)");
   await salir();
 
-  /* ---------- Despachador ---------- */
-  await ingresar("luis", "Luis5555");
+  /* ---------- Despacho (sin depositario, lo hace Administración) ---------- */
+  await ingresar("ana", "Ana*2222");
   await esperarRuta("#/inicio");
-  assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Entregas"]);
-  await page.waitForSelector("#iLista .fila-ped");
-  assert.match(await page.innerText("#iLista"), /Av\. Bolívar/);
-  assert.match(await page.innerText(".carga-hoy"), /Hoy tenés por entregar\s+9 cajas/);
-  await foto("07b-inicio-despachador");
+  assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Nuevo", "Pedidos", "Clientes", "Despacho"]);
+  await foto("07b-inicio-admin");
   await page.click('.app-nav a[href="#/entregas"]');
   await esperarRuta("#/entregas");
+  assert.equal(await titulo(), "Despacho");
   assert.ok(await page.locator("#pBarra").isHidden());
   // la barra: nombre y luego el menú en la esquina
   assert.ok(await page.evaluate(() => document.getElementById("appQuien").nextElementSibling.id === "btnMas"));
@@ -643,7 +646,7 @@ function servidor() {
   assert.ok(await page.locator("#cargaListo").isHidden());
   assert.match(await page.innerText("#cargaProg"), /Cargado 1 de 4/);
   await page.click("#btnCompartirCarga");
-  assert.match((await page.evaluate(() => window.__compartido)).at(-1), /\*CARGA LUIS\* · 1 pedido\(s\) · 9 cajas[\s\S]*• 5 × Kit Aguacate/);
+  assert.match((await page.evaluate(() => window.__compartido)).at(-1), /\*CARGA ANA\* · 1 pedido\(s\) · 9 cajas[\s\S]*• 5 × Kit Aguacate/);
   for (const c of await page.locator(".lista-carga input").all()) await c.check();
   await page.waitForSelector("#cargaListo:not([hidden])");
   assert.match(await page.innerText("#cargaListo"), /¡Completo![\s\S]*¡Saliendo a despachar!/);
@@ -653,7 +656,7 @@ function servidor() {
   await page.click("#btnSalirDespacho");
   await esperarRuta("#/entregas");
   assert.equal(gas.tabla("Pedidos")[0].estado, "en_ruta");
-  ok("despachador: tocar pedidos → total de carga; todo marcado → ¡Completo! y salen en ruta");
+  ok("Despacho: tocar pedidos → total de carga; todo marcado → ¡Completo! y salen en ruta");
   await page.waitForSelector('.ent-card [data-ent="entregado"]');
   assert.match(await page.innerText(".ent-lista"), /En ruta/i);
   await foto("07e-en-ruta");
@@ -663,26 +666,58 @@ function servidor() {
   await page.click(`${card} .ent-mas summary`);
   await page.click(`${card} .ent-mas a[href^="#/pedido/"]`);
   await esperarRuta("#/pedido/");
-  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Entregado"]);
+  assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Entregado", "Anular pedido"]);
   assert.ok(await page.locator('.botones-contacto a:has-text("Mapa")').count());
   await foto("08-entrega");
+  // Entrega con diferencias: el cliente recibió 4 de los 5 kits; el que falta se entrega después
   await page.click('[data-acc="entregado"]');
+  assert.equal(await page.locator('.entrega-tipo [aria-pressed="true"]').innerText(), "Sí, completo");
+  await page.click('.entrega-tipo [data-ent-tipo="1"]');
+  assert.equal(await page.innerText("#hojaOk"), "Guardar entrega");
+  await page.click("#hojaOk");
+  assert.match(await page.innerText("#hojaError"), /llegó incompleto/);
+  await page.fill('.dif-fila[data-code="KT-02"] .dif-n', "4");
+  assert.ok(await page.locator('.dif-fila[data-code="KT-02"] .dif-destino').isVisible());
+  assert.match(await page.innerText('.dif-fila[data-code="KT-02"] .dif-falta'), /Falta 1 caja/);
+  await page.click("#hojaOk");
+  assert.match(await page.innerText("#hojaError"), /qué pasó/);
+  await page.fill('#hoja input[name="motivo_entrega"]', "Faltó cargar un kit");
+  await foto("08a-entrega-diferencias");
+  await revisarDiseno("entrega con diferencias");
+  await page.click("#hojaOk");
+  await page.waitForFunction(() => /Por despachar/.test(document.querySelector(".chip-estado")?.textContent || ""));
+  assert.match(await page.innerText(".datos"), /Entrega\s+Parcial · faltan 1 caja/);
+  assert.match(await page.innerText(".historial"), /Entrega parcial[\s\S]*Entregó 8 caja\(s\) · 1 de Kit Aguacate se entrega\(n\) después · Faltó cargar un kit/);
+  assert.equal(gas.tabla("Pedidos")[0].estado, "confirmado");
+  // en Despacho aparece con lo que falta: 1 caja
+  await page.goto(BASE + "/panel.html#/entregas");
+  await esperarRuta("#/entregas");
+  await page.waitForSelector(`${card} .chip-parcial`);
+  assert.match(await page.innerText(card), /1\s+caja[\s\S]*Entrega parcial · faltan 1 de 9/);
+  await page.click(`${card} [data-ent="en_ruta"]`);
+  await page.waitForSelector(`${card} [data-ent="entregado"]`);
+  await page.click(`${card} [data-ent="entregado"]`);
+  await page.waitForSelector("#hoja:not([hidden])");
+  assert.match(await page.textContent("#hDifs"), /Kit Aguacate[\s\S]*faltaban 1/); // solo lo que faltaba
   assert.equal(await page.locator('.dias-entrega [aria-pressed="true"]').innerText(), "Hoy");
   await page.click('.dias-entrega [data-dia="otro"]');
   assert.ok(await page.locator("#hFecha").isVisible());
   await page.click('.dias-entrega button:first-child');
   await page.click("#hojaOk");
-  await page.waitForFunction(() => /Entregado/.test(document.querySelector(".chip-estado")?.textContent || ""));
-  assert.equal(gas.tabla("Pedidos")[0].entregado_por, "Luis");
-  assert.match(await page.innerText(".datos"), /Entregado[\s\S]*Luis/);
-  // un despachador no puede entrar a Nuevo pedido
-  await page.goto(BASE + "/panel.html#/nuevo");
-  await esperarRuta("#/inicio");
+  for (let i = 0; i < 50 && gas.tabla("Pedidos")[0].estado !== "entregado"; i++) await page.waitForTimeout(100);
+  assert.deepEqual(["estado", "entregado_por"].map((k) => gas.tabla("Pedidos")[0][k]), ["entregado", "Ana"]);
+  // volvió una caja de más en el camión: solo se anota
+  await page.click("#btnSobrante");
+  await page.selectOption('#hoja select[name="code"]', "BC-06");
+  await page.fill('#hoja input[name="cajas"]', "1");
+  await page.click("#hojaOk");
+  await page.waitForFunction(() => /volvieron cajas de más/.test(document.getElementById("toast")?.textContent || ""));
+  assert.deepEqual(["tipo", "cajas"].map((k) => gas.tabla("Inventario").at(-1)[k]), ["sobrante", 0]);
   await page.goto(BASE + "/panel.html#/entregas?tab=entregado");
   await page.waitForSelector(".ent-lista .ent-card");
   assert.match(await page.innerText(".ent-lista"), /HOY\s*1[\s\S]*9 cajas[\s\S]*Peluquería Bella/i);
   await foto("08b-entregados");
-  ok("despachador: entregas con mapa, en ruta → entregado; Nuevo pedido bloqueado");
+  ok("despacho por Administración: entrega con diferencias (se entrega después), segundo viaje → entregado; caja sobrante anotada");
   await salir();
 
   /* ---------- Crédito y cobro: banderas, cancelado (vendedor) → conciliado (Administración) ---------- */
@@ -863,7 +898,8 @@ function servidor() {
   await page.click("#btnGuardarUsuario");
   assert.match(await page.innerText("#uError"), /al menos un rol/);
   await page.check('input[name="uRol"][value="vendedor"]');
-  await page.check('input[name="uRol"][value="despachador"]'); // varios roles
+  assert.equal(await page.locator('input[name="uRol"][value="despachador"]').count(), 0); // desactivado por ahora
+  await page.check('input[name="uRol"][value="admin"]'); // varios roles
   await page.fill("#uClave", "123456");
   await page.click("#btnGuardarUsuario");
   await page.waitForFunction(() => /letras y números/.test(document.getElementById("uError").textContent));
@@ -871,8 +907,8 @@ function servidor() {
   await page.click("#btnGuardarUsuario");
   await esperarRuta("#/usuarios");
   await page.waitForFunction(() => document.querySelectorAll(".usuarios-lista li").length === 5);
-  assert.match(await page.innerText(".usuarios-lista"), /Kevin[\s\S]*Vendedor · Despachador/);
-  assert.equal(gas.tabla("Usuarios").find((u) => u.usuario === "kevin").rol, "vendedor, despachador");
+  assert.match(await page.innerText(".usuarios-lista"), /Kevin[\s\S]*Administración · Vendedor/);
+  assert.deepEqual(gas.tabla("Usuarios").find((u) => u.usuario === "kevin").rol.split(", ").sort(), ["admin", "vendedor"]);
   await foto("10-usuarios");
   await revisarDiseno("usuarios");
   ok("master: Más → Resumen y Usuarios (crear con validación de clave)");
@@ -908,17 +944,17 @@ function servidor() {
   await salir();
   await ingresar("kevin", "Kevin#9876");
   await esperarRuta("#/inicio");
-  assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Nuevo", "Pedidos", "Clientes", "Entregas"]);
-  assert.match(await page.innerText("#appQuien"), /Kevin · Vendedor · Despachador/);
-  assert.deepEqual(await page.locator(".accesos .acceso span").allInnerTexts(), ["Nuevo pedido", "Pedidos", "Clientes", "Mis entregas"]);
+  assert.deepEqual(await page.locator(".app-nav a span").allInnerTexts(), ["Inicio", "Nuevo", "Pedidos", "Clientes", "Despacho"]);
+  assert.match(await page.innerText("#appQuien"), /Kevin · Administración · Vendedor/);
+  assert.deepEqual(await page.locator(".accesos .acceso span").allInnerTexts(), ["Nuevo pedido", "Pedidos", "Clientes", "Despacho"]);
   await page.click('.app-nav a[href="#/entregas"]');
   await esperarRuta("#/entregas");
-  assert.equal(await titulo(), "Mis entregas");
+  assert.equal(await titulo(), "Despacho");
   await page.click('.app-nav a[href="#/nuevo"]');
   await esperarRuta("#/nuevo");
   await page.waitForSelector("#btnClienteNuevo");
   await revisarDiseno("varios roles");
-  ok("varios roles: Kevin (Vendedor + Despachador) tiene Nuevo, Pedidos, Clientes y Entregas");
+  ok("varios roles: Kevin (Vendedor + Administración) tiene Nuevo, Pedidos, Clientes y Despacho");
   await salir();
   await ingresar("jose", "Skala#2026");
   await esperarRuta("#/inicio");
@@ -941,16 +977,17 @@ function servidor() {
     await page.click("#btnAprobarVarios");
     await page.waitForFunction(() => /Aprobar 2 pedidos/.test(document.getElementById("hojaTitulo").textContent) && !document.getElementById("hoja").hidden);
     assert.match(await page.innerText("#hoja"), /2 pedidos · 6 cajas/);
-    await page.selectOption("#hDesp", { label: "Luis" });
+    assert.match(await page.innerText("#hoja"), /Salón Uno/); assert.match(await page.innerText("#hoja"), /Salón Dos/);
+    await page.locator('#hoja label:has-text("Salón Uno") input').fill("A-1");
     await page.click("#hojaOk");
     await page.waitForFunction(() => /1 aprobado, 1 sin aprobar/.test(document.getElementById("hojaTitulo")?.textContent || ""));
     assert.match(await page.innerText("#hojaCuerpo"), /Salón Dos: Sin stock suficiente/);
     await page.click("#hojaOk");
     const est = (id) => gas.tabla("Pedidos").find((x) => x.id === id);
-    assert.deepEqual([est(a.id).estado, est(a.id).despachador, est(b.id).estado], ["confirmado", "Luis", "pendiente"]);
+    assert.deepEqual([est(a.id).estado, est(a.id).factura, est(b.id).estado], ["confirmado", "A-1", "pendiente"]);
     await page.waitForFunction((id) => !document.querySelector(`.apr-card[data-id="${id}"]`), a.id);
     assert.ok(await page.locator(`.apr-card[data-id="${b.id}"]`).count());
-    ok("aprobar varios: un despachador para todos; el que no tiene stock queda en Por aprobar con aviso");
+    ok("aprobar varios: n° de factura de cada uno; el que no tiene stock queda en Por aprobar con aviso");
   }
 
   /* ---------- Tema oscuro ---------- */

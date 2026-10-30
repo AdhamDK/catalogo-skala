@@ -111,7 +111,7 @@
     "nuevo/cliente": { titulo: "Nuevo pedido", roles: TOMAN, nav: "nuevo", render: () => ir("#/nuevo") }, // enlace viejo
     "nuevo/listo": { titulo: "Pedido guardado", roles: TOMAN, nav: "nuevo", render: vNuevoListo },
     pedidos: { titulo: "Pedidos", roles: TOMAN, nav: "pedidos", render: vPedidos },
-    entregas: { titulo: "Mis entregas", roles: ["despachador"], nav: "entregas", render: vPedidos },
+    entregas: { titulo: "Mis entregas", roles: ["despachador", "master", "admin"], nav: "entregas", render: vPedidos }, // Administración: "Despacho"
     pedido: { titulo: "Pedido", roles: TODOS, atras: true, render: vPedido },
     web: { titulo: "Pedido web", roles: TOMAN, nav: "pedidos", atras: "#/pedidos?tab=hacer", render: vWeb },
     carga: { titulo: "Total de carga", roles: ["despachador", "master", "admin"], atras: true, render: vCarga },
@@ -183,7 +183,8 @@
     if (!rol()) { nav.hidden = true; document.body.classList.remove("con-nav"); return; }
     const items = [["inicio", "Inicio"]];
     if (vende()) items.push(["nuevo", "Nuevo"], ["pedidos", "Pedidos"], ["clientes", "Clientes"]);
-    if (tiene("despachador")) items.push(["entregas", "Entregas"]);
+    if (gestion()) items.push(["entregas", "Despacho"]); // sin depositario, Administración despacha
+    else if (tiene("despachador")) items.push(["entregas", "Entregas"]);
     const n = cajasCarrito();
     nav.innerHTML = items.map(([k, t]) =>
       `<a href="#/${k}" class="${k === activa ? "activa" : ""}"${k === activa ? ' aria-current="page"' : ""}>${icono(k)}<span>${t}</span>${k === "nuevo" && n ? `<b class="badge">${n}</b>` : ""}</a>`).join("");
@@ -321,7 +322,8 @@
     const saludo = hora < 12 ? "Buenos días" : hora < 19 ? "Buenas tardes" : "Buenas noches";
     const accesos = [];
     if (vende()) accesos.push(["#/nuevo", "Nuevo pedido", "nuevo"], ["#/pedidos", "Pedidos", "pedidos"], ["#/clientes", "Clientes", "clientes"]);
-    if (tiene("despachador")) accesos.push(["#/entregas", "Mis entregas", "entregas"]);
+    if (gestion()) accesos.push(["#/entregas", "Despacho", "entregas"]);
+    else if (tiene("despachador")) accesos.push(["#/entregas", "Mis entregas", "entregas"]);
     v.innerHTML = `
       <section class="saludo"><h2>${saludo}, ${esc(u.nombre.split(" ")[0])}</h2><p>${esc(u.rol_nombre)}</p></section>
       <div class="stats" id="iStats"><div class="stat"><strong>…</strong><span>cargando</span></div></div>
@@ -993,7 +995,7 @@
           const aprobar = conAprobar && s.id === "aprobar";
           const tit = `<li class="grupo-tit${aprobar ? " grupo-aprobar" : ""}" data-seccion="${s.id}"><span>${esc(s.titulo)} <b>${s.pedidos.length}</b></span>${aprobar ? '<button type="button" class="ent-todos" id="aTodos" aria-pressed="false">Elegir todos</button>' : ""}</li>`;
           const filas = s.web ? s.pedidos.map(filaWeb).join("")
-            : aprobar ? `<li class="ent-ayuda-li">Tocá los pedidos para aprobar varios juntos, o abrí la flecha y aprobá uno.</li>${s.pedidos.map((p) => tarjetaAprobar(p, abiertasAp.has(p.id))).join("")}`
+            : aprobar ? `<li class="ent-ayuda-li">Abrí la flecha para ver los datos de la factura y aprobar. Tocá varios para aprobarlos juntos.</li>${s.pedidos.map((p) => tarjetaAprobar(p, abiertasAp.has(p.id))).join("")}`
             : filasDe(s.pedidos, false);
           return tit + filas;
         }).join("");
@@ -1075,6 +1077,11 @@
           if (selAp.has(id)) selAp.delete(id); else selAp.add(id);
           return pintarAprobar();
         }
+        if (e.target.closest("[data-ap-copiar]")) {
+          const px = porAprobar.find((x) => x.id === id);
+          if (px) toast((await copiarTexto(textoFactura(px))) ? "Datos copiados: pegalos para hacer la factura" : "No se pudo copiar");
+          return;
+        }
         const b = e.target.closest("[data-ap]");
         const p = porAprobar.find((x) => x.id === id);
         if (b && p) { selAp.delete(id); await accionPedido(p, b.dataset.ap, b); }
@@ -1083,14 +1090,13 @@
         const ps = elegidosAp();
         if (!ps.length) return;
         if (ps.length === 1) return accionPedido(ps[0], "confirmar", $("btnAprobarVarios"));
-        const despachador = await elegirDespachador(`Aprobar ${ps.length} pedidos`,
-          `${ps.length} pedidos · ${ps.reduce((a, p) => a + (Number(p.total_cajas) || 0), 0)} cajas · pasan a <strong>Aprobado · Preparando despacho</strong>`);
-        if (!despachador) return;
+        const facturas = await hojaAprobar(ps);
+        if (!facturas) return;
         const btn = $("btnAprobarVarios");
         btn.disabled = true; btn.classList.add("ocupado");
         let ok = 0; const fallos = [];
-        for (const p of ps) {
-          try { const r = await api("estado", { pedido_id: p.id, estado: "confirmado", despachador_id: despachador }); guardarEnMemoria(r.pedido); ok++; selAp.delete(p.id); }
+        for (const [i, p] of ps.entries()) {
+          try { const r = await api("estado", { pedido_id: p.id, estado: "confirmado", factura: facturas[i] }); guardarEnMemoria(r.pedido); ok++; selAp.delete(p.id); }
           catch (e2) { fallos.push(`${p.negocio}: ${e2.message}`); }
         }
         btn.disabled = false; btn.classList.remove("ocupado");
@@ -1154,30 +1160,27 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         </button>
       </div>
-      <div class="ent-detalle"${abierta ? "" : " hidden"}>
-        <ul class="ent-items">${items.map((it) => `<li><b>${Number(it.cajas) || 0}</b><span>${esc(it.producto)} <span class="ped-det">${esc(it.code)}${it.total_unidades ? ` · ${it.total_unidades} ${esc(it.unidad)}` : ""}</span></span>${vende() && Number(it.precio) > 0 ? `<em class="ent-precio">${dinero(it.cajas * precioUnitario(it, tipo))}</em>` : ""}</li>`).join("") || '<li class="ped-det">Abrí el pedido para ver los productos.</li>'}</ul>
-        <p class="ent-dir-full"><span class="ped-det">Cliente</span><br>${esc(p.cliente && p.cliente !== p.negocio ? `${p.negocio} · ${p.cliente}` : p.negocio)}${c.direccion ? `<br>${esc(c.direccion)}` : ""}${p.nota ? `<br><span class="ped-det">Nota: ${esc(p.nota)}</span>` : ""}</p>
+      <div class="ent-detalle apr-factura"${abierta ? "" : " hidden"}>
+        <dl class="datos datos-factura">
+          <dt>Cliente</dt><dd><strong>${esc(p.negocio)}</strong>${p.cliente && p.cliente !== p.negocio ? ` · ${esc(p.cliente)}` : ""}</dd>
+          <dt>RIF</dt><dd>${c.rif_cedula ? esc(c.rif_cedula) : '<span class="falta-dato">Sin RIF</span>'}</dd>
+          <dt>Teléfono</dt><dd>${esc([c.telefono, c.telefono2].filter(Boolean).join(" / ") || "—")}</dd>
+          <dt>Dirección</dt><dd>${esc(c.direccion || "—")}</dd>
+          <dt>Documento</dt><dd>${esc(p.documento || "Nota de entrega")}</dd>
+          <dt>Pago</dt><dd>${esc(pago)}${p.dias_credito ? ` · ${p.dias_credito} días` : ""} · precio ${p.nivel_precio === "mayor" ? "al mayor" : "al por menor"}${p.excepcion_precio ? " (excepción)" : ""}</dd>
+          <dt>Vendedor</dt><dd>${esc(p.vendedor)}</dd>
+          ${p.nota ? `<dt>Nota</dt><dd>${esc(p.nota)}</dd>` : ""}
+        </dl>
+        <table class="tabla tabla-factura"><thead><tr><th>Cajas</th><th>Producto</th><th class="num">Precio</th><th class="num">Subtotal</th></tr></thead><tbody>
+          ${items.map((it) => { const u = precioUnitario(it, tipo); return `<tr><td>${Number(it.cajas) || 0}</td><td>${esc(it.producto)} <span class="ped-det">${esc(it.code)}</span></td><td class="num">${u ? dinero(u) : "—"}</td><td class="num">${u ? dinero(it.cajas * u) : "—"}</td></tr>`; }).join("")}
+        </tbody><tfoot><tr><td>${cajas}</td><td><strong>Total</strong></td><td></td><td class="num"><strong>${items.some((it) => Number(it.precio) > 0) ? dinero(totalPorPago(items, tipo)) : "—"}</strong></td></tr></tfoot></table>
         <div class="ent-botones apr-botones">
+          <button type="button" class="ent-ico" data-ap-copiar>${icoEnt("ver")}<span>Copiar datos</span></button>
           <a class="ent-ico" href="#/pedido/${encodeURIComponent(p.id)}">${icoEnt("ver")}<span>Ver pedido</span></a>
-          ${acc.includes("confirmar") ? `<button type="button" class="btn btn-primary ent-acc es-entregar" data-ap="confirmar">${icoEnt("ok")}Aprobar</button>` : ""}
+          ${acc.includes("confirmar") ? `<button type="button" class="btn btn-primary ent-acc es-entregar" data-ap="confirmar">${icoEnt("ok")}Aprobado</button>` : ""}
         </div>
       </div>
     </li>`;
-  }
-
-  /* Elegir quién despacha (al aprobar uno o varios) */
-  async function elegirDespachador(titulo, sub, actual) {
-    const { despachadores } = await api("despachadores");
-    if (!despachadores.length) { toast("No hay despachadores activos. Crealos en Más → Usuarios."); return ""; }
-    const r = await hoja({
-      titulo,
-      cuerpo: `<p class="modal-sub">${sub}</p>
-        <label class="field field-full"><span>¿Quién lo despacha?</span><select name="despachador_id" id="hDesp"><option value="">Elegí quién lo lleva</option>${despachadores.map((d) =>
-          `<option value="${esc(d.id)}"${d.id === actual ? " selected" : ""}>${esc(d.nombre)}</option>`).join("")}</select></label>`,
-      ok: "Aprobar",
-      validar: (d) => (d.despachador_id ? "" : "Elegí un despachador."),
-    });
-    return r ? r.despachador_id : "";
   }
 
   /* Tarjeta de entrega: en la vista solo el mapa y la acción; la flecha despliega productos y dirección,
@@ -1186,8 +1189,9 @@
     const c = p.cliente_datos || {};
     const tel = telLink(c.telefono), tel2 = telLink(c.telefono2), mapa = linkMapa(c.latitud, c.longitud);
     const acc = accionesPedido(roles(), yo().id, p).find((a) => a === "en_ruta" || a === "entregado");
-    const cajas = Number(p.total_cajas) || 0;
     const items = Array.isArray(p.items) ? p.items : [];
+    const cajas = p.estado === "entregado" || !items.length ? Number(p.total_cajas) || 0 : cajasPendientes(p);
+    const parcial = p.estado !== "entregado" && esParcial(p);
     return `<li class="ent-card est-borde-${esc(p.estado)}${elegible ? " elegible" : ""}${abierta ? " abierta" : ""}" data-id="${esc(p.id)}">
       <div class="ent-cab">
         <button type="button" class="ent-info" data-ent-tap aria-${elegible ? `pressed="false" aria-label="Elegir ${esc(p.negocio)} para la carga"` : `expanded="${!!abierta}"`}>
@@ -1195,7 +1199,8 @@
           <span class="ent-txt">
             <strong class="ent-neg">${esc(p.negocio)}</strong>
             ${c.direccion ? `<span class="ent-dir">${icoEnt("mapa")}${esc(c.direccion)}</span>` : '<span class="ent-dir sin">Sin dirección</span>'}
-            <span class="ped-det">${esc(p.id)}${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}</span>
+            <span class="ped-det">${esc(p.id)}${parcial ? "" : p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}${p.factura ? ` · Fact. ${esc(p.factura)}` : ""}</span>
+            ${parcial ? `<span class="chip-parcial">Entrega parcial · faltan ${cajas} de ${Number(p.total_cajas) || 0}</span>` : ""}
           </span>
         </button>
         <button type="button" class="ent-flecha" data-ent-ver aria-expanded="${!!abierta}" aria-label="Ver detalles de ${esc(p.negocio)}" title="Detalles">
@@ -1203,7 +1208,8 @@
         </button>
       </div>
       <div class="ent-detalle"${abierta ? "" : " hidden"}>
-        <ul class="ent-items">${items.map((it) => `<li><b>${Number(it.cajas) || 0}</b><span>${esc(it.producto)} <span class="ped-det">${esc(it.code)}${it.total_unidades ? ` · ${it.total_unidades} ${esc(it.unidad)}` : ""}</span></span></li>`).join("") || '<li class="ped-det">Abrí el pedido para ver los productos.</li>'}</ul>
+        <ul class="ent-items">${items.filter((it) => p.estado === "entregado" || cajasPorEntregar(it) > 0).map((it) => { const n = p.estado === "entregado" ? Number(it.cajas) || 0 : cajasPorEntregar(it);
+          return `<li><b>${n}</b><span>${esc(it.producto)} <span class="ped-det">${esc(it.code)}${n !== Number(it.cajas) ? ` · faltan ${n} de ${it.cajas}` : it.total_unidades ? ` · ${it.total_unidades} ${esc(it.unidad)}` : ""}</span></span></li>`; }).join("") || '<li class="ped-det">Abrí el pedido para ver los productos.</li>'}</ul>
         <p class="ent-dir-full"><span class="ped-det">Entregar en</span><br>${esc(c.direccion || "Sin dirección")}${p.cliente && p.cliente !== p.negocio ? `<br><span class="ped-det">Recibe: ${esc(p.cliente)}</span>` : ""}</p>
         <details class="ent-mas">
           <summary>Más detalles</summary>
@@ -1224,8 +1230,28 @@
     </li>`;
   }
 
+  const sobranteHtml = '<p class="ent-sobrante"><button type="button" class="link-btn" id="btnSobrante">¿Volvieron cajas de más en el camión?</button></p>';
+  /* Se cargó de más por error y volvió: solo queda la constancia (el stock no cambia) */
+  async function registrarSobrante() {
+    const prods = [...BANOS, ...KITS];
+    const d = await hoja({
+      titulo: "Volvieron cajas de más",
+      cuerpo: `<p class="modal-sub">Cajas que se cargaron por error y no eran de ningún pedido. <strong>No cambia el inventario</strong> (nunca se descontaron); queda anotado en Inventario → Últimos movimientos.</p>
+        <label class="field field-full"><span>Producto</span><select name="code"><option value="">Elegí el producto</option>${prods.map((x) => `<option value="${esc(x.code)}">${esc(x.name)} · ${esc(x.code)}</option>`).join("")}</select></label>
+        <label class="field field-full"><span>Cajas</span><input name="cajas" inputmode="numeric" autocomplete="off" placeholder="ej. 1" /></label>
+        <label class="field field-full"><span>Nota</span><input name="nota" maxlength="200" autocomplete="off" placeholder="ej. viaje de la tarde a El Vigía" /></label>`,
+      ok: "Guardar",
+      validar: (x) => (!x.code ? "Elegí el producto." : !(Math.round(Number(x.cajas)) > 0) ? "Indicá cuántas cajas volvieron." : ""),
+    });
+    if (!d) return;
+    try { await api("movimiento", { tipo: "sobrante", code: d.code, cajas: Math.round(Number(d.cajas)), nota: d.nota.trim() }); toast("Anotado: volvieron cajas de más"); }
+    catch (e) { toast(e.message); }
+  }
+
   async function vEntregas(v, query, vigente) {
     const tab = query.get("tab") === "entregado" ? "entregado" : "curso";
+    const admin = gestion(); // sin depositario: Administración despacha todos los pedidos aprobados
+    if (admin) { $("appTitulo").textContent = "Despacho"; document.title = "Despacho · Skala Equipo"; }
     v.innerHTML = `
       <div class="periodos tabs-ped tabs-ent" role="tablist">
         <a role="tab" class="tab${tab === "curso" ? " active" : ""}" aria-selected="${tab === "curso"}" href="#/entregas?tab=curso">Por entregar<b class="cuenta" data-cuenta="curso"></b></a>
@@ -1255,12 +1281,12 @@
     };
     const pintar = (todos) => {
       if (!document.body.contains(lista0)) return;
-      const propios = (todos || []).filter((p) => String(p.despachador_id) === String(yo().id));
+      const propios = (todos || []).filter((p) => admin || String(p.despachador_id) === String(yo().id));
       const porCargar = propios.filter((p) => p.estado === "confirmado");
       const enRuta = propios.filter((p) => p.estado === "en_ruta");
       const cuenta = v.querySelector('[data-cuenta="curso"]');
       if (cuenta) cuenta.textContent = porCargar.length + enRuta.length ? String(porCargar.length + enRuta.length) : "";
-      const sumaCajas = (l) => l.reduce((a, p) => a + (Number(p.total_cajas) || 0), 0);
+      const sumaCajas = (l) => l.reduce((a, p) => a + (p.estado === "entregado" || !(p.items || []).length ? Number(p.total_cajas) || 0 : cajasPendientes(p)), 0);
       if (tab === "curso") {
         mias = porCargar.concat(enRuta);
         $("eResumen").innerHTML = mias.length ? `<section class="ent-resumen">
@@ -1268,14 +1294,15 @@
             <div><strong>${porCargar.length}</strong><span>por cargar</span></div>
             <div><strong>${enRuta.length}</strong><span>en ruta</span></div>
           </section>` : "";
-        if (!mias.length) { lista0.innerHTML = '<p class="vacio-panel ent-vacio">No tenés entregas pendientes.</p>'; pintarSel(); return; }
+        if (!mias.length) { lista0.innerHTML = `<p class="vacio-panel ent-vacio">${admin ? "No hay pedidos aprobados por despachar." : "No tenés entregas pendientes."}</p>${admin ? sobranteHtml : ""}`; pintarSel(); return; }
         lista0.innerHTML = `
           ${porCargar.length ? `<div class="ent-grupo"><h3 class="ent-tit">Por cargar <b>${porCargar.length}</b></h3>
             <button type="button" class="ent-todos" id="pTodos" aria-pressed="false">Elegir todos</button></div>
             <p class="ent-ayuda">Tocá los pedidos que vas a llevar y luego <strong>Ver total de carga</strong>.</p>
             <ul class="lista-ped">${porCargar.map((p) => tarjetaEntrega(p, true, abiertas.has(p.id))).join("")}</ul>` : ""}
           ${enRuta.length ? `<div class="ent-grupo"><h3 class="ent-tit">En ruta <b>${enRuta.length}</b></h3></div>
-            <ul class="lista-ped">${enRuta.map((p) => tarjetaEntrega(p, false, abiertas.has(p.id))).join("")}</ul>` : ""}`;
+            <ul class="lista-ped">${enRuta.map((p) => tarjetaEntrega(p, false, abiertas.has(p.id))).join("")}</ul>` : ""}
+          ${admin ? sobranteHtml : ""}`;
         pintarSel();
       } else {
         const hechos = propios.filter((p) => p.estado === "entregado")
@@ -1289,6 +1316,7 @@
       }
     };
     const abrir = (li) => {
+      if (!li.querySelector(".ent-detalle")) return;
       const on = !li.classList.contains("abierta");
       li.classList.toggle("abierta", on);
       li.querySelector(".ent-detalle").hidden = !on;
@@ -1297,6 +1325,7 @@
       if (on) abiertas.add(li.dataset.id); else abiertas.delete(li.dataset.id);
     };
     lista0.addEventListener("click", async (e) => {
+      if (e.target.closest("#btnSobrante")) return registrarSobrante();
       if (e.target.closest("#pTodos")) {
         const todasIds = [...v.querySelectorAll(".ent-card.elegible")].map((li) => li.dataset.id);
         const todas = todasIds.every((id) => sel.has(id));
@@ -1444,7 +1473,7 @@
     const salen = peds.filter((p) => p.estado === "confirmado" && accionesPedido(roles(), yo().id, p).includes("en_ruta"));
     const texto = [`*CARGA ${yo().nombre.toUpperCase()}* · ${t.pedidos} pedido(s) · ${t.cajas} cajas`, "",
       ...t.productos.map((x) => `• ${x.cajas} × ${x.producto} (${x.code})`), "", "*Pedidos*",
-      ...peds.map((p) => `• ${p.id} · ${p.negocio} · ${p.total_cajas} caja(s)`)].join("\n");
+      ...peds.map((p) => `• ${p.id} · ${p.negocio} · ${cajasPendientes(p) || p.total_cajas} caja(s)`)].join("\n");
     v.innerHTML = `
       <section class="tarjeta carga-total">
         <p class="carga-grande"><strong>${t.cajas}</strong> cajas</p>
@@ -1462,7 +1491,7 @@
       </section>
       <section class="tarjeta">
         <h3 class="sub-titulo">Pedidos incluidos</h3>
-        <ul class="resumen-items">${peds.map((p) => `<li><a href="#/pedido/${encodeURIComponent(p.id)}">${esc(p.negocio)}</a><em>${p.total_cajas} caja(s)</em></li>`).join("")}</ul>
+        <ul class="resumen-items">${peds.map((p) => `<li><a href="#/pedido/${encodeURIComponent(p.id)}">${esc(p.negocio)}</a><em>${cajasPendientes(p) || p.total_cajas} caja(s)${esParcial(p) ? " · faltaban" : ""}</em></li>`).join("")}</ul>
       </section>
       <button type="button" class="btn btn-ghost btn-bloque" id="btnCompartirCarga">Compartir lista de carga</button>`;
     $("btnCompartirCarga").addEventListener("click", () => enviarAlGrupo(texto));
@@ -1544,6 +1573,10 @@
           <dt>Fecha</dt><dd>${esc(fechaLegible(p.fecha))}</dd>
           ${p.estado === "entregado" && p.entregado_at ? `<dt>Entregado</dt><dd>${esc(new Date(p.entregado_at).toLocaleDateString("es-VE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" }))}${p.entregado_por ? ` · ${esc(p.entregado_por)}` : ""}</dd>` : ""}
           <dt>Vendedor</dt><dd>${esc(p.vendedor)}</dd>
+          ${gestion() ? `<dt>RIF</dt><dd>${esc(c.rif_cedula || "—")}</dd><dt>Teléfono</dt><dd>${esc([c.telefono, c.telefono2].filter(Boolean).join(" / ") || "—")}</dd>` : ""}
+          ${p.factura ? `<dt>Factura</dt><dd>${esc(p.factura)}</dd>` : ""}
+          ${p.nota_credito ? `<dt>Nota de crédito</dt><dd><strong>${esc(dinero(p.nota_credito))}</strong> · por cajas que volvieron al depósito</dd>` : ""}
+          ${p.estado !== "entregado" && esParcial(p) ? `<dt>Entrega</dt><dd>Parcial · faltan ${cajasPendientes(p)} caja(s)</dd>` : ""}
           ${p.despachador ? `<dt>Despachador</dt><dd>${esc(p.despachador)}</dd>` : ""}
           ${p.documento ? `<dt>Documento</dt><dd>${esc(p.documento)}</dd>` : ""}
           ${p.pago ? `<dt>Pago</dt><dd>${esc(p.pago)}${p.dias_credito ? ` · ${p.dias_credito} días` : ""}</dd>` : ""}
@@ -1558,7 +1591,7 @@
       ${p.historial === null ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3>${spin("Cargando historial…")}</section>` : ""}
       ${p.historial && p.historial.length ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3><ol class="historial">${p.historial.map((h) =>
         `<li><strong>${esc({ creado: "Enviado (en proceso)", reasignado: "Despachador cambiado", pendiente: "Vuelto a En proceso", confirmado: "Aprobado",
-          cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", borrado: "Borrado", entregado: "Entregado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
+          cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", borrado: "Borrado", entregado: "Entregado", entrega_parcial: "Entrega parcial", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
 
     $("btnReenviar").addEventListener("click", () => enviarAlGrupo(mensajeGrupo(p, c)));
     const bb = $("btnBorrarPed");
@@ -1581,15 +1614,130 @@
     v.querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", () => accionPedido(p, b.dataset.acc)));
   }
 
+  /* Aprobar = ya se hizo la factura. N° de factura opcional (uno por pedido). Devuelve la lista de números o null. */
+  async function hojaAprobar(ps) {
+    const uno = ps.length === 1;
+    const cajas = ps.reduce((a, p) => a + (Number(p.total_cajas) || 0), 0);
+    const r = await hoja({
+      titulo: uno ? `Aprobar ${ps[0].id}` : `Aprobar ${ps.length} pedidos`,
+      cuerpo: `<p class="modal-sub">${uno ? `${esc(ps[0].negocio)} · ${cajas} caja(s)` : `${ps.length} pedidos · ${cajas} cajas`}.
+          Aprobar = <strong>ya se hizo la factura</strong>; pasa a <strong>Aprobado · Por despachar</strong>.</p>
+        ${ps.map((p, i) => `<label class="field field-full"><span>N° de factura${uno ? "" : ` · ${esc(p.negocio)} <span class="ped-det">${esc(p.id)}</span>`} <span class="ped-det">(opcional)</span></span>
+          <input name="factura_${i}" maxlength="40" autocomplete="off" placeholder="ej. 000123" /></label>`).join("")}`,
+      ok: uno ? "Aprobado" : `Aprobar ${ps.length}`,
+    });
+    return r ? ps.map((_, i) => String(r[`factura_${i}`] || "").trim()) : null;
+  }
+
+  /* Entrega con diferencias: por producto, cuántas recibió el cliente y qué pasa con lo que falta */
+  function difsHtml(p) {
+    const pend = (p.items || []).filter((it) => cajasPorEntregar(it) > 0);
+    if (!pend.length) return "";
+    return `<fieldset class="pay"><legend>¿Se entregó todo?</legend>
+        <div class="selector-tema entrega-tipo">
+          <button type="button" data-ent-tipo="0" aria-pressed="true">Sí, completo</button>
+          <button type="button" data-ent-tipo="1" aria-pressed="false">Con diferencias</button>
+        </div>
+        <div id="hDifs" class="difs" hidden>
+          <p class="nota-chica">¿Cuántas cajas recibió el cliente de cada producto?</p>
+          ${pend.map((it) => { const max = cajasPorEntregar(it); return `<div class="dif-fila" data-code="${esc(it.code)}" data-max="${max}">
+            <span class="dif-prod"><strong>${esc(it.producto)}</strong><span class="ped-det">${esc(it.code)} · ${Number(it.entregadas) ? "faltaban" : "pedidas"} ${max}</span></span>
+            <input type="number" class="dif-n" min="0" max="${max}" step="1" inputmode="numeric" value="${max}" aria-label="Cajas de ${esc(it.producto)} que recibió" />
+            <span class="dif-falta ped-det" hidden></span>
+            <select class="dif-destino" hidden aria-label="Qué pasa con lo que falta de ${esc(it.producto)}">
+              <option value="despues">Se entrega después</option>
+              <option value="devuelve">No se entrega · vuelve al depósito</option>
+            </select>
+          </div>`; }).join("")}
+          <label class="field field-full"><span>¿Qué pasó?</span><input name="motivo_entrega" maxlength="200" autocomplete="off" placeholder="ej. faltó cargar una caja · no la quiso · llegó dañada" /></label>
+          <p class="nota-chica"><strong>Se entrega después</strong>: queda pendiente en el mismo pedido y factura (vuelve a Por despachar).
+            <strong>No se entrega</strong>: vuelve al depósito y baja el monto; hace falta una nota de crédito.</p>
+        </div>
+        <input type="hidden" name="con_difs" value="0" />
+        <input type="hidden" name="diferencias" value="[]" />
+      </fieldset>`;
+  }
+  function enlazarDifs(form) {
+    const caja = form.querySelector("#hDifs");
+    if (!caja) return;
+    const conDifs = form.querySelector('[name="con_difs"]'), json = form.querySelector('[name="diferencias"]');
+    const leer = () => {
+      const difs = [];
+      caja.querySelectorAll(".dif-fila").forEach((f) => {
+        const max = Number(f.dataset.max), inp = f.querySelector(".dif-n");
+        let n = Math.round(Number(inp.value));
+        if (!isFinite(n) || inp.value === "") n = max;
+        n = Math.max(0, Math.min(max, n));
+        const falta = max - n, sel = f.querySelector(".dif-destino"), txt = f.querySelector(".dif-falta");
+        sel.hidden = !falta; txt.hidden = !falta;
+        txt.textContent = falta === 1 ? "Falta 1 caja. ¿Qué pasa con ella?" : falta ? `Faltan ${falta} cajas. ¿Qué pasa con ellas?` : "";
+        f.classList.toggle("con-falta", !!falta);
+        if (falta) difs.push({ code: f.dataset.code, entregadas: n, destino: sel.value });
+      });
+      json.value = JSON.stringify(difs);
+    };
+    form.querySelector(".entrega-tipo").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-ent-tipo]");
+      if (!b) return;
+      form.querySelectorAll("[data-ent-tipo]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      conDifs.value = b.dataset.entTipo;
+      caja.hidden = b.dataset.entTipo !== "1";
+      $("hojaOk").textContent = b.dataset.entTipo === "1" ? "Guardar entrega" : "Sí, entregado";
+      leer();
+    });
+    caja.addEventListener("input", leer);
+    caja.addEventListener("change", leer);
+  }
+  function validarDifs(d) {
+    if (d.con_difs !== "1") return "";
+    if (!JSON.parse(d.diferencias || "[]").length) return "Indicá qué producto llegó incompleto (o elegí Sí, completo).";
+    if (!String(d.motivo_entrega || "").trim()) return "Escribí qué pasó.";
+    return "";
+  }
+
+  /* Datos para hacer la factura (se copian de una vez) */
+  function textoFactura(p) {
+    const c = p.cliente_datos || {};
+    const tipo = p.tipo_pago || tipoPagoDe(p.pago);
+    const items = p.items || [];
+    const conPrecio = items.some((it) => Number(it.precio) > 0);
+    return [`PEDIDO ${p.id} · ${p.documento || "Nota de entrega"}`,
+      `Cliente: ${p.negocio}${p.cliente && p.cliente !== p.negocio ? ` (${p.cliente})` : ""}`,
+      c.rif_cedula ? `RIF/Cédula: ${c.rif_cedula}` : "RIF/Cédula: —",
+      `Teléfono: ${[c.telefono, c.telefono2].filter(Boolean).join(" / ") || "—"}`,
+      `Dirección: ${c.direccion || "—"}`,
+      `Pago: ${(pagoPorId(tipo) || {}).nombre || p.pago || ""}${p.dias_credito ? ` · ${p.dias_credito} días` : ""} · precio ${p.nivel_precio === "mayor" ? "al mayor" : "al por menor"}`,
+      "",
+      ...items.map((it) => `${it.cajas} × ${it.producto} (${it.code})${conPrecio ? ` · ${dinero(precioUnitario(it, tipo))} c/u = ${dinero(it.cajas * precioUnitario(it, tipo))}` : ""}`),
+      "",
+      `Total: ${p.total_cajas} cajas${conPrecio ? ` · ${dinero(totalPorPago(items, tipo))}` : ""}`,
+      `Vendedor: ${p.vendedor}`,
+      p.nota ? `Nota: ${p.nota}` : ""].filter((l, i, a) => l !== "" || (a[i - 1] !== "" && i < a.length - 1)).join("\n").trim();
+  }
+  async function copiarTexto(t) {
+    try { await navigator.clipboard.writeText(t); return true; }
+    catch (e) {
+      const a = document.createElement("textarea"); a.value = t; a.setAttribute("readonly", ""); a.style.position = "fixed"; a.style.opacity = "0";
+      document.body.appendChild(a); a.select();
+      let ok = false; try { ok = document.execCommand("copy"); } catch (_) {}
+      a.remove(); return ok;
+    }
+  }
+
   async function accionPedido(p, acc, boton) {
     if (["cobrar", "conciliar", "rechazar", "desconciliar"].includes(acc)) return accionCobro(p, acc);
     let estado = acc, extra = {};
-    if (acc === "confirmar" || acc === "reasignar") {
+    if (acc === "confirmar") {
+      const facturas = await hojaAprobar([p]);
+      if (!facturas) return;
+      estado = "confirmado";
+      extra.factura = facturas[0];
+    } else if (acc === "reasignar") {
       const { despachadores } = await api("despachadores");
       if (!despachadores.length) return toast("No hay despachadores activos. Crealos en Más → Usuarios.");
       const r = await hoja({
         titulo: acc === "confirmar" ? `Aprobar ${p.id}` : "Cambiar despachador",
-        cuerpo: `<p class="modal-sub">${esc(p.negocio)} · ${p.total_cajas} caja(s)${acc === "confirmar" ? " · pasa a <strong>Aprobado · Preparando despacho</strong>" : ""}</p>
+        cuerpo: `<p class="modal-sub">${esc(p.negocio)} · ${p.total_cajas} caja(s)</p>
           <label class="field field-full"><span>¿Quién lo despacha?</span><select name="despachador_id" id="hDesp"><option value="">Elegí quién lo lleva</option>${despachadores.map((d) =>
             `<option value="${esc(d.id)}"${d.id === p.despachador_id ? " selected" : ""}>${esc(d.nombre)}</option>`).join("")}</select></label>`,
         ok: acc === "confirmar" ? "Aprobar" : "Guardar",
@@ -1615,6 +1763,7 @@
       const r = await hoja({
         titulo: `¿Marcar ${p.id} como entregado?`,
         cuerpo: `<p class="modal-sub">Confirmá que el cliente recibió el pedido.</p>
+          ${difsHtml(p)}
           <fieldset class="pay"><legend>¿Cuándo se entregó?</legend>
             <div class="selector-tema dias-entrega">
               <button type="button" data-dia="${hoy}" aria-pressed="true">Hoy</button>
@@ -1638,8 +1787,11 @@
             if (otro) fecha.focus();
           });
           fecha.addEventListener("input", () => { elegida.value = fecha.value; });
+          enlazarDifs(form);
         },
         validar: (d) => {
+          const err = validarDifs(d);
+          if (err) return err;
           if (!/^\d{4}-\d{2}-\d{2}$/.test(d.fecha_entrega || "")) return "Elegí la fecha de entrega.";
           if (d.fecha_entrega > hoy) return "La fecha no puede ser futura.";
           if (desde && d.fecha_entrega < desde) return "La fecha no puede ser anterior al pedido.";
@@ -1649,6 +1801,7 @@
       if (!r) return;
       estado = "entregado";
       extra.fecha_entrega = r.fecha_entrega;
+      if (r.con_difs === "1") { extra.diferencias = JSON.parse(r.diferencias || "[]"); extra.motivo_entrega = (r.motivo_entrega || "").trim(); }
     } else if (acc === "reabrir") {
       const r = await hoja({
         titulo: `¿Volver ${p.id} a En proceso?`,
@@ -1663,7 +1816,10 @@
     try {
       const r = await api("estado", { pedido_id: p.id, estado, ...extra });
       guardarEnMemoria(r.pedido);
-      toast(`${p.id}: ${acc === "reasignar" ? "despachador cambiado" : nombreEstado(estado)}`);
+      const quedan = acc === "entregado" && r.pedido.estado !== "entregado" ? cajasPendientes(r.pedido) : 0;
+      toast(quedan ? `${p.id}: entrega parcial · quedan ${quedan} caja${quedan === 1 ? "" : "s"} por entregar`
+        : r.pedido.nota_credito && acc === "entregado" ? `${p.id}: entregado · nota de crédito ${dinero(r.pedido.nota_credito)}`
+        : `${p.id}: ${acc === "reasignar" ? "despachador cambiado" : nombreEstado(estado)}`);
       render();
     } catch (e) {
       toast(e.message);
@@ -2282,7 +2438,8 @@
       <label class="field field-full"><span>Usuario (para ingresar)</span><input id="uUsuario" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="ej. kevin" value="${esc(u ? u.usuario : "")}" /></label>
       <label class="field field-full"><span>Nombre</span><input id="uNombre" type="text" autocapitalize="words" autocomplete="off" placeholder="ej. Kevin Pérez" value="${esc(u ? u.nombre : "")}" /></label>
       <fieldset class="pay roles-usuario" id="uRoles"><legend>Roles (puede tener varios)</legend>
-        ${[["vendedor", "Vendedor", "toma pedidos, clientes y cobros"], ["despachador", "Despachador", "entrega los pedidos que le asignan"], ["admin", "Administración", "aprueba, concilia, inventario y precios"], ["master", "Master", "todo, incluido usuarios"]].map(([k, t, d]) =>
+        ${[["vendedor", "Vendedor", "toma pedidos, clientes y cobros"], ["despachador", "Despachador", "por ahora desactivado: despacha Administración"], ["admin", "Administración", "aprueba (factura), despacha, entrega e inventario"], ["master", "Master", "todo, incluido usuarios"]]
+          .filter(([k]) => k !== "despachador" || (u && (u.roles || [u.rol]).includes("despachador"))).map(([k, t, d]) =>
           `<label class="check rol-opt"><input type="checkbox" name="uRol" value="${k}"${(u ? u.roles || [u.rol] : ["vendedor"]).includes(k) ? " checked" : ""} /> <span><strong>${t}</strong> <span class="ped-det">${d}</span></span></label>`).join("")}
       </fieldset>
       <label class="field field-full"><span>${nuevo ? "Clave" : "Clave nueva (dejar vacía para no cambiarla)"}</span>

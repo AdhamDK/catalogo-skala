@@ -100,8 +100,8 @@ const P = (estado, extra = {}) => ({ id: "SKL-1", estado, vendedor_id: "U3", des
 test("acciones de gestión (master/admin) según estado", () => {
   for (const rol of ["master", "admin"]) {
     assert.deepEqual(core.accionesPedido(rol, "U2", P("pendiente")), ["confirmar", "cancelar"]);
-    assert.deepEqual(core.accionesPedido(rol, "U2", P("confirmado")), ["en_ruta", "reasignar", "cancelar"]);
-    assert.deepEqual(core.accionesPedido(rol, "U2", P("en_ruta")), ["entregado", "reasignar", "cancelar"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("confirmado")), ["en_ruta", "entregado", "cancelar"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("en_ruta")), ["entregado", "cancelar"]);
     assert.deepEqual(core.accionesPedido(rol, "U2", P("entregado")), ["conciliar", "reabrir"]);
     assert.deepEqual(core.accionesPedido(rol, "U2", P("cancelado")), ["reabrir"]);
   }
@@ -139,7 +139,7 @@ test("puedeTomarPedidos y nombre de estado", () => {
   assert.equal(core.puedeTomarPedidos("despachador"), false);
   assert.equal(core.nombreEstado("en_ruta"), "En ruta");
   assert.equal(core.nombreEstado("pendiente"), "En proceso");
-  assert.equal(core.nombreEstado("confirmado"), "Aprobado · Preparando despacho");
+  assert.equal(core.nombreEstado("confirmado"), "Aprobado · Por despachar");
   assert.equal(core.nombreEstado("cancelado"), "Anulado");
   assert.match(core.mensajeGrupo({ ...PEDIDO, estado: "en_ruta" }, CLIENTE), /^\*PEDIDO SKL-261025-007 — EN RUTA\*/);
 });
@@ -394,7 +394,7 @@ test("varios roles: botones y permisos suman los de cada rol", () => {
   const p = { estado: "confirmado", vendedor_id: "U3", despachador_id: "U3", cobro: "" };
   assert.deepEqual(core.accionesPedido(["vendedor", "despachador"], "U3", p), ["en_ruta", "entregado"]);
   assert.deepEqual(core.accionesPedido(["vendedor", "despachador"], "U3", { ...p, estado: "pendiente" }), ["cancelar"]);
-  assert.deepEqual(core.accionesPedido(["admin", "despachador"], "U3", p), ["en_ruta", "reasignar", "cancelar", "entregado"]);
+  assert.deepEqual(core.accionesPedido(["admin", "despachador"], "U3", p), ["en_ruta", "entregado", "cancelar"]);
   assert.equal(core.puedeTomarPedidos(["despachador", "vendedor"]), true);
   assert.equal(core.puedeTomarPedidos(["despachador"]), false);
   assert.equal(core.puedeBorrar(["admin", "vendedor"], "U3", p), true);
@@ -456,4 +456,15 @@ test("sin señal: el cliente se encuentra con el teléfono escrito de cualquier 
   for (const q of ["04247387202", "+584247387202", "0424-738.72.02", "v-28072542"]) assert.equal(core.buscarClientesLocal(cl, q).length, 1, q);
   assert.equal(core.telefonoWhatsapp("+58 424 7387202"), "584247387202");
   assert.equal(core.telefonoWhatsapp("04247387202"), "584247387202");
+});
+
+test("entrega parcial: total de carga y pendientes cuentan solo lo que falta entregar", () => {
+  const p = { estado: "confirmado", items: [
+    { code: "BC-01", producto: "Babosa", cajas: 2, entregadas: 1, unidades_caja: 6, unidad: "unidades", total_unidades: 12 },
+    { code: "KT-01", producto: "Kit", cajas: 1, entregadas: 1, unidades_caja: 6, unidad: "dúos", total_unidades: 6 }] };
+  assert.equal(core.cajasPendientes(p), 1);
+  assert.equal(core.esParcial(p), true);
+  const t = core.totalCarga([p]);
+  assert.deepEqual([t.cajas, t.productos.map((x) => [x.code, x.cajas, x.total_unidades])], [1, [["BC-01", 1, 6]]]);
+  assert.equal(core.esParcial({ items: [{ cajas: 2, entregadas: 0 }] }), false);
 });
