@@ -939,6 +939,7 @@ function servidor() {
     await page.click(`.apr-card[data-id="${b.id}"] [data-ap-tap]`);
     assert.match(await page.innerText("#aBarra"), /2 pedidos · 6 cajas/);
     await page.click("#btnAprobarVarios");
+    await page.waitForFunction(() => /Aprobar 2 pedidos/.test(document.getElementById("hojaTitulo").textContent) && !document.getElementById("hoja").hidden);
     assert.match(await page.innerText("#hoja"), /2 pedidos · 6 cajas/);
     await page.selectOption("#hDesp", { label: "Luis" });
     await page.click("#hojaOk");

@@ -670,3 +670,4 @@ body.app.con-nav .barra-accion { bottom: calc(68px + env(safe-area-inset-bottom)
 .apr-card .fila-monto { margin-top: 2px; }
 .ent-items .ent-precio { margin-left: auto; font-style: normal; font-weight: 700; white-space: nowrap; }
 .apr-botones { padding: 4px 0 0; }
+.datos dd, .ent-dir, .ent-dir-full, .ped-det, .resumen-items span { overflow-wrap: anywhere; }

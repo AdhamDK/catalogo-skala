@@ -579,7 +579,7 @@
         <label class="field"><span>RIF / Cédula</span><input id="cRif" type="text" autocomplete="off" autocapitalize="characters" enterkeyhint="next" placeholder="J-12345678-9" value="${val("rif_cedula")}" /></label>
         <label class="field"><span>Teléfono 1 *</span><input id="cTel1" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="0412-1234567" value="${val("telefono")}" /></label>
         <label class="field"><span>Teléfono 2</span><input id="cTel2" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="Opcional" value="${val("telefono2")}" /></label>
-        <label class="field field-full"><span>Dirección</span><input id="cDireccion" type="text" autocomplete="off" enterkeyhint="done" placeholder="Dirección de entrega" value="${val("direccion")}" /></label>
+        <label class="field field-full"><span>Dirección</span><textarea id="cDireccion" class="dir-texto" rows="1" autocomplete="off" enterkeyhint="done" placeholder="Dirección de entrega">${val("direccion")}</textarea></label>
       </div>
       <div class="gps-box">
         <button type="button" class="btn btn-ghost btn-gps" id="btnGps">Tomar ubicación GPS del cliente</button>

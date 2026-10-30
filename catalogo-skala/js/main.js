@@ -210,6 +210,7 @@ function abrirCliente(modo) {
   $id("cliPanel").hidden = modo !== "buscar";
   $id("cliForm").hidden = modo !== "form";
   if (modo === "buscar") { $id("cliRes").textContent = ""; }
+  if (modo === "form" && window.crecerDireccion) requestAnimationFrame(() => window.crecerDireccion($id("fDireccion")));
   pintarCliente();
 }
 async function buscarCliente(q) {
@@ -256,6 +257,7 @@ function fillCliente() {
   $id("fNegocio").value = cliente.negocio || "";
   $id("fContacto").value = cliente.contacto || "";
   $id("fDireccion").value = cliente.direccion || "";
+  if (window.crecerDireccion) requestAnimationFrame(() => window.crecerDireccion($id("fDireccion")));
   $id("fTelefono").value = cliente.telefono || "";
 }
 

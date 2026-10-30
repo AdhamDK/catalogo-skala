@@ -66,3 +66,37 @@ function textoUnidadesPedido(p, cajas) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { UNIDADES_POR_CAJA_BANO, DUOS_POR_CAJA_KIT, CURVATURAS, tiposDeCabello, iconosCabelloHTML, textoUnidades, textoUnidadesCorto, textoUnidadesPedido };
 }
+
+/* -------------------- Detalles de los campos (catálogo y panel) --------------------
+   - Cantidad: al tocar el número se selecciona entero, así lo que escribís lo reemplaza
+     (antes el cursor quedaba detrás del "1" y salía "12").
+   - Dirección: crece hacia abajo en vez de correr el texto hacia un costado; Enter no hace salto de línea. */
+(function () {
+  if (typeof document === "undefined") return;
+  const esCantidad = (el) => el && el.classList && el.classList.contains("qty-input");
+  const esDir = (el) => el && el.classList && el.classList.contains("dir-texto");
+  const crecer = (el) => { el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; };
+  let recien = null;
+  document.addEventListener("focusin", (e) => {
+    const el = e.target;
+    if (esCantidad(el)) { recien = el; try { el.select(); } catch (_) {} setTimeout(() => { try { el.select(); } catch (_) {} }, 0); }
+    if (esDir(el)) crecer(el);
+  });
+  // el toque que enfoca no debe mover el cursor y deshacer la selección
+  document.addEventListener("mouseup", (e) => { if (esCantidad(e.target) && recien === e.target) { e.preventDefault(); recien = null; } });
+  document.addEventListener("touchend", (e) => { if (esCantidad(e.target) && recien === e.target) { setTimeout(() => { try { e.target.select(); } catch (_) {} }, 0); recien = null; } });
+  document.addEventListener("input", (e) => {
+    if (!esDir(e.target)) return;
+    if (/\n/.test(e.target.value)) { const pos = e.target.selectionStart; e.target.value = e.target.value.replace(/\s*\n+\s*/g, " "); try { e.target.setSelectionRange(pos, pos); } catch (_) {} }
+    crecer(e.target);
+  });
+  document.addEventListener("keydown", (e) => { if (esDir(e.target) && e.key === "Enter") { e.preventDefault(); e.target.blur(); } });
+  window.crecerDireccion = crecer; // para cuando el valor se pone desde el código
+  // los formularios que se dibujan después (panel) también se ajustan solos
+  const ajustar = (raiz) => { if (raiz.querySelectorAll) raiz.querySelectorAll(".dir-texto").forEach((t) => { if (t.offsetParent) crecer(t); }); };
+  const iniciar = () => {
+    ajustar(document);
+    new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => { if (n.nodeType === 1) ajustar(n.parentNode || n); }))).observe(document.body, { childList: true, subtree: true });
+  };
+  if (document.body) iniciar(); else document.addEventListener("DOMContentLoaded", iniciar);
+})();

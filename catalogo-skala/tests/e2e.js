@@ -225,6 +225,15 @@ async function probar(browser, cfg) {
   await page.locator('#cartList .qty-btn[data-act="plus"][data-code="KT-01"]').click();
   assert.match(await page.innerText("#cartTotal"), /4 cajas · 60,00 \$/);
   assert.equal(await page.inputValue('.card[data-card="KT-01"] .qty-input'), "2");
+  // tocar el número lo selecciona entero: lo que se escribe lo reemplaza (no queda "23")
+  const qKT = '#cartList .qty-input[data-code="KT-01"]';
+  if (cfg.movil) await page.locator(qKT).tap(); else await page.locator(qKT).click();
+  await page.waitForTimeout(50);
+  assert.ok(await page.locator(qKT).evaluate((e) => document.activeElement === e));
+  await page.keyboard.type("3");
+  assert.equal(await page.inputValue(qKT), "3");
+  assert.match(await page.innerText("#cartTotal"), /5 cajas/);
+  await page.locator(qKT).fill("2");
   // papelera: animación y se quita
   await page.locator('#cartList [data-quitar="KT-01"]').click();
   assert.ok(await page.locator('#cartList [data-item="KT-01"].saliendo').count());
@@ -300,6 +309,12 @@ async function probar(browser, cfg) {
   assert.ok(await page.locator("#cliForm").isVisible());
   await page.fill("#fNegocio", "Salón Luz");
   await page.fill("#fTelefono", "0414-5551234");
+  // dirección larga: baja de línea en vez de correrse hacia un lado
+  await page.fill("#fDireccion", "Av 15 bis Calle 13 edificio Dávila Local 12 Planta Alta El Vigía Mérida 5145 frente a la plaza");
+  const dir = await page.locator("#fDireccion").evaluate((e) => ({ alto: e.offsetHeight, sw: e.scrollWidth, cw: e.clientWidth, pag: document.documentElement.scrollWidth - innerWidth }));
+  assert.ok(dir.alto > 60 && dir.sw <= dir.cw && dir.pag <= 0, JSON.stringify(dir));
+  await page.locator("#fDireccion").press("Enter"); // Enter no agrega saltos de línea
+  assert.ok(!/\n/.test(await page.inputValue("#fDireccion")));
   await page.click("#btnUbic");
   await page.waitForFunction(() => /Ubicación lista/.test(document.getElementById("ubicEstado").textContent));
   await page.click("#btnCliListo");

@@ -1341,3 +1341,17 @@ html[data-tema="oscuro"] .es-listo #listoTit { color: var(--verde-claro); }
 .cli-elegido.saliendo { animation: salir .32s ease forwards; }
 .cli-elegido .cart-quitar { flex: 0 0 44px; }
 .cli-elegido .link-cli { padding: 0 4px; }
+
+/* Dirección: crece hacia abajo (no se corre de lado) */
+.field textarea.dir-texto {
+  display: block; min-width: 0; min-height: 46px; resize: none; overflow: hidden; line-height: 1.35;
+  overflow-wrap: anywhere; background: var(--superficie);
+}
+.field textarea.dir-texto:focus { outline: 2px solid var(--verde-claro); outline-offset: 0; }
+.dir-fila { align-items: flex-start; }
+.dir-fila textarea { flex: 1; }
+/* Cliente elegido: nombre y dirección completos arriba; Editar · Cambiar · papelera abajo */
+.cli-elegido { flex-wrap: wrap; row-gap: 0; }
+.cli-elegido .cli-datos { flex: 1 1 calc(100% - 52px); padding: 4px 0; }
+.cli-datos span { white-space: normal; overflow-wrap: anywhere; }
+.cli-elegido .link-cli:first-of-type { margin-left: auto; }
