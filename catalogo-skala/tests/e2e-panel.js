@@ -476,6 +476,7 @@ function servidor() {
   await page.click(`${p1} .ent-detalle a[href^="#/pedido/"]`);
   await esperarRuta("#/pedido/");
   assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Aprobar", "Anular pedido"]);
+  assert.equal(await page.locator("#hDesp, .datos dt:text-is('Despachador')").count(), 0); // no se elige quién lo lleva
   await page.click("#btnAtras");
   await page.waitForSelector(`${p1}.abierta [data-ap="confirmar"]`); // vuelve con los detalles abiertos
   await page.click(`${p1} [data-ap="confirmar"]`);

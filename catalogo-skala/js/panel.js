@@ -895,8 +895,7 @@
   };
   function filaPedido(p, elegible) {
     const r = enEntregas() ? "despachador" : rolPedidos();
-    const extra = r === "vendedor" ? (p.despachador ? `Despacha: ${p.despachador}` : "")
-      : r === "despachador" ? ((p.cliente_datos || {}).direccion || "") : `Vendedor: ${p.vendedor}${p.despachador ? ` · Despacha: ${p.despachador}` : ""}`;
+    const extra = r === "vendedor" ? "" : r === "despachador" ? ((p.cliente_datos || {}).direccion || "") : `Vendedor: ${p.vendedor}`;
     return `<li class="${elegible ? "con-check" : ""}">${elegible ? `<label class="check-ped"><input type="checkbox" value="${esc(p.id)}" aria-label="Elegir ${esc(p.negocio)} para la carga" /></label>` : ""}
       <a class="fila-ped est-borde-${esc(p.estado)}" href="#/pedido/${encodeURIComponent(p.id)}">
       <div class="fila-top"><strong>${esc(p.negocio)}</strong>${chipEstado(p.estado)}</div>
@@ -1676,7 +1675,7 @@
   }
 
   /* ---------- Detalle de pedido ---------- */
-  const ETIQUETAS = { confirmar: "Aprobar", en_ruta: "Salió en ruta", entregado: "Entregado", reasignar: "Cambiar despachador", cancelar: "Anular pedido", reabrir: "Volver a En proceso",
+  const ETIQUETAS = { confirmar: "Aprobar", en_ruta: "Salió en ruta", entregado: "Entregado", cancelar: "Anular pedido", reabrir: "Volver a En proceso",
     cobrar: "Marcar cancelado (pagado)", conciliar: "Conciliar pago (recibido)", rechazar: "Pago no recibido", desconciliar: "Deshacer conciliación" };
   async function vPedido(v, id, _q, vigente) {
     // Al instante con lo que ya está en la lista; el historial llega después
@@ -1734,7 +1733,6 @@
           ${p.factura ? `<dt>Factura</dt><dd>${esc(p.factura)}</dd>` : ""}
           ${p.nota_credito ? `<dt>Nota de crédito</dt><dd><strong>${esc(dinero(p.nota_credito))}</strong> · por cajas que volvieron al depósito</dd>` : ""}
           ${p.estado !== "entregado" && esParcial(p) ? `<dt>Entrega</dt><dd>Parcial · faltan ${cajasPendientes(p)} caja(s)</dd>` : ""}
-          ${p.despachador ? `<dt>Despachador</dt><dd>${esc(p.despachador)}</dd>` : ""}
           ${p.documento ? `<dt>Documento</dt><dd>${esc(p.documento)}</dd>` : ""}
           ${p.pago ? `<dt>Pago</dt><dd>${esc(p.pago)}${p.dias_credito ? ` · ${p.dias_credito} días` : ""}</dd>` : ""}
           ${ec && ec.vence ? `<dt>Vence</dt><dd>${esc(ec.vence.split("-").reverse().join("/"))}</dd>` : ""}
@@ -1890,20 +1888,6 @@
       if (!facturas) return;
       estado = "confirmado";
       extra.factura = facturas[0];
-    } else if (acc === "reasignar") {
-      const { despachadores } = await api("despachadores");
-      if (!despachadores.length) return toast("No hay despachadores activos. Crealos en Más → Usuarios.");
-      const r = await hoja({
-        titulo: acc === "confirmar" ? `Aprobar ${p.id}` : "Cambiar despachador",
-        cuerpo: `<p class="modal-sub">${esc(p.negocio)} · ${p.total_cajas} caja(s)</p>
-          <label class="field field-full"><span>¿Quién lo despacha?</span><select name="despachador_id" id="hDesp"><option value="">Elegí quién lo lleva</option>${despachadores.map((d) =>
-            `<option value="${esc(d.id)}"${d.id === p.despachador_id ? " selected" : ""}>${esc(d.nombre)}</option>`).join("")}</select></label>`,
-        ok: acc === "confirmar" ? "Aprobar" : "Guardar",
-        validar: (d) => (d.despachador_id ? "" : "Elegí un despachador."),
-      });
-      if (!r) return;
-      estado = acc === "confirmar" ? "confirmado" : p.estado;
-      extra.despachador_id = r.despachador_id;
     } else if (acc === "cancelar") {
       const r = await hoja({
         titulo: `Anular ${p.id}`,
@@ -1963,7 +1947,7 @@
     } else if (acc === "reabrir") {
       const r = await hoja({
         titulo: `¿Volver ${p.id} a En proceso?`,
-        cuerpo: '<p class="modal-sub">Se quita el despachador y vuelve a Por aprobar.</p>',
+        cuerpo: '<p class="modal-sub">Vuelve a Por aprobar.</p>',
         ok: "Volver a En proceso",
       });
       if (!r) return;
@@ -1977,7 +1961,7 @@
       const quedan = acc === "entregado" && r.pedido.estado !== "entregado" ? cajasPendientes(r.pedido) : 0;
       toast(quedan ? `${p.id}: entrega parcial · quedan ${quedan} caja${quedan === 1 ? "" : "s"} por entregar`
         : r.pedido.nota_credito && acc === "entregado" ? `${p.id}: entregado · nota de crédito ${dinero(r.pedido.nota_credito)}`
-        : `${p.id}: ${acc === "reasignar" ? "despachador cambiado" : nombreEstado(estado)}`);
+        : `${p.id}: ${nombreEstado(estado)}`);
       render();
     } catch (e) {
       toast(e.message);
