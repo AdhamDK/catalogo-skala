@@ -57,6 +57,12 @@ En el teléfono se puede instalar: Chrome → menú ⋮ → **Instalar app** (iP
   **Copiar datos** los copia para pegarlos en el sistema de facturación. **Aprobado** pide el
   **N° de factura** (opcional) y pasa el pedido a *Aprobado · Por despachar*. Tocar varias tarjetas
   y **Aprobar N** aprueba juntos (un n° de factura por pedido; si a uno le falta stock, queda y avisa).
+- **Editar pedido** (Administración): botón *Editar pedido* en el pedido o *Editar* en la carta.
+  Se puede en cualquier momento **hasta que pasa a cuentas por cobrar** (En proceso, Por despachar o
+  En ruta); entregado, cobrado o conciliado ya no. Cambia productos y cantidades (o agrega), forma de
+  pago y días, nota o factura, documento y n° de factura. Los precios de lo que ya estaba se mantienen
+  si no cambia el nivel mayor/menor. Si ya estaba facturado, avisa que hay que corregir la factura.
+  Los datos del cliente se corrigen en su ficha. Queda en el historial lo que cambió.
 - **Despacho** (por ahora lo hace Administración; el rol *Despachador* está desactivado y más
   adelante será *Depositario*): menú **Despacho**. Arriba: cajas por entregar, por cargar y en ruta.
   En *Por cargar* se tocan los pedidos que van al camión → **Ver total de carga** (cajas por

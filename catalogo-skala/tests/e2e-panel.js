@@ -73,6 +73,7 @@ function servidor() {
   const titulo = () => page.innerText("#appTitulo");
   const esperarTitulo = (t) => page.waitForFunction((t) => document.getElementById("appTitulo").textContent === t, t);
   const esperarRuta = (h) => page.waitForFunction((h) => !!document.body && (document.body.dataset.lista || "").startsWith(h), h);
+  const esperarRutaExacta = (h) => page.waitForFunction((h) => !!document.body && (document.body.dataset.lista || "").split("?")[0] === h, h);
   const ingresar = async (u, c) => {
     await page.waitForSelector("#fLogin");
     await page.fill("#lUsuario", u);
@@ -486,6 +487,36 @@ function servidor() {
   await page.waitForFunction((s) => !document.querySelector(s), p1);
   assert.deepEqual(["estado", "factura", "despachador"].map((k) => gas.tabla("Pedidos")[0][k]), ["confirmado", "000123", ""]);
   ok("administración ve la carta del pedido (RIF, teléfono, dirección, precios), copia los datos y aprueba con n° de factura");
+  // Administración edita un pedido (el otro que está En proceso): cantidades, agregar producto, pago y nota
+  const p2 = gas.tabla("Pedidos")[1];
+  await page.click(`.apr-card[data-id="${p2.id}"] [data-ap-ver]`);
+  await page.click(`.apr-card[data-id="${p2.id}"] a[href^="#/editar/"]`);
+  await esperarRuta("#/editar/");
+  assert.equal(await titulo(), `Editar ${p2.id}`);
+  await page.waitForSelector("#xLista .pcard.elegido");
+  const antes = await page.locator("#xLista .pcard:not([hidden])").count();
+  assert.equal(antes, gas.tabla("PedidoItems").filter((x) => x.pedido_id === p2.id).length); // "En el pedido"
+  await page.click('#xFiltros [data-f="todos"]');
+  await page.click('#xLista .pcard[data-code="BC-06"] .pcard-tap');
+  await page.click('#xLista .pcard[data-code="BC-06"] [data-act="plus"]');
+  assert.equal(await page.inputValue('#xLista .pcard[data-code="BC-06"] .qty-input'), "2");
+  await page.selectOption("#xPago", "credito");
+  assert.ok(await page.locator("#xDiasWrap").isVisible());
+  await page.fill("#xDias", "");
+  await page.click("#btnGuardarEdicion");
+  assert.match(await page.innerText("#xError"), /días de crédito/);
+  await page.fill("#xDias", "21");
+  await page.fill("#xNota", "Corregido por Administración");
+  await foto("06e-editar-pedido");
+  await revisarDiseno("editar pedido");
+  await page.click("#btnGuardarEdicion");
+  await esperarRuta("#/pedido/");
+  const e2 = gas.tabla("Pedidos")[1];
+  assert.deepEqual([e2.tipo_pago, e2.dias_credito, e2.nota], ["credito", 21, "Corregido por Administración"]);
+  assert.equal(gas.tabla("PedidoItems").find((x) => x.pedido_id === p2.id && x.code === "BC-06").cajas, 2);
+  await page.waitForFunction(() => /Editado/.test(document.querySelector(".historial")?.textContent || ""));
+  assert.match(await page.innerText(".historial"), /Editado[\s\S]*cajas \d+ → \d+/);
+  ok("Administración edita el pedido: agrega productos, cambia cantidades, pago y nota");
   await page.goto(BASE + "/panel.html#/inventario");
   await esperarRuta("#/inventario");
   const kt = '.inv-fila[data-code="KT-02"]';
@@ -581,7 +612,7 @@ function servidor() {
   assert.match(await page.innerText("#hoja"), /Babosa[\s\S]*40[\s\S]*\+40[\s\S]*Kit Aguacate[\s\S]*15[\s\S]*−1/);
   await page.fill('#hoja input[name="nota"]', "Primer conteo");
   await page.click("#hojaOk");
-  await esperarRuta("#/inventario");
+  await esperarRutaExacta("#/inventario"); // (no "#/inventario/cargar")
   const movs = gas.tabla("Inventario").filter((m) => m.tipo === "conteo");
   assert.deepEqual(movs.map((m) => [m.code, m.cajas]), [["BC-01", 40], ["KT-02", -1]]);
   assert.match(movs[0].nota, /Primer conteo/);
@@ -598,7 +629,7 @@ function servidor() {
   await foto("07g-entrada");
   await page.click("#icGuardar");
   await page.click("#hojaOk");
-  await esperarRuta("#/inventario");
+  await esperarRutaExacta("#/inventario"); // (no "#/inventario/cargar")
   assert.deepEqual(gas.tabla("Inventario").filter((m) => m.tipo === "entrada" && m.code === "BC-06").map((m) => m.cajas), [3]);
   ok("inventario: conteo total y carga de mercancía con fotos (borrador guardado)");
   await salir();
@@ -885,7 +916,7 @@ function servidor() {
   await page.click('.menu-mas a[href="#/resumen"]');
   await esperarRuta("#/resumen");
   await page.waitForSelector(".stats .stat");
-  assert.deepEqual(await page.locator(".stats .stat strong").allInnerTexts(), ["2", "10", "1", "1"]);
+  assert.deepEqual(await page.locator(".stats .stat strong").allInnerTexts(), ["2", "12", "1", "1"]); // 12 cajas: el pedido 2 se editó (+2 Mais Cachos)
   await foto("09-resumen");
   await page.goto(BASE + "/panel.html#/usuarios");
   await esperarRuta("#/usuarios");
@@ -918,6 +949,7 @@ function servidor() {
   await page.click("#pLista .fila-ped");
   await esperarRuta("#/pedido/");
   assert.deepEqual(await page.locator(".acciones-ped .btn").allInnerTexts(), ["Deshacer conciliación"]);
+  assert.equal(await page.locator("#btnEditarPed").count(), 0); // cobrado y conciliado: no se edita
   await page.click('[data-acc="desconciliar"]');
   await page.click("#hojaOk");
   await page.waitForSelector('[data-acc="rechazar"]');

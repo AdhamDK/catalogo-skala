@@ -155,6 +155,7 @@ var ACCIONES = {
   inventario: [accionInventario_, GESTION],
   movimiento: [accionMovimiento_, GESTION],
   cargarInventario: [accionCargarInventario_, GESTION],
+  editarPedido: [accionEditarPedido_, GESTION],
   guardarPrecio: [accionGuardarPrecio_, GESTION],
   guardarProducto: [accionGuardarProducto_, GESTION],
   despachadores: [accionDespachadores_, GESTION],
@@ -1237,6 +1238,107 @@ function entregar_(ped, p, ses) {
   var detalle = difs.length ? 'Entregó ' + entregadasHoy + ' caja(s) · ' + partes.join(' · ') + ' · ' + motivo +
     (devueltas && ped.nota_credito ? ' · nota de crédito ' + ped.nota_credito + ' $' : '') : '';
   return { parcial: quedan > 0, detalle: detalle };
+}
+
+/* Administración edita un pedido en cualquier momento hasta que pasa a cuentas por cobrar
+   (En proceso, Por despachar o En ruta): productos y cantidades, forma de pago, documento, nota y
+   n° de factura. Con entrega parcial, lo que el cliente ya recibió se conserva.
+   Los precios se mantienen para los productos que ya estaban (si no cambia el nivel mayor/menor);
+   los nuevos, o todos si cambia el nivel, toman el precio de la hoja Precios. */
+function accionEditarPedido_(p, ses) {
+  var items = limpiarItems_(p.items);
+  if (!items.length) return { ok: false, error: 'El pedido no tiene productos.', code: 'empty' };
+  var vistos = {};
+  for (var i = 0; i < items.length; i++) {
+    if (vistos[items[i].code]) return { ok: false, error: items[i].code + ' está repetido.', code: 'items' };
+    vistos[items[i].code] = true;
+  }
+  var documento = txt_(p.documento, 30);
+  if (DOCUMENTOS.indexOf(documento) === -1) return { ok: false, error: 'Indicá nota de entrega o factura.', code: 'documento' };
+  var tipoPago = String(p.tipo_pago || '');
+  var pagoDef = pagoPorId_(tipoPago);
+  if (!pagoDef) return { ok: false, error: 'Elegí la forma de pago.', code: 'pago' };
+  var diasCredito = 0;
+  if (pagoDef.credito) {
+    diasCredito = Math.floor(Number(p.dias_credito));
+    if (!isFinite(diasCredito) || diasCredito < 1 || diasCredito > MAX_DIAS_CREDITO) return { ok: false, error: 'Indicá los días de crédito (1 a ' + MAX_DIAS_CREDITO + ').', code: 'credito' };
+  }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var pedidos = leer_('Pedidos');
+    var ped = pedidos.filter(function (x) { return String(x.id) === String(p.pedido_id) && !borrado_(x); })[0];
+    if (!ped) return { ok: false, error: 'Pedido no encontrado.', code: 'not_found' };
+    var estado = String(ped.estado);
+    if (estado === 'entregado') return { ok: false, error: 'Ya está en cuentas por cobrar: no se puede editar.', code: 'estado' };
+    if (estado === 'cancelado') return { ok: false, error: 'El pedido está anulado.', code: 'estado' };
+    var pItems = leer_('PedidoItems');
+    var filas = pItems.filter(function (it) { return String(it.pedido_id) === String(ped.id); });
+    if (documento === 'Factura') {
+      var cli = leer_('Clientes').filter(function (x) { return String(x.id) === String(ped.cliente_id); })[0];
+      if (!cli || soloDigitos_(cli.rif_cedula).length < 6) return { ok: false, error: 'Para factura hace falta el RIF o la cédula del cliente (editalo en Clientes).', code: 'rif' };
+    }
+    // stock (si todavía no salió): lo que hay, sin contar lo que este mismo pedido ya tenía apartado
+    if (estado === 'pendiente' || estado === 'confirmado') {
+      var otros = pItems.filter(function (it) { return String(it.pedido_id) !== String(ped.id); });
+      var sinStock = faltaStock_(items, existencias_(pedidos, otros));
+      if (sinStock) return { ok: false, error: sinStock, code: 'stock' };
+    }
+
+    var totalCajas = items.reduce(function (a, it) { return a + it.cajas; }, 0);
+    var excepcion = p.precio_mayor === true && totalCajas < CAJAS_MAYOR;
+    var mayor = totalCajas >= CAJAS_MAYOR || excepcion;
+    var tabla = tablaPrecios_();
+    ponerPrecios_(items, tabla, mayor);
+    if (mayor === (String(ped.nivel_precio) === 'mayor')) {
+      var previo = {};
+      filas.forEach(function (f) { previo[String(f.code).toUpperCase()] = f; });
+      items.forEach(function (it) {
+        var f = previo[it.code];
+        if (f && Number(f.precio) > 0) {
+          it.precio = Number(f.precio); it.desc_pronto = Number(f.desc_pronto) || 0;
+          it.desc_efectivo_credito = Number(f.desc_efectivo_credito) || 0; it.desc_efectivo_pronto = Number(f.desc_efectivo_pronto) || 0;
+        }
+        if (!it.producto) it.producto = f ? String(f.producto) : nombreProducto_(it.code);
+      });
+    } else items.forEach(function (it) { if (!it.producto) it.producto = nombreProducto_(it.code); });
+
+    var antes = { cajas: Number(ped.total_cajas) || 0, total: ped.total, pago: String(ped.pago), doc: String(ped.documento), factura: String(ped.factura || '') };
+    var t = ahora_();
+    ped.total_cajas = totalCajas;
+    ped.detalle_unidades = detalleUnidades_(items);
+    ped.tipo_pago = tipoPago; ped.pago = pagoDef.nombre; ped.dias_credito = diasCredito;
+    ped.documento = documento;
+    ped.nota = txt_(p.nota, 300);
+    ped.nivel_precio = mayor ? 'mayor' : 'menor'; ped.excepcion_precio = excepcion;
+    ped.total = items.some(function (it) { return it.precio; }) ? totalPorPago_(items, tipoPago) : '';
+    if (estado !== 'pendiente' && p.factura !== undefined) ped.factura = txt_(p.factura, 40);
+    ped.updated_at = t;
+    actualizar_('Pedidos', ped._fila, ped);
+    // productos: se reusan las filas del pedido; las que sobran quedan vacías (sin pedido)
+    var previoFila = {};
+    filas.forEach(function (f) { previoFila[String(f.code).toUpperCase()] = f; });
+    items.forEach(function (it, k) {
+      var pf = previoFila[it.code];
+      it.pedido_id = ped.id;
+      // entrega parcial: se conserva lo que el cliente ya recibió
+      it.entregadas = Math.min(it.cajas, pf ? Number(pf.entregadas) || 0 : 0);
+      it.devueltas = pf ? Number(pf.devueltas) || 0 : 0;
+      if (filas[k]) actualizar_('PedidoItems', filas[k]._fila, it); else agregar_('PedidoItems', it);
+    });
+    filas.slice(items.length).forEach(function (f) { actualizar_('PedidoItems', f._fila, { pedido_id: '', code: '', producto: '', cajas: 0 }); });
+
+    var cambios = [];
+    if (antes.cajas !== totalCajas) cambios.push('cajas ' + antes.cajas + ' → ' + totalCajas);
+    if (String(antes.total) !== String(ped.total)) cambios.push('total ' + (antes.total === '' ? '—' : antes.total + ' $') + ' → ' + (ped.total === '' ? '—' : ped.total + ' $'));
+    if (antes.pago !== ped.pago) cambios.push('pago ' + antes.pago + ' → ' + ped.pago);
+    if (antes.doc !== documento) cambios.push(antes.doc + ' → ' + documento);
+    if (antes.factura !== String(ped.factura || '')) cambios.push('factura ' + (ped.factura || '(sin número)'));
+    historial_(ped.id, ses, 'editado', cambios.join(' · ') || 'productos o nota');
+    return { ok: true, pedido: pedidoConItems_(ped, leer_('PedidoItems')), facturado: estado !== 'pendiente' };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function accionDespachadores_() {

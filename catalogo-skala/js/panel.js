@@ -113,6 +113,7 @@
     pedidos: { titulo: "Pedidos", roles: TOMAN, nav: "pedidos", render: vPedidos },
     entregas: { titulo: "Mis entregas", roles: ["despachador", "master", "admin"], nav: "entregas", render: vPedidos }, // Administración: "Despacho"
     pedido: { titulo: "Pedido", roles: TODOS, atras: true, render: vPedido },
+    editar: { titulo: "Editar pedido", roles: ["master", "admin"], atras: true, render: vEditarPedido },
     web: { titulo: "Pedido web", roles: TOMAN, nav: "pedidos", atras: "#/pedidos?tab=hacer", render: vWeb },
     carga: { titulo: "Total de carga", roles: ["despachador", "master", "admin"], atras: true, render: vCarga },
     clientes: { titulo: "Clientes", roles: TOMAN, nav: "clientes", render: vClientes },
@@ -1134,6 +1135,7 @@
     ruta: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19a2 2 0 1 0 0-.01M17 19a2 2 0 1 0 0-.01"/>',
     ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     ver: '<path d="M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5"/>',
+    editar: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/>',
   };
   const diaLocal = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
   const icoEnt = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICO_ENT[n]}</svg>`;
@@ -1176,6 +1178,7 @@
         </tbody><tfoot><tr><td>${cajas}</td><td><strong>Total</strong></td><td></td><td class="num"><strong>${items.some((it) => Number(it.precio) > 0) ? dinero(totalPorPago(items, tipo)) : "—"}</strong></td></tr></tfoot></table>
         <div class="ent-botones apr-botones">
           <button type="button" class="ent-ico" data-ap-copiar>${icoEnt("ver")}<span>Copiar datos</span></button>
+          <a class="ent-ico" href="#/editar/${encodeURIComponent(p.id)}">${icoEnt("editar")}<span>Editar</span></a>
           <a class="ent-ico" href="#/pedido/${encodeURIComponent(p.id)}">${icoEnt("ver")}<span>Ver pedido</span></a>
           ${acc.includes("confirmar") ? `<button type="button" class="btn btn-primary ent-acc es-entregar" data-ap="confirmar">${icoEnt("ok")}Aprobado</button>` : ""}
         </div>
@@ -1518,6 +1521,160 @@
     });
   }
 
+  /* ---------- Editar pedido (Administración): en cualquier momento hasta que pasa a cuentas por cobrar ---------- */
+  const puedeEditar = (p) => gestion() && !borradoPed(p) && ["pendiente", "confirmado", "en_ruta"].includes(p.estado);
+  const borradoPed = (p) => p.borrado === true || String(p.borrado) === "true";
+  let filtroEditar = "elegidos";
+  async function vEditarPedido(v, id, _q, vigente) {
+    let p = (pedidosEnMemoria() || []).find((x) => x.id === id);
+    if (!p || !p.items) p = (await api("pedido", { pedido_id: id })).pedido;
+    if (!vigente()) return;
+    if (!puedeEditar(p)) { v.innerHTML = `<p class="vacio-panel">Este pedido ya no se puede editar (${esc(nombreEstado(p.estado))}${p.estado === "entregado" ? ": está en cuentas por cobrar" : ""}).</p><a class="btn btn-ghost btn-bloque" href="#/pedido/${encodeURIComponent(id)}">Ver pedido</a>`; return; }
+    $("appTitulo").textContent = `Editar ${p.id}`;
+    const g0 = SkalaAPI.catalogoGuardado();
+    if (g0) sumarProductosNuevos(g0.productos);
+    const productos = [...BANOS.map((x) => ({ ...x, tipo: "banos" })), ...KITS.map((x) => ({ ...x, tipo: "kits" }))];
+    const cant = {};
+    (p.items || []).forEach((it) => { cant[it.code] = Number(it.cajas) || 0; });
+    // los que estaban en el pedido salen primero
+    productos.sort((a, b) => (cant[b.code] ? 1 : 0) - (cant[a.code] ? 1 : 0));
+    let precios = {};
+    const facturado = p.estado !== "pendiente";
+    const avisoEstado = p.estado === "en_ruta" ? " El pedido <strong>ya salió</strong>: avisá al que lo lleva si cambian las cajas." : "";
+    const tipo0 = p.tipo_pago || tipoPagoDe(p.pago);
+    v.innerHTML = `
+      <section class="tarjeta edit-cab">
+        <div class="fila-top"><h2 class="ped-titulo">${esc(p.negocio)}</h2>${chipEstado(p.estado)}</div>
+        <p class="ped-det">${esc(p.id)} · ${esc(p.vendedor)} · ${esc(fechaLegible(p.fecha))}</p>
+        ${facturado ? `<p class="aviso-chico">Ya está <strong>facturado</strong>${p.factura ? ` (factura ${esc(p.factura)})` : ""}. Si cambiás productos o precios, corregí también la factura.${avisoEstado}</p>` : ""}
+        <p class="nota-chica">Los datos del cliente (RIF, teléfono, dirección) se corrigen en <a href="#/cliente/${encodeURIComponent(p.cliente_id)}">su ficha</a>.</p>
+      </section>
+      <div class="buscador"><input type="search" id="xBuscar" placeholder="Buscar producto o código" autocomplete="off" enterkeyhint="search" /></div>
+      <div class="periodos" id="xFiltros">${[["elegidos", "En el pedido"], ["todos", "Agregar"], ["banos", "Baños"], ["kits", "Kits"]].map(([k, t]) =>
+        `<button type="button" class="tab${k === filtroEditar ? " active" : ""}" data-f="${k}">${t}</button>`).join("")}</div>
+      <ul class="grilla-prod" id="xLista">${productos.map((x) => `
+        <li class="pcard" data-code="${x.code}" data-tipo="${x.tipo}" data-texto="${esc((x.name + " " + x.code + " " + x.line).toLowerCase())}">
+          <button type="button" class="pcard-tap" data-act="plus" aria-label="Sumar una caja de ${esc(x.name)}">
+            ${fotoHTML(x.code, { ancho: 64, alto: 51 })}
+            <strong>${esc(x.name)}</strong>
+            <span class="pcard-sub">${x.code} · ${esc(textoUnidades(x))}</span>
+            <span class="pcard-precio" data-precio></span>
+          </button>
+          <b class="pcard-n" aria-hidden="true"></b>
+          <div class="pcard-qty">
+            <button type="button" class="qty-btn" data-act="minus" aria-label="Restar una caja de ${esc(x.name)}">−</button>
+            <input class="qty-input" type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" aria-label="Cajas de ${esc(x.name)}" />
+            <button type="button" class="qty-btn" data-act="plus" aria-label="Sumar una caja de ${esc(x.name)}">+</button>
+          </div>
+        </li>`).join("")}</ul>
+      <p class="vacio-panel" id="xVacio" hidden>No hay productos con ese filtro.</p>
+      <form id="fEditar" class="tarjeta" novalidate>
+        <p class="nota-chica" id="xNivel"></p>
+        <label class="check excepcion" id="xMayorWrap"><input type="checkbox" id="xMayor"${p.excepcion_precio ? " checked" : ""} /> Precio al mayor (excepción para este cliente)</label>
+        <fieldset class="pay"><legend>Documento</legend>
+          ${["Nota de entrega", "Factura"].map((d) => `<label class="pay-opt"><input type="radio" name="xDoc" value="${d}"${(p.documento || "Nota de entrega") === d ? " checked" : ""} /> ${d}</label>`).join("")}
+        </fieldset>
+        <label class="field field-full"><span>Forma de pago</span><select id="xPago">${PAGOS.map((x) => `<option value="${x.id}"${x.id === tipo0 ? " selected" : ""}>${esc(x.nombre)}</option>`).join("")}</select></label>
+        <label class="field field-full" id="xDiasWrap"><span>Días de crédito</span><input id="xDias" type="number" inputmode="numeric" min="1" max="180" value="${p.dias_credito || ""}" placeholder="ej. 30" /></label>
+        ${facturado ? `<label class="field field-full"><span>N° de factura</span><input id="xFactura" maxlength="40" autocomplete="off" value="${esc(p.factura || "")}" placeholder="ej. 000123" /></label>` : ""}
+        <label class="field field-full"><span>Nota</span><textarea id="xNota" rows="2" maxlength="300" placeholder="Opcional">${esc(p.nota || "")}</textarea></label>
+        <p class="form-warn" id="xError" hidden></p>
+      </form>
+      <div class="barra-accion" id="xBarra">
+        <div><strong id="xTotal">0 cajas</strong><span id="xDetalle"></span></div>
+        <a class="btn btn-ghost" href="#/pedido/${encodeURIComponent(p.id)}">Cancelar</a>
+        <button type="button" class="btn btn-primary" id="btnGuardarEdicion">Guardar</button>
+      </div>`;
+    const lista = $("xLista");
+    const total = () => Object.values(cant).reduce((a, n) => a + n, 0);
+    const pagoSel = () => $("xPago").value;
+    const pintar = () => {
+      const t = total();
+      const nivel = nivelPrecio(t, $("xMayor").checked);
+      // si no cambia el nivel (mayor/menor), se mantiene el precio con que se tomó el pedido
+      const fijo = (code) => { const v0 = (p.items || []).find((it) => it.code === code); return v0 && Number(v0.precio) > 0 && nivel === (p.nivel_precio || "menor") ? v0 : null; };
+      const conPrecio = Object.entries(cant).filter(([, n]) => n > 0).map(([code, cajas]) => { const f = fijo(code); return f ? { ...f, cajas } : conPrecios([{ code, cajas }], precios, nivel)[0]; });
+      const monto = totalPorPago(conPrecio, pagoSel());
+      lista.querySelectorAll(".pcard").forEach((li) => {
+        const code = li.dataset.code, q = cant[code] || 0;
+        const inp = li.querySelector(".qty-input");
+        if (document.activeElement !== inp) inp.value = q;
+        li.classList.toggle("elegido", q > 0);
+        li.querySelector(".pcard-n").textContent = q ? String(q) : "";
+        const f = fijo(code);
+        const it = f ? { ...f, cajas: 1 } : conPrecios([{ code, cajas: 1 }], precios, nivel)[0];
+        const u = precioUnitario(it, pagoSel());
+        li.querySelector("[data-precio]").textContent = u ? `${dinero(u)} / caja` : "";
+      });
+      const n = Object.values(cant).filter((x) => x > 0).length;
+      $("xTotal").textContent = `${t} caja${t === 1 ? "" : "s"}${monto ? " · " + dinero(monto) : ""}`;
+      $("xDetalle").textContent = ` · ${n} producto${n === 1 ? "" : "s"}`;
+      $("xNivel").textContent = nivel === "mayor" ? (t >= CAJAS_MAYOR ? `Precio al mayor (${t} cajas).` : "Precio al mayor por excepción.") : `Precio al por menor · desde ${CAJAS_MAYOR} cajas, al mayor.`;
+      $("xMayorWrap").hidden = t >= CAJAS_MAYOR;
+      $("xDiasWrap").hidden = !(pagoPorId(pagoSel()) || {}).credito;
+      $("btnGuardarEdicion").disabled = !t;
+      filtrar();
+    };
+    const filtrar = () => {
+      const q = $("xBuscar").value.trim().toLowerCase();
+      let vis = 0;
+      lista.querySelectorAll(".pcard").forEach((li) => {
+        const okF = filtroEditar === "todos" || li.dataset.tipo === filtroEditar || (filtroEditar === "elegidos" && (cant[li.dataset.code] || 0) > 0);
+        const ok = okF && (!q || li.dataset.texto.includes(q));
+        li.hidden = !ok; if (ok) vis++;
+      });
+      $("xVacio").hidden = !!vis;
+    };
+    const fijar = (code, n) => { n = Math.max(0, Math.min(9999, Math.floor(Number(n) || 0))); if (n) cant[code] = n; else delete cant[code]; pintar(); };
+    lista.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-act]");
+      if (!b) return;
+      const li = b.closest(".pcard");
+      fijar(li.dataset.code, (cant[li.dataset.code] || 0) + (b.dataset.act === "plus" ? 1 : -1));
+      if (b.dataset.act === "plus") { li.classList.remove("pulso"); void li.offsetWidth; li.classList.add("pulso"); }
+    });
+    lista.addEventListener("input", (e) => { if (e.target.classList.contains("qty-input")) fijar(e.target.closest(".pcard").dataset.code, e.target.value); });
+    lista.addEventListener("focusout", (e) => { if (e.target.classList.contains("qty-input")) pintar(); });
+    $("xBuscar").addEventListener("input", filtrar);
+    $("xFiltros").addEventListener("click", (e) => {
+      const t = e.target.closest("[data-f]");
+      if (!t) return;
+      filtroEditar = t.dataset.f;
+      $("xFiltros").querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
+      filtrar();
+    });
+    $("xPago").addEventListener("change", pintar);
+    $("xMayor").addEventListener("change", pintar);
+    $("btnGuardarEdicion").addEventListener("click", async () => {
+      const err = $("xError");
+      const credito = !!(pagoPorId(pagoSel()) || {}).credito;
+      const dias = Math.floor(Number($("xDias").value));
+      const doc = (document.querySelector('input[name="xDoc"]:checked') || {}).value;
+      const falla = !total() ? "El pedido necesita al menos un producto." : credito && !(dias >= 1 && dias <= 180) ? "Indicá los días de crédito (1 a 180)." : "";
+      if (falla) { err.textContent = falla; err.hidden = false; err.scrollIntoView({ block: "center" }); return; }
+      err.hidden = true;
+      const prodMap = allProductsMap();
+      const items = Object.entries(cant).filter(([, n]) => n > 0).map(([code, cajas]) => {
+        const x = prodMap[code] || {};
+        return { code, producto: x.name || code, cajas, unidades_caja: x.unidades || "", unidad: x.unidad || "unidades" };
+      });
+      const btn = $("btnGuardarEdicion");
+      btn.disabled = true; btn.classList.add("ocupado");
+      try {
+        const r = await api("editarPedido", { pedido_id: p.id, items, documento: doc, tipo_pago: pagoSel(), dias_credito: credito ? dias : 0,
+          nota: $("xNota").value.trim(), precio_mayor: $("xMayor").checked, ...(facturado ? { factura: $("xFactura").value.trim() } : {}) });
+        guardarEnMemoria(r.pedido);
+        toast(r.facturado ? `${p.id} editado · recordá corregir la factura` : `${p.id} editado`);
+        ir(`#/pedido/${encodeURIComponent(p.id)}`);
+      } catch (e2) {
+        err.textContent = e2.message; err.hidden = false; err.scrollIntoView({ block: "center" });
+        btn.disabled = false; btn.classList.remove("ocupado");
+      }
+    });
+    pintar();
+    return preciosYStock((m) => { if (vigente() && $("xLista") === lista) { precios = m; pintar(); } }, null).then((m) => { if (vigente() && $("xLista") === lista) { precios = m; pintar(); } });
+  }
+
   /* ---------- Detalle de pedido ---------- */
   const ETIQUETAS = { confirmar: "Aprobar", en_ruta: "Salió en ruta", entregado: "Entregado", reasignar: "Cambiar despachador", cancelar: "Anular pedido", reabrir: "Volver a En proceso",
     cobrar: "Marcar cancelado (pagado)", conciliar: "Conciliar pago (recibido)", rechazar: "Pago no recibido", desconciliar: "Deshacer conciliación" };
@@ -1586,12 +1743,13 @@
           ${p.motivo ? `<dt>Motivo</dt><dd>${esc(p.motivo)}</dd>` : ""}
         </dl>
       </section>
+      ${puedeEditar(p) ? `<a class="btn btn-ghost btn-bloque" id="btnEditarPed" href="#/editar/${encodeURIComponent(p.id)}">Editar pedido</a>` : ""}
       <button type="button" class="btn btn-ghost btn-bloque" id="btnReenviar">Reenviar al grupo de WhatsApp</button>
       ${puedeBorrar(roles(), yo().id, p) ? '<button type="button" class="btn btn-ghost btn-bloque btn-peligro" id="btnBorrarPed">Borrar pedido</button>' : ""}
       ${p.historial === null ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3>${spin("Cargando historial…")}</section>` : ""}
       ${p.historial && p.historial.length ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3><ol class="historial">${p.historial.map((h) =>
         `<li><strong>${esc({ creado: "Enviado (en proceso)", reasignado: "Despachador cambiado", pendiente: "Vuelto a En proceso", confirmado: "Aprobado",
-          cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", borrado: "Borrado", entregado: "Entregado", entrega_parcial: "Entrega parcial", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
+          cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", borrado: "Borrado", entregado: "Entregado", entrega_parcial: "Entrega parcial", editado: "Editado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
 
     $("btnReenviar").addEventListener("click", () => enviarAlGrupo(mensajeGrupo(p, c)));
     const bb = $("btnBorrarPed");

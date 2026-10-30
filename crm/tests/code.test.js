@@ -290,6 +290,38 @@ test("entrega con diferencias: lo que falta se entrega después o vuelve al dep�
   assert.equal(fis("BC-01").fisico, 16);
 });
 
+test("Administración edita el pedido (productos, pago, documento, factura) antes de que salga", () => {
+  const g = preparar();
+  const ta = conPrecios(g), tv = login(g);
+  const id = pedir(g, tv, { tipo_pago: "pronto" }).pedido.id; // BC-01 ×2 (9), KT-01 ×1 (18) = 36
+  const base = { action: "editarPedido", token: ta, pedido_id: id, documento: "Nota de entrega", tipo_pago: "pronto", nota: "llamar antes" };
+  assert.equal(g.post({ ...base, token: tv, items: [{ code: "BC-01", cajas: 1 }] }).code, "forbidden");
+  assert.equal(g.post({ ...base, items: [] }).code, "empty");
+  assert.equal(g.post({ ...base, tipo_pago: "credito", items: [{ code: "BC-01", cajas: 1 }] }).code, "credito");
+  assert.equal(g.post({ ...base, items: [{ code: "BC-01", cajas: 1 }, { code: "bc-01", cajas: 2 }] }).code, "items");
+  // cambia cantidades, quita el kit y agrega Mais Cachos (sin precio cargado)
+  let r = g.post({ ...base, items: [{ code: "BC-01", producto: "Babosa", cajas: 3 }, { code: "BC-06", producto: "Mais Cachos", cajas: 2, unidades_caja: 6, unidad: "unidades" }] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.pedido.items.map((it) => [it.code, it.cajas, it.precio]), [["BC-01", 3, 10], ["BC-06", 2, 0]]);
+  assert.deepEqual([r.pedido.total_cajas, r.pedido.total, r.pedido.nota, r.pedido.pago], [5, 27, "llamar antes", "Pronto pago"]);
+  assert.match(g.tabla("Historial").at(-1).detalle, /cajas 3 → 5 · total 36 \$ → 27 \$/);
+  // la fila que sobró quedó vacía; el pedido sigue con 2 productos
+  assert.equal(g.tabla("PedidoItems").filter((x) => x.pedido_id === id).length, 2);
+  // factura exige RIF del cliente (lo tiene)
+  r = g.post({ ...base, documento: "Factura", tipo_pago: "credito", dias_credito: 30, items: [{ code: "BC-01", cajas: 15 }] });
+  assert.deepEqual([r.pedido.nivel_precio, r.pedido.items[0].precio, r.pedido.total, r.pedido.dias_credito, r.pedido.documento], ["mayor", 8, 120, 30, "Factura"]);
+  // aprobado (facturado): se puede corregir con n° de factura; en ruta ya no
+  g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", factura: "100" });
+  r = g.post({ ...base, factura: "101", items: [{ code: "BC-01", cajas: 14 }], precio_mayor: true });
+  assert.deepEqual([r.ok, r.facturado, r.pedido.factura, r.pedido.excepcion_precio, r.pedido.items[0].precio], [true, true, "101", true, 8]);
+  // en ruta todavía se puede; en cuentas por cobrar (entregado) ya no
+  g.post({ action: "estado", token: ta, pedido_id: id, estado: "en_ruta" });
+  r = g.post({ ...base, items: [{ code: "BC-01", cajas: 10 }, { code: "KT-01", cajas: 1 }] });
+  assert.deepEqual([r.ok, r.pedido.estado, r.pedido.total], [true, "en_ruta", 108]);
+  g.post({ action: "estado", token: ta, pedido_id: id, estado: "entregado" });
+  assert.match(g.post({ ...base, items: [{ code: "BC-01", cajas: 1 }] }).error, /cuentas por cobrar/);
+});
+
 test("reasignar despachador y reabrir (solo gestión)", () => {
   const g = preparar();
   const ta = login(g, "ana", "Ana*2222"), tp = login(g, "pedro", "Pedro6666");
