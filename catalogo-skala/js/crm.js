@@ -27,6 +27,7 @@
     const s = SkalaAPI.sesion();
     if (s && puedeTomarPedidos(s.usuario.roles || s.usuario.rol)) return irAlPanel("nuevo");
     if (typeof closeModal === "function") closeModal();
+    if (typeof cargarVendedores === "function") cargarVendedores(); // para tener el WhatsApp del vendedor asignado
     $("modoModal").hidden = false;
     document.body.classList.add("modal-open");
     $("modoModal").querySelector(".modal-box").focus({ preventScroll: true });
@@ -36,7 +37,8 @@
     pintarSesion();
     $("btnCuenta").addEventListener("click", () => irAlPanel(SkalaAPI.sesion() ? "inicio" : "ingresar"));
     $("footAcceso").addEventListener("click", (e) => { e.preventDefault(); irAlPanel("inicio"); });
-    $("btnModoCliente").addEventListener("click", () => { cerrarModo(); openModal(); });
+    $("btnModoCliente").addEventListener("click", () => { cerrarModo(); enviarDirectoVendedor(); });
+    $("btnModoDetalles").addEventListener("click", () => { cerrarModo(); openModal(); });
     $("btnModoVendedor").addEventListener("click", () => irAlPanel("nuevo"));
     $("modoModal").addEventListener("click", (e) => {
       if (e.target.id === "modoModal" || e.target.closest("[data-cerrar]")) cerrarModo();

@@ -692,3 +692,31 @@ html[data-tema="oscuro"] .chip-parcial { background: rgba(242, 178, 92, 0.18); c
 .ent-sobrante { margin: 14px 2px 0; text-align: center; }
 .edit-cab .aviso-chico { margin: 8px 0 0; }
 #fEditar { margin-top: 12px; }
+
+/* ---------- Precio personalizado por caja (acuerdo con el cliente) ---------- */
+.box-personalizado {
+  margin-top: 8px; padding: 10px 12px; border-radius: 12px;
+  background: var(--crema-2); border: 1px solid var(--borde-suave);
+}
+.fila-precio-global {
+  display: flex; align-items: flex-end; gap: 8px; margin-bottom: 6px;
+}
+.fila-precio-global .field { flex: 1 1 auto; margin: 0; }
+.btn-chico { min-height: 44px; padding: 0 14px; font-size: 0.9rem; white-space: nowrap; }
+.resumen-items li.con-precio-manual {
+  flex-wrap: wrap; gap: 6px 8px; align-items: center;
+}
+.caja-precio-manual {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+}
+.lbl-precio-caja {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: 10px; border: 1px solid var(--borde);
+  background: var(--superficie); font-size: 0.92rem; font-weight: 600;
+}
+.lbl-precio-caja span { color: var(--tinta-suave); }
+.inp-precio-caja {
+  width: 68px; height: 34px; border: 0; background: transparent;
+  color: var(--tinta); font: inherit; font-size: 0.95rem; text-align: right; outline: none;
+}
+#xItemsManual { margin-top: 8px; }

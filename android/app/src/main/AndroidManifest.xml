@@ -28,6 +28,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- "Código de pedido para vendedor" (WhatsApp): abre el panel de la app con el pedido cargado.
+                 Para que Android lo abra directo sin preguntar, ver LEEME.md → "Enlaces de pedidos". -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="skala-venezuela.netlify.app" android:path="/panel.html" />
+            </intent-filter>
         </activity>
 
         <provider

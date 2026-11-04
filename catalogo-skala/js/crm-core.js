@@ -66,7 +66,7 @@ function mensajeGrupo(ped, c) {
       `• ${it.cajas} × ${it.producto} (${it.code})${it.total_unidades ? ` = ${it.total_unidades} ${it.unidad}` : ""}${conPrecio ? ` · ${dinero(precioUnitario(it, tipo))} c/u` : ""}`),
     "",
     `*Total: ${ped.total_cajas} caja${Number(ped.total_cajas) === 1 ? "" : "s"}*${ped.detalle_unidades ? ` · ${ped.detalle_unidades}` : ""}`,
-    conPrecio ? `*Monto: ${dinero(totalPorPago(ped.items, tipo))}* · precio ${ped.nivel_precio === "mayor" ? "al mayor" : "al por menor"}${ped.excepcion_precio ? " (excepción)" : ""}` : null,
+    conPrecio ? `*Monto: ${dinero(totalPorPago(ped.items, tipo))}* · precio ${ped.nivel_precio === "personalizado" ? "personalizado" : ped.nivel_precio === "mayor" ? "al mayor" : "al por menor"}${ped.excepcion_precio && ped.nivel_precio !== "personalizado" ? " (excepción)" : ""}` : null,
     ped.pago ? `Pago: ${ped.pago}${Number(ped.dias_credito) > 0 ? ` (${ped.dias_credito} días)` : ""}` : null,
     ped.documento ? `Documento: ${ped.documento}` : null,
     ped.nota ? `Nota: ${ped.nota}` : null,
@@ -268,9 +268,13 @@ function tipoPagoDe(pago) {
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 function nivelPrecio(totalCajas, excepcion) { return totalCajas >= CAJAS_MAYOR || excepcion ? "mayor" : "menor"; }
 
-/* Agrega precio y descuentos a los items (copia), según nivel */
-function conPrecios(items, precios, nivel) {
+/* Agrega precio y descuentos a los items (copia), según nivel o precios personalizados por caja */
+function conPrecios(items, precios, nivel, personalizados) {
   return (items || []).map((it) => {
+    const manual = r2(Number((personalizados && personalizados[it.code]) ?? it.precio_manual) || 0);
+    if (manual > 0) {
+      return { ...it, precio: manual, precio_manual: manual, desc_pronto: 0, desc_efectivo_credito: 0, desc_efectivo_pronto: 0, personalizado: true };
+    }
     const pr = (precios || {})[it.code] || {};
     const may = nivel === "mayor";
     const precio = may ? (Number(pr.mayor) || Number(pr.menor) || 0) : (Number(pr.menor) || 0);

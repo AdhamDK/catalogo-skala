@@ -10,6 +10,11 @@
 /* -------------------- CONFIGURACIÓN -------------------- */
 /* Número de WhatsApp de la empresa: código de país + número, sin "+", espacios ni guiones. */
 const WHATSAPP_NUMBER = "584247042169";
+/* Vendedor asignado por defecto: al tocar "Cliente" el pedido va directo a su WhatsApp.
+   Se busca por nombre en la lista de vendedores del CRM; si no aparece, se usa WHATSAPP_NUMBER. */
+const VENDEDOR_ASIGNADO = "kevin";
+/* Panel del equipo (para el "Código de pedido para vendedor" si la página no se abre desde la web) */
+const PANEL_URL = "https://skala-venezuela.netlify.app/panel.html";
 const MIN_CAJAS = 40;   // mínimo de cajas por cliente
 const META_CAJAS = 100; // meta de cajas
 const STORAGE_KEY = "skala_pedido_v1";
@@ -423,7 +428,8 @@ function lanzarConfeti() {
 function enviarWhatsappA(i) {
   const v = (pintarListaWa.lista || [])[i];
   if (!v || !envio) return;
-  const msg = mensajeWeb({ ...envio.datos, vendedor: v.oficina ? "" : v.nombre });
+  const base = mensajeWeb({ ...envio.datos, vendedor: v.oficina ? "" : v.nombre });
+  const msg = envio.modo === "whatsapp" ? base + "\n\n*Código de pedido para vendedor:*\n" + linkVendedor(envio.datos) : base;
   const numero = v.wa || WHATSAPP_NUMBER;
   window.open(`https://wa.me/${numero}?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
   // si el pedido ya llegó a Skala, queda asignado a ese vendedor
@@ -431,6 +437,50 @@ function enviarWhatsappA(i) {
   envio.enviados.add(i);
   pintarListaWa();
 }
+/* "Cliente": manda el pedido directo al WhatsApp del vendedor asignado (sin abrir "Tu pedido") */
+function vendedorAsignado() {
+  const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const buscado = norm(VENDEDOR_ASIGNADO);
+  return vendedores.find((v) => cliente.vendedor_id && v.id === cliente.vendedor_id && v.whatsapp)
+    || vendedores.find((v) => v.whatsapp && norm(v.nombre).split(/\s+/).includes(buscado))
+    || null;
+}
+/* Enlace para que el vendedor monte el pedido en el panel con los productos ya cargados.
+   Ej.: https://skala-venezuela.netlify.app/panel.html#/nuevo?p=BC-01:3,KT-02:5&pago=credito&ref=WEB-AB12CD */
+function linkVendedor(d) {
+  const base = /^https?:$/.test(location.protocol) ? new URL("panel.html", location.href).href : PANEL_URL;
+  const q = new URLSearchParams();
+  q.set("p", d.items.map((it) => `${it.code}:${it.cajas}`).join(","));
+  if (d.tipo_pago) q.set("pago", d.tipo_pago);
+  if (d.ref) q.set("ref", d.ref);
+  const c = d.cliente || {};
+  const tel = String(c.telefono || "").replace(/\D/g, "");
+  if (tel.length >= 7) q.set("tel", tel);
+  if (c.cliente_id) q.set("cid", c.cliente_id);
+  if (c.negocio) q.set("neg", c.negocio);
+  if (c.contacto) q.set("con", c.contacto);
+  if (c.rif_cedula) q.set("rif", c.rif_cedula);
+  if (c.direccion) q.set("dir", c.direccion);
+  if (c.latitud !== "" && c.latitud != null && c.longitud !== "" && c.longitud != null) {
+    q.set("lat", c.latitud);
+    q.set("lng", c.longitud);
+  }
+  return `${base}#/nuevo?${q.toString().replace(/%3A/gi, ":").replace(/%2C/gi, ",")}`;
+}
+function enviarDirectoVendedor() {
+  if (totalCajas() <= 0) return;
+  fillCliente();
+  const d = datosPedidoWeb();
+  if (!d.items.length) return;
+  const elegido = (document.querySelector('input[name="pagoWeb"]:checked') || {}).value;
+  d.tipo_pago = elegido || cliente.tipo_pago || "credito";
+  const v = vendedorAsignado();
+  const msg = mensajeWeb({ ...d, vendedor: v ? v.nombre : "" }) + "\n\n*Código de pedido para vendedor:*\n" + linkVendedor(d);
+  const numero = (v && v.whatsapp) || WHATSAPP_NUMBER;
+  window.open(`https://wa.me/${numero}?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
+  cargarVendedores(); // refresca la lista para la próxima vez
+}
+
 function cerrarEnvio() {
   const m = $id("listoModal");
   if (m.hidden) return false;

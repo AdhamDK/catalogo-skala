@@ -76,6 +76,8 @@
   const K_CARGA = "skala_carga";          // pedidos elegidos para ver el total de carga
   const K_WEB = "skala_tomando_web";      // pedido web que se está tomando (id, cliente, forma de pago)
   const K_INV = "skala_inv_borrador";     // carga de inventario a medias: { entrada: {code: n}, conteo: {code: n} }
+  const K_ENLACE = "skala_enlace_wa";     // pedido que llegó por WhatsApp con "Código de pedido para vendedor": { ref, tipo_pago, tel }
+  const K_PRECIOS_MANUAL = "skala_precios_manual"; // precios personalizados por caja { code: precio } en el pedido en curso
   const TODOS = ["master", "admin", "vendedor", "despachador"];
   const TOMAN = ["master", "admin", "vendedor"];
   const rol = () => (sesion() || { usuario: {} }).usuario.rol; // el de más rango
@@ -258,11 +260,14 @@
 
   const telLink = (t) => String(t || "").replace(/[^\d+]/g, "");
   const chipEstado = (e) => `<span class="chip-estado est-${esc(e)}">${esc(nombreEstado(e))}</span>`;
+  const textoNivelPrecio = (p) => p.nivel_precio === "personalizado" ? "precio personalizado" : `precio ${p.nivel_precio === "mayor" ? "al mayor" : "al por menor"}${p.excepcion_precio ? " (excepción)" : ""}`;
 
   /* -------------------- Carrito (compartido con el catálogo) -------------------- */
   const carrito = () => leerLS(K_CARRITO, {}) || {};
   const guardarCarrito = (c) => guardarLS(K_CARRITO, c);
   const cajasCarrito = () => Object.values(carrito()).reduce((a, b) => a + (Number(b) || 0), 0);
+  const preciosManuales = () => leerLS(K_PRECIOS_MANUAL, {}) || {};
+  const guardarPreciosManuales = (m) => guardarLS(K_PRECIOS_MANUAL, m || {});
 
   /* ==================== PÁGINAS ==================== */
 
@@ -515,7 +520,7 @@
       filtrar();
     });
     $("nVaciar").addEventListener("click", async () => {
-      if (await hoja({ titulo: "¿Vaciar el pedido?", cuerpo: '<p class="modal-sub">Se quitan todos los productos elegidos.</p>', ok: "Vaciar" })) { guardarCarrito({}); guardarLS(K_MAYOR, false); pintar(); }
+      if (await hoja({ titulo: "¿Vaciar el pedido?", cuerpo: '<p class="modal-sub">Se quitan todos los productos elegidos.</p>', ok: "Vaciar" })) { guardarCarrito({}); guardarLS(K_MAYOR, false); borrarLS(K_PRECIOS_MANUAL); pintar(); }
     });
     $("nSeguir").addEventListener("click", (e) => { e.preventDefault(); irAEnviar(); });
     enlazarAvisoWeb();
@@ -607,8 +612,55 @@
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
   }
 
+  /* ---------- Nuevo pedido desde el "Código de pedido para vendedor" (WhatsApp) ----------
+     #/nuevo?p=BC-01:3,KT-02:5&pago=credito&ref=WEB-AB12CD&tel=584121234567
+     Carga las cantidades en el carrito y sigue con el paso 1 (cliente). */
+  async function importarEnlace(q) {
+    const map = allProductsMap();
+    const nuevo = {}, desconocidos = [];
+    String(q.get("p") || "").split(",").forEach((par) => {
+      const i = par.lastIndexOf(":");
+      if (i < 1) return;
+      const code = par.slice(0, i).trim().toUpperCase();
+      const cajas = Math.floor(Number(par.slice(i + 1)));
+      if (!(cajas > 0 && cajas <= 9999)) return;
+      if (map[code]) nuevo[code] = (nuevo[code] || 0) + cajas; else desconocidos.push(code);
+    });
+    const seguir = () => location.replace("#/nuevo");
+    if (!Object.keys(nuevo).length) { toast("El código de pedido no trae productos válidos."); return seguir(); }
+    const aMedias = cajasCarrito() > 0 || clienteElegido() || tomandoWeb();
+    if (aMedias) {
+      const ok = await hoja({ titulo: "¿Reemplazar el pedido actual?", cuerpo: '<p class="modal-sub">Tenés un pedido a medias en este teléfono. ¿Querés reemplazarlo por el que llegó por WhatsApp?</p>', ok: "Reemplazar" });
+      if (!ok) return seguir();
+    }
+    guardarCarrito(nuevo);
+    guardarLS(K_MAYOR, false);
+    borrarLS(K_PRECIOS_MANUAL);
+    borrarLS(K_CLIENTE);
+    borrarLS(K_WEB);
+    const pago = q.get("pago") || "";
+    const tel = String(q.get("tel") || "").replace(/\D/g, "").slice(0, 15);
+    guardarLS(K_ENLACE, { ref: String(q.get("ref") || "").slice(0, 20), tipo_pago: pagoPorId(pago) ? pago : "", tel });
+    // si el enlace también trae datos completos del cliente, dejarlo elegido de una vez
+    const cEnlace = {
+      id: q.get("cid") || undefined,
+      negocio: (q.get("neg") || "").trim(),
+      contacto: (q.get("con") || "").trim(),
+      rif_cedula: (q.get("rif") || "").trim(),
+      telefono: tel ? tel.replace(/^58/, "0") : "",
+      direccion: (q.get("dir") || "").trim(),
+      latitud: q.get("lat") || "",
+      longitud: q.get("lng") || "",
+    };
+    if (!validarCliente(cEnlace).length) fijarCliente(cEnlace);
+    const total = Object.values(nuevo).reduce((a, b) => a + b, 0);
+    toast(`Pedido cargado: ${total} caja${total === 1 ? "" : "s"}` + (desconocidos.length ? ` · no existen: ${desconocidos.join(", ")}` : ""));
+    seguir();
+  }
+
   /* ---------- Nuevo pedido: 1) cliente (buscar / nuevo) ---------- */
-  function vNuevoCliente(v) {
+  function vNuevoCliente(v, _p, q) {
+    if (q && q.has("p")) return importarEnlace(q);
     let modo = clienteElegido() ? "ficha" : "buscar"; // buscar · ficha · form
     let enEdicion = null;
     const pintar = () => {
@@ -647,14 +699,23 @@
           }, 350);
         });
         $("btnClienteNuevo").addEventListener("click", () => { enEdicion = null; modo = "form"; pintar(); });
+        // pedido que llegó por WhatsApp con el teléfono del cliente: buscarlo una vez
+        const enl = leerLS(K_ENLACE, null);
+        if (enl && enl.tel && !enl.buscado) {
+          guardarLS(K_ENLACE, { ...enl, buscado: true });
+          $("cBuscar").value = enl.tel.replace(/^58/, "0");
+          $("cBuscar").dispatchEvent(new Event("input"));
+        }
         $("cBuscar").focus();
         return;
       }
       if (modo === "ficha") {
+        const nCajas = cajasCarrito();
         v.innerHTML = `${pasos(1)}${avisoWeb()}${fichaCliente(cli)}
           <div class="barra-accion">
             <button type="button" class="btn btn-ghost" id="btnCambiarCli">Cambiar cliente</button>
-            <a class="btn btn-primary" href="#/nuevo/productos" id="btnAProductos">Continuar a productos</a>
+            <a class="btn ${nCajas > 0 ? "btn-ghost" : "btn-primary"}" href="#/nuevo/productos" id="btnAProductos">${nCajas > 0 ? `Productos (${nCajas})` : "Continuar a productos"}</a>
+            ${nCajas > 0 ? '<a class="btn btn-primary" href="#/nuevo/enviar" id="btnAEnviar">Ir a enviar</a>' : ""}
           </div>`;
         enlazarAvisoWeb();
         $("btnLapiz").addEventListener("click", () => { enEdicion = cli; modo = "form"; pintar(); });
@@ -727,8 +788,10 @@
     const total = items.reduce((a, it) => a + it.cajas, 0);
     const unidades = {};
     items.forEach((it) => { if (it.total_unidades) unidades[it.unidad] = (unidades[it.unidad] || 0) + it.total_unidades; });
-    let precios = await preciosYStock((m) => { precios = m; if ($("fEnviar")) pintarPrecios(); });
+    let precios = await preciosYStock((m) => { precios = m; if ($("fEnviar")) pintarPrecios(true); });
     const web = tomandoWeb();
+    let manuales = preciosManuales();
+    let usarManual = Object.keys(manuales).some((k) => Number(manuales[k]) > 0);
     v.innerHTML = `${pasos(3)}${avisoWeb()}
       <a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>
       <section class="tarjeta">
@@ -736,7 +799,17 @@
         <ul class="resumen-items" id="eItems"></ul>
         <p class="total-ped"><strong>Total: ${total} caja${total === 1 ? "" : "s"}</strong> · ${Object.entries(unidades).map(([u, n]) => `${n} ${esc(u)}`).join(" + ")}</p>
         <p class="nota-chica" id="eNivel"></p>
-        ${total < CAJAS_MAYOR ? `<label class="check excepcion"><input type="checkbox" id="eMayor"${excepcionMayor() ? " checked" : ""} /> Dar precio al mayor (excepción para este cliente)</label>` : ""}
+        ${total < CAJAS_MAYOR ? `<label class="check excepcion" id="eMayorWrap"${usarManual ? " hidden" : ""}><input type="checkbox" id="eMayor"${excepcionMayor() ? " checked" : ""} /> Dar precio al mayor (excepción para este cliente)</label>` : ""}
+        <label class="check excepcion"><input type="checkbox" id="ePersonalizado"${usarManual ? " checked" : ""} /> Precio personalizado por caja (acuerdo con el cliente)</label>
+        <div id="eBoxPersonalizado" class="box-personalizado"${usarManual ? "" : " hidden"}>
+          <div class="fila-precio-global">
+            <label class="field"><span>Mismo precio por caja ($)</span>
+              <input id="ePrecioTodos" type="text" inputmode="decimal" autocomplete="off" placeholder="ej. 18,50" />
+            </label>
+            <button type="button" class="btn btn-ghost btn-chico" id="btnPrecioTodos">Aplicar a todo</button>
+          </div>
+          <p class="nota-chica">O escribí el precio ($/caja) en cada producto arriba. El monto acordado queda fijo sin rebajas adicionales por forma de pago.</p>
+        </div>
       </section>
       <form id="fEnviar" novalidate>
         <fieldset class="pay documento" id="fsDoc"><legend>¿El cliente quiere nota de entrega o factura? *</legend>
@@ -763,15 +836,39 @@
     const doc = () => (document.querySelector('input[name="eDoc"]:checked') || {}).value || "";
     const pagoSel = () => (document.querySelector('input[name="ePago"]:checked') || {}).value || "";
     const esCredito = () => !!(pagoPorId(pagoSel()) || {}).credito;
-    const conPrecio = () => conPrecios(items, precios, nivelPrecio(total, excepcionMayor()));
+    const mapaManualActivo = () => (usarManual ? manuales : null);
+    const conPrecio = () => conPrecios(items, precios, nivelPrecio(total, excepcionMayor()), mapaManualActivo());
     /* Montos de cada forma de pago (ej. Crédito 100 · Pronto pago 90 · Efectivo a crédito 70 · Efectivo pronto pago 60) */
-    function pintarPrecios() {
+    function pintarPrecios(rearmarLista = true) {
       const its = conPrecio();
+      const baseIts = conPrecios(items, precios, nivelPrecio(total, excepcionMayor()));
       const hayPrecio = its.some((it) => it.precio > 0);
       const tipo = pagoSel() || "credito";
-      $("eItems").innerHTML = its.map((it) => `<li class="con-foto"><span class="item-foto">${fotoHTML(it.code, { ancho: 36, alto: 36 })}</span><span>${it.cajas} × ${esc(it.producto)}${it.total_unidades ? ` <span class="ped-det">${it.total_unidades} ${esc(it.unidad)}</span>` : ""}</span><em>${it.precio ? `${dinero(precioUnitario(it, tipo))} c/u · <strong>${dinero(it.cajas * precioUnitario(it, tipo))}</strong>` : "sin precio"}</em></li>`).join("");
+      if (rearmarLista) {
+        $("eItems").innerHTML = its.map((it, idx) => {
+          const u = precioUnitario(it, tipo);
+          const baseU = precioUnitario(baseIts[idx] || it, tipo);
+          const valManual = manuales[it.code] !== undefined && manuales[it.code] > 0 ? String(manuales[it.code]) : "";
+          return `<li class="con-foto${usarManual ? " con-precio-manual" : ""}">
+            <span class="item-foto">${fotoHTML(it.code, { ancho: 36, alto: 36 })}</span>
+            <span>${it.cajas} × ${esc(it.producto)}${it.total_unidades ? ` <span class="ped-det">${it.total_unidades} ${esc(it.unidad)}</span>` : ""}</span>
+            ${usarManual
+              ? `<span class="caja-precio-manual"><label class="lbl-precio-caja"><span>$</span><input type="text" inputmode="decimal" autocomplete="off" class="inp-precio-caja" data-precio-code="${esc(it.code)}" value="${esc(valManual)}" placeholder="${baseU ? baseU.toFixed(2) : "0.00"}" aria-label="Precio por caja de ${esc(it.producto)}" /></label><em data-sub-code="${esc(it.code)}">${u ? `<strong>${dinero(it.cajas * u)}</strong>` : "sin precio"}</em></span>`
+              : `<em>${it.precio ? `${dinero(u)} c/u · <strong>${dinero(it.cajas * u)}</strong>` : "sin precio"}</em>`}
+          </li>`;
+        }).join("");
+      } else {
+        its.forEach((it) => {
+          const u = precioUnitario(it, tipo);
+          const elSub = $("eItems").querySelector(`[data-sub-code="${it.code}"]`);
+          if (elSub) elSub.innerHTML = u ? `<strong>${dinero(it.cajas * u)}</strong>` : "sin precio";
+        });
+      }
+      const tieneManual = usarManual && its.some((it) => it.personalizado);
       const nivel = nivelPrecio(total, excepcionMayor());
-      $("eNivel").textContent = nivel === "mayor" ? (total >= CAJAS_MAYOR ? "Precio al mayor." : "Precio al mayor por excepción.") : `Precio al por menor (menos de ${CAJAS_MAYOR} cajas).`;
+      $("eNivel").textContent = tieneManual
+        ? "Precio personalizado acordado con el cliente."
+        : nivel === "mayor" ? (total >= CAJAS_MAYOR ? "Precio al mayor." : "Precio al mayor por excepción.") : `Precio al por menor (menos de ${CAJAS_MAYOR} cajas).`;
       const sel = pagoSel();
       $("ePagos").innerHTML = totalesPorPago(its).map((pg) => `<label class="pay-opt pago-opt">
           <input type="radio" name="ePago" value="${pg.id}"${pg.id === sel ? " checked" : ""} />
@@ -781,15 +878,49 @@
         + (hayPrecio ? "" : '<p class="nota-chica">Todavía no hay precios cargados para estos productos.</p>');
     }
     enlazarAvisoWeb();
-    pintarPrecios();
+    pintarPrecios(true);
     if (web && web.tipo_pago && !pagoSel()) {
       const r0 = document.querySelector(`input[name="ePago"][value="${web.tipo_pago}"]`);
-      if (r0) { r0.checked = true; $("eCredito").hidden = !esCredito(); pintarPrecios(); }
+      if (r0) { r0.checked = true; $("eCredito").hidden = !esCredito(); pintarPrecios(true); }
       if (web.nota && !$("eNota").value) $("eNota").value = `Pedido web ${web.id}: ${web.nota}`;
     }
-    $("fsPago").addEventListener("change", (e) => { if (e.target.name === "ePago") { $("eCredito").hidden = !esCredito(); $("fsPago").classList.remove("falta"); pintarPrecios(); } });
+    // pedido que llegó por WhatsApp ("Código de pedido para vendedor"): forma de pago y referencia
+    const enl = web ? null : leerLS(K_ENLACE, null);
+    if (enl) {
+      if (enl.tipo_pago && !pagoSel()) {
+        const r1 = document.querySelector(`input[name="ePago"][value="${enl.tipo_pago}"]`);
+        if (r1) { r1.checked = true; $("eCredito").hidden = !esCredito(); pintarPrecios(true); }
+      }
+      if (enl.ref && !$("eNota").value) $("eNota").value = `Pedido por WhatsApp ${enl.ref}`;
+    }
+    $("fsPago").addEventListener("change", (e) => { if (e.target.name === "ePago") { $("eCredito").hidden = !esCredito(); $("fsPago").classList.remove("falta"); pintarPrecios(true); } });
     const may = $("eMayor");
-    if (may) may.addEventListener("change", () => { guardarLS(K_MAYOR, may.checked); pintarPrecios(); });
+    if (may) may.addEventListener("change", () => { guardarLS(K_MAYOR, may.checked); pintarPrecios(true); });
+    $("ePersonalizado").addEventListener("change", (e) => {
+      usarManual = e.target.checked;
+      $("eBoxPersonalizado").hidden = !usarManual;
+      if ($("eMayorWrap")) $("eMayorWrap").hidden = usarManual;
+      if (!usarManual) { manuales = {}; guardarPreciosManuales({}); $("ePrecioTodos").value = ""; }
+      pintarPrecios(true);
+    });
+    $("btnPrecioTodos").addEventListener("click", () => {
+      const n = montoNum($("ePrecioTodos").value);
+      if (!(n > 0)) return toast("Escribí un precio por caja válido (ej. 18,50).");
+      items.forEach((it) => { manuales[it.code] = n; });
+      guardarPreciosManuales(manuales);
+      pintarPrecios(true);
+      toast(`Precio de ${dinero(n)} por caja aplicado a todos los productos`);
+    });
+    $("ePrecioTodos").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("btnPrecioTodos").click(); } });
+    $("eItems").addEventListener("input", (e) => {
+      const inp = e.target.closest("[data-precio-code]");
+      if (!inp) return;
+      const code = inp.dataset.precioCode;
+      const n = montoNum(inp.value);
+      if (n > 0) manuales[code] = n; else delete manuales[code];
+      guardarPreciosManuales(manuales);
+      pintarPrecios(false);
+    });
     $("eCredito").addEventListener("click", (e) => {
       const b = e.target.closest("[data-dias]");
       if (!b) return;
@@ -817,9 +948,12 @@
       err.hidden = true;
       const { _listo, ...cliente } = cli;
       if (d === "Factura") cliente.rif_cedula = rif;
-      const its = itemsDePedido(carrito(), allProductsMap());
+      const its = itemsDePedido(carrito(), allProductsMap()).map((it) => {
+        const pm = usarManual ? montoNum(manuales[it.code]) : 0;
+        return pm > 0 ? { ...it, precio_manual: pm } : it;
+      });
       const datos = { client_ref: nuevoRef(), cliente, items: its, documento: d,
-        tipo_pago: pagoSel(), pago: pagoPorId(pagoSel()).nombre, precio_mayor: total < CAJAS_MAYOR && excepcionMayor(),
+        tipo_pago: pagoSel(), pago: pagoPorId(pagoSel()).nombre, precio_mayor: !usarManual && total < CAJAS_MAYOR && excepcionMayor(),
         dias_credito: esCredito() ? dias : 0, nota: $("eNota").value.trim() };
       if (web) datos.web_id = web.id;
       const btn = $("btnEnviar");
@@ -828,7 +962,9 @@
         memoria.t = 0;
         guardarCarrito({});
         guardarLS(K_MAYOR, false);
+        borrarLS(K_PRECIOS_MANUAL);
         borrarLS(K_WEB);
+        borrarLS(K_ENLACE);
         borrarLS(K_CLIENTE);
         sessionStorage.setItem(K_LISTO, JSON.stringify(listo));
         ir("#/nuevo/listo");
@@ -1168,7 +1304,7 @@
           <dt>Teléfono</dt><dd>${esc([c.telefono, c.telefono2].filter(Boolean).join(" / ") || "—")}</dd>
           <dt>Dirección</dt><dd>${esc(c.direccion || "—")}</dd>
           <dt>Documento</dt><dd>${esc(p.documento || "Nota de entrega")}</dd>
-          <dt>Pago</dt><dd>${esc(pago)}${p.dias_credito ? ` · ${p.dias_credito} días` : ""} · precio ${p.nivel_precio === "mayor" ? "al mayor" : "al por menor"}${p.excepcion_precio ? " (excepción)" : ""}</dd>
+          <dt>Pago</dt><dd>${esc(pago)}${p.dias_credito ? ` · ${p.dias_credito} días` : ""} · ${textoNivelPrecio(p)}</dd>
           <dt>Vendedor</dt><dd>${esc(p.vendedor)}</dd>
           ${p.nota ? `<dt>Nota</dt><dd>${esc(p.nota)}</dd>` : ""}
         </dl>
@@ -1570,6 +1706,16 @@
       <form id="fEditar" class="tarjeta" novalidate>
         <p class="nota-chica" id="xNivel"></p>
         <label class="check excepcion" id="xMayorWrap"><input type="checkbox" id="xMayor"${p.excepcion_precio ? " checked" : ""} /> Precio al mayor (excepción para este cliente)</label>
+        <label class="check excepcion"><input type="checkbox" id="xPersonalizado"${p.nivel_precio === "personalizado" ? " checked" : ""} /> Precio personalizado por caja (acuerdo con el cliente)</label>
+        <div id="xBoxPersonalizado" class="box-personalizado"${p.nivel_precio === "personalizado" ? "" : " hidden"}>
+          <div class="fila-precio-global">
+            <label class="field"><span>Mismo precio por caja ($)</span>
+              <input id="xPrecioTodos" type="text" inputmode="decimal" autocomplete="off" placeholder="ej. 18,50" />
+            </label>
+            <button type="button" class="btn btn-ghost btn-chico" id="btnXPrecioTodos">Aplicar a todo</button>
+          </div>
+          <ul class="resumen-items" id="xItemsManual"></ul>
+        </div>
         <fieldset class="pay"><legend>Documento</legend>
           ${["Nota de entrega", "Factura"].map((d) => `<label class="pay-opt"><input type="radio" name="xDoc" value="${d}"${(p.documento || "Nota de entrega") === d ? " checked" : ""} /> ${d}</label>`).join("")}
         </fieldset>
@@ -1585,15 +1731,47 @@
         <button type="button" class="btn btn-primary" id="btnGuardarEdicion">Guardar</button>
       </div>`;
     const lista = $("xLista");
+    const manualesEdit = {};
+    if (p.nivel_precio === "personalizado") {
+      (p.items || []).forEach((it) => { if (Number(it.precio) > 0) manualesEdit[it.code] = Number(it.precio); });
+    }
     const total = () => Object.values(cant).reduce((a, n) => a + n, 0);
     const pagoSel = () => $("xPago").value;
-    const pintar = () => {
+    const pintar = (rearmarManual = true) => {
       const t = total();
+      const usarManual = $("xPersonalizado").checked;
+      $("xBoxPersonalizado").hidden = !usarManual;
       const nivel = nivelPrecio(t, $("xMayor").checked);
       // si no cambia el nivel (mayor/menor), se mantiene el precio con que se tomó el pedido
-      const fijo = (code) => { const v0 = (p.items || []).find((it) => it.code === code); return v0 && Number(v0.precio) > 0 && nivel === (p.nivel_precio || "menor") ? v0 : null; };
+      const fijo = (code) => {
+        if (usarManual && Number(manualesEdit[code]) > 0) return { code, precio: Number(manualesEdit[code]), desc_pronto: 0, desc_efectivo_credito: 0, desc_efectivo_pronto: 0 };
+        const v0 = (p.items || []).find((it) => it.code === code);
+        return v0 && Number(v0.precio) > 0 && nivel === (p.nivel_precio || "menor") ? v0 : null;
+      };
       const conPrecio = Object.entries(cant).filter(([, n]) => n > 0).map(([code, cajas]) => { const f = fijo(code); return f ? { ...f, cajas } : conPrecios([{ code, cajas }], precios, nivel)[0]; });
       const monto = totalPorPago(conPrecio, pagoSel());
+      const prodMap = allProductsMap();
+      if (usarManual && rearmarManual) {
+        $("xItemsManual").innerHTML = Object.entries(cant).filter(([, n]) => n > 0).map(([code, cajas]) => {
+          const x = prodMap[code] || {};
+          const itCat = conPrecios([{ code, cajas: 1 }], precios, nivel)[0];
+          const baseU = precioUnitario(itCat, pagoSel());
+          const val = manualesEdit[code] !== undefined && manualesEdit[code] > 0 ? String(manualesEdit[code]) : "";
+          const u = Number(manualesEdit[code]) > 0 ? Number(manualesEdit[code]) : baseU;
+          return `<li class="con-precio-manual">
+            <span>${cajas} × ${esc(x.name || code)}</span>
+            <span class="caja-precio-manual"><label class="lbl-precio-caja"><span>$</span><input type="text" inputmode="decimal" autocomplete="off" class="inp-precio-caja" data-xprecio-code="${esc(code)}" value="${esc(val)}" placeholder="${baseU ? baseU.toFixed(2) : "0.00"}" aria-label="Precio por caja de ${esc(x.name || code)}" /></label><em data-xsub-code="${esc(code)}">${u ? `<strong>${dinero(cajas * u)}</strong>` : "—"}</em></span>
+          </li>`;
+        }).join("");
+      } else if (usarManual) {
+        Object.entries(cant).filter(([, n]) => n > 0).forEach(([code, cajas]) => {
+          const f = fijo(code);
+          const it = f ? { ...f, cajas: 1 } : conPrecios([{ code, cajas: 1 }], precios, nivel)[0];
+          const u = precioUnitario(it, pagoSel());
+          const elSub = $("xItemsManual").querySelector(`[data-xsub-code="${code}"]`);
+          if (elSub) elSub.innerHTML = u ? `<strong>${dinero(cajas * u)}</strong>` : "—";
+        });
+      }
       lista.querySelectorAll(".pcard").forEach((li) => {
         const code = li.dataset.code, q = cant[code] || 0;
         const inp = li.querySelector(".qty-input");
@@ -1608,8 +1786,8 @@
       const n = Object.values(cant).filter((x) => x > 0).length;
       $("xTotal").textContent = `${t} caja${t === 1 ? "" : "s"}${monto ? " · " + dinero(monto) : ""}`;
       $("xDetalle").textContent = ` · ${n} producto${n === 1 ? "" : "s"}`;
-      $("xNivel").textContent = nivel === "mayor" ? (t >= CAJAS_MAYOR ? `Precio al mayor (${t} cajas).` : "Precio al mayor por excepción.") : `Precio al por menor · desde ${CAJAS_MAYOR} cajas, al mayor.`;
-      $("xMayorWrap").hidden = t >= CAJAS_MAYOR;
+      $("xNivel").textContent = usarManual ? "Precio personalizado acordado con el cliente." : nivel === "mayor" ? (t >= CAJAS_MAYOR ? `Precio al mayor (${t} cajas).` : "Precio al mayor por excepción.") : `Precio al por menor · desde ${CAJAS_MAYOR} cajas, al mayor.`;
+      $("xMayorWrap").hidden = usarManual || t >= CAJAS_MAYOR;
       $("xDiasWrap").hidden = !(pagoPorId(pagoSel()) || {}).credito;
       $("btnGuardarEdicion").disabled = !t;
       filtrar();
@@ -1642,8 +1820,25 @@
       $("xFiltros").querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
       filtrar();
     });
-    $("xPago").addEventListener("change", pintar);
-    $("xMayor").addEventListener("change", pintar);
+    $("xPago").addEventListener("change", () => pintar(true));
+    $("xMayor").addEventListener("change", () => pintar(true));
+    $("xPersonalizado").addEventListener("change", () => pintar(true));
+    $("btnXPrecioTodos").addEventListener("click", () => {
+      const n = montoNum($("xPrecioTodos").value);
+      if (!(n > 0)) return toast("Escribí un precio por caja válido (ej. 18,50).");
+      Object.keys(cant).forEach((code) => { if (cant[code] > 0) manualesEdit[code] = n; });
+      pintar(true);
+      toast(`Precio de ${dinero(n)} por caja aplicado a todos los productos`);
+    });
+    $("xPrecioTodos").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("btnXPrecioTodos").click(); } });
+    $("xItemsManual").addEventListener("input", (e) => {
+      const inp = e.target.closest("[data-xprecio-code]");
+      if (!inp) return;
+      const code = inp.dataset.xprecioCode;
+      const n = montoNum(inp.value);
+      if (n > 0) manualesEdit[code] = n; else delete manualesEdit[code];
+      pintar(false);
+    });
     $("btnGuardarEdicion").addEventListener("click", async () => {
       const err = $("xError");
       const credito = !!(pagoPorId(pagoSel()) || {}).credito;
@@ -1653,15 +1848,17 @@
       if (falla) { err.textContent = falla; err.hidden = false; err.scrollIntoView({ block: "center" }); return; }
       err.hidden = true;
       const prodMap = allProductsMap();
+      const usarManual = $("xPersonalizado").checked;
       const items = Object.entries(cant).filter(([, n]) => n > 0).map(([code, cajas]) => {
         const x = prodMap[code] || {};
-        return { code, producto: x.name || code, cajas, unidades_caja: x.unidades || "", unidad: x.unidad || "unidades" };
+        const pm = usarManual ? montoNum(manualesEdit[code]) : 0;
+        return { code, producto: x.name || code, cajas, unidades_caja: x.unidades || "", unidad: x.unidad || "unidades", ...(pm > 0 ? { precio_manual: pm } : {}) };
       });
       const btn = $("btnGuardarEdicion");
       btn.disabled = true; btn.classList.add("ocupado");
       try {
         const r = await api("editarPedido", { pedido_id: p.id, items, documento: doc, tipo_pago: pagoSel(), dias_credito: credito ? dias : 0,
-          nota: $("xNota").value.trim(), precio_mayor: $("xMayor").checked, ...(facturado ? { factura: $("xFactura").value.trim() } : {}) });
+          nota: $("xNota").value.trim(), precio_mayor: !usarManual && $("xMayor").checked, ...(facturado ? { factura: $("xFactura").value.trim() } : {}) });
         guardarEnMemoria(r.pedido);
         toast(r.facturado ? `${p.id} editado · recordá corregir la factura` : `${p.id} editado`);
         ir(`#/pedido/${encodeURIComponent(p.id)}`);
@@ -1723,7 +1920,7 @@
           ${p.items.map((it) => `<tr><td>${esc(it.producto)} <span class="ped-det">${esc(it.code)}${it.total_unidades ? ` · ${it.total_unidades} ${esc(it.unidad)}` : ""}</span></td><td>${it.cajas}</td>${conPrecio ? `<td class="num">${it.precio ? dinero(precioUnitario(it, tipoAcordado)) : "—"}</td>` : ""}</tr>`).join("")}
         </tbody></table>
         <p class="total-ped"><strong>Total: ${p.total_cajas} caja${p.total_cajas === 1 ? "" : "s"}</strong>${p.detalle_unidades ? ` · ${esc(p.detalle_unidades)}` : ""}</p>
-        ${conPrecio ? `<p class="monto-ped" id="dMonto"><strong>${dinero(totalPorPago(p.items, tipoAcordado))}</strong> · ${esc((pagoPorId(tipoAcordado) || {}).nombre || p.pago)} · precio ${p.nivel_precio === "mayor" ? "al mayor" : "al por menor"}${p.excepcion_precio ? " (excepción)" : ""}</p>` : ""}
+        ${conPrecio ? `<p class="monto-ped" id="dMonto"><strong>${dinero(totalPorPago(p.items, tipoAcordado))}</strong> · ${esc((pagoPorId(tipoAcordado) || {}).nombre || p.pago)} · ${textoNivelPrecio(p)}</p>` : ""}
         ${conPrecio && p.tipo_pago_real && p.tipo_pago_real !== tipoAcordado ? `<p class="monto-ped cambio" id="dMontoReal">Pagó como <strong>${esc(pagoPorId(p.tipo_pago_real).nombre)}</strong>: ${dinero(totalPorPago(p.items, p.tipo_pago_real))}</p>` : ""}
         <dl class="datos">
           <dt>Fecha</dt><dd>${esc(fechaLegible(p.fecha))}</dd>
@@ -1862,7 +2059,7 @@
       c.rif_cedula ? `RIF/Cédula: ${c.rif_cedula}` : "RIF/Cédula: —",
       `Teléfono: ${[c.telefono, c.telefono2].filter(Boolean).join(" / ") || "—"}`,
       `Dirección: ${c.direccion || "—"}`,
-      `Pago: ${(pagoPorId(tipo) || {}).nombre || p.pago || ""}${p.dias_credito ? ` · ${p.dias_credito} días` : ""} · precio ${p.nivel_precio === "mayor" ? "al mayor" : "al por menor"}`,
+      `Pago: ${(pagoPorId(tipo) || {}).nombre || p.pago || ""}${p.dias_credito ? ` · ${p.dias_credito} días` : ""} · ${textoNivelPrecio(p)}`,
       "",
       ...items.map((it) => `${it.cajas} × ${it.producto} (${it.code})${conPrecio ? ` · ${dinero(precioUnitario(it, tipo))} c/u = ${dinero(it.cajas * precioUnitario(it, tipo))}` : ""}`),
       "",

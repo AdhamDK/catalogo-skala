@@ -77,10 +77,28 @@ public class MainActivity extends Activity {
             }
         });
 
-        if (guardado != null) web.restoreState(guardado);
+        String enlace = rutaDeEnlace(getIntent());
+        if (enlace != null) web.loadUrl(INICIO + enlace);
+        else if (guardado != null) web.restoreState(guardado);
         else web.loadUrl(INICIO);
 
         Sincronizador.programar(this);
+    }
+
+    /** Enlace https://skala-venezuela.netlify.app/panel.html#/nuevo?... → "#/nuevo?..." (null si no es un enlace). */
+    private static String rutaDeEnlace(Intent i) {
+        if (i == null || !Intent.ACTION_VIEW.equals(i.getAction()) || i.getData() == null) return null;
+        String frag = i.getData().getEncodedFragment();
+        return frag != null && frag.startsWith("/") ? "#" + frag : "#/inicio";
+    }
+
+    /** Con la app ya abierta (singleTask), el enlace llega acá. */
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        setIntent(i);
+        String enlace = rutaDeEnlace(i);
+        if (enlace != null && web != null) web.loadUrl(INICIO + enlace);
     }
 
     private void abrirAfuera(Uri u) {

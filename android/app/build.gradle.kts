@@ -25,8 +25,8 @@ android {
         minSdk = 24
         targetSdk = 34
         // Al publicar una APK nueva: subir versionCode y poner el mismo número en la hoja Config (version_apk)
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         buildConfigField("String", "API_URL", "\"$apiUrl\"")
     }
 

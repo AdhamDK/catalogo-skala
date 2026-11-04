@@ -495,7 +495,8 @@ function limpiarItems_(items) {
   return items.map(function (it) {
     var cajas = Math.floor(Number(it.cajas));
     var u = Math.floor(Number(it.unidades_caja));
-    return {
+    var pm = numPrecio_(it.precio_manual);
+    var o = {
       code: txt_(it.code, 20).toUpperCase(),
       producto: txt_(it.producto, 120),
       cajas: cajas,
@@ -503,6 +504,8 @@ function limpiarItems_(items) {
       unidad: txt_(it.unidad || 'unidades', 20),
       total_unidades: isFinite(u) && u > 0 ? cajas * u : ''
     };
+    if (pm > 0) o.precio_manual = pm;
+    return o;
   }).filter(function (it) { return it.code && isFinite(it.cajas) && it.cajas > 0 && it.cajas <= 10000; });
 }
 
@@ -558,9 +561,17 @@ function tablaPrecios_() {
   return m;
 }
 
-/* Pone precio (según nivel) y descuentos a cada item. Si falta el precio Mayor se usa el Menor. */
+/* Pone precio (según nivel) y descuentos a cada item. Si falta el precio Mayor se usa el Menor.
+   Si el vendedor indicó precio_manual (> 0), se fija ese precio acordado sin descuentos adicionales. */
 function ponerPrecios_(items, precios, mayor) {
   items.forEach(function (it) {
+    if (Number(it.precio_manual) > 0) {
+      it.precio = r2_(Number(it.precio_manual));
+      it.desc_pronto = 0;
+      it.desc_efectivo_credito = 0;
+      it.desc_efectivo_pronto = 0;
+      return;
+    }
     var pr = precios[it.code] || {};
     it.precio = mayor ? (pr.mayor || pr.menor || 0) : (pr.menor || 0);
     var pre = mayor ? 'mayor_desc_' : 'desc_';
@@ -905,6 +916,7 @@ function accionGuardarPedido_(p, ses) {
     catch (err) { return { ok: false, error: err.message, code: 'cliente' }; }
 
     var totalCajas = items.reduce(function (a, it) { return a + it.cajas; }, 0);
+    var personalizado = items.some(function (it) { return Number(it.precio_manual) > 0; });
     var excepcion = p.precio_mayor === true && totalCajas < CAJAS_MAYOR;
     var mayor = totalCajas >= CAJAS_MAYOR || excepcion;
     ponerPrecios_(items, tablaPrecios_(), mayor);
@@ -916,7 +928,7 @@ function accionGuardarPedido_(p, ses) {
       cliente_id: cliente.id, cliente: cliente.contacto || cliente.nombre, negocio: cliente.nombre,
       total_cajas: totalCajas,
       detalle_unidades: detalleUnidades_(items),
-      pago: pagoTexto, tipo_pago: tipoPago, nivel_precio: mayor ? 'mayor' : 'menor', excepcion_precio: excepcion,
+      pago: pagoTexto, tipo_pago: tipoPago, nivel_precio: personalizado ? 'personalizado' : (mayor ? 'mayor' : 'menor'), excepcion_precio: excepcion,
       total: totalPorPago_(items, tipoPago),
       nota: txt_(p.nota, 300), documento: documento,
       dias_credito: diasCredito, cobro: '',
@@ -931,7 +943,7 @@ function accionGuardarPedido_(p, ses) {
     var filas = items.map(function (it) { it.pedido_id = ped.id; return filaDe_('PedidoItems', it); });
     var hItems = hoja_('PedidoItems');
     hItems.getRange(hItems.getLastRow() + 1, 1, filas.length, HOJAS.PedidoItems.length).setValues(filas);
-    historial_(ped.id, ses, 'creado', ped.total_cajas + ' cajas · ' + ped.negocio + (ped.total ? ' · ' + ped.total + ' $ (' + pagoTexto + ')' : '') + (excepcion ? ' · precio mayor por excepción' : '') + (web ? ' · desde pedido web ' + web.id : ''));
+    historial_(ped.id, ses, 'creado', ped.total_cajas + ' cajas · ' + ped.negocio + (ped.total ? ' · ' + ped.total + ' $ (' + pagoTexto + ')' : '') + (personalizado ? ' · precio personalizado' : (excepcion ? ' · precio mayor por excepción' : '')) + (web ? ' · desde pedido web ' + web.id : ''));
     return { ok: true, pedido: pedidoConItems_(ped, items), cliente_id: cliente.id, cliente: clientePublico_(cliente) };
   } finally {
     lock.releaseLock();
@@ -1286,11 +1298,12 @@ function accionEditarPedido_(p, ses) {
     }
 
     var totalCajas = items.reduce(function (a, it) { return a + it.cajas; }, 0);
+    var personalizado = items.some(function (it) { return Number(it.precio_manual) > 0; });
     var excepcion = p.precio_mayor === true && totalCajas < CAJAS_MAYOR;
     var mayor = totalCajas >= CAJAS_MAYOR || excepcion;
     var tabla = tablaPrecios_();
     ponerPrecios_(items, tabla, mayor);
-    if (mayor === (String(ped.nivel_precio) === 'mayor')) {
+    if (!personalizado && mayor === (String(ped.nivel_precio) === 'mayor')) {
       var previo = {};
       filas.forEach(function (f) { previo[String(f.code).toUpperCase()] = f; });
       items.forEach(function (it) {
@@ -1310,7 +1323,7 @@ function accionEditarPedido_(p, ses) {
     ped.tipo_pago = tipoPago; ped.pago = pagoDef.nombre; ped.dias_credito = diasCredito;
     ped.documento = documento;
     ped.nota = txt_(p.nota, 300);
-    ped.nivel_precio = mayor ? 'mayor' : 'menor'; ped.excepcion_precio = excepcion;
+    ped.nivel_precio = personalizado ? 'personalizado' : (mayor ? 'mayor' : 'menor'); ped.excepcion_precio = excepcion;
     ped.total = items.some(function (it) { return it.precio; }) ? totalPorPago_(items, tipoPago) : '';
     if (estado !== 'pendiente' && p.factura !== undefined) ped.factura = txt_(p.factura, 40);
     ped.updated_at = t;
