@@ -720,3 +720,477 @@ html[data-tema="oscuro"] .chip-parcial { background: rgba(242, 178, 92, 0.18); c
   color: var(--tinta); font: inherit; font-size: 0.95rem; text-align: right; outline: none;
 }
 #xItemsManual { margin-top: 8px; }
+
+/* ---------- Cobro y Conciliación (Bs con Tasa BCV, Abonos y Ajuste de Precios) ---------- */
+.aviso-abono-previo,
+.aviso-reportado-box,
+.aviso-ajuste-modal {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+.aviso-abono-previo {
+  background: rgba(181, 69, 10, 0.1);
+  border: 1px solid rgba(181, 69, 10, 0.25);
+  color: var(--tinta);
+}
+.aviso-reportado-box {
+  background: var(--crema-2);
+  border: 1px solid var(--borde);
+  color: var(--tinta);
+}
+.aviso-ajuste-modal {
+  background: #fff4df;
+  border: 1px solid #e6b86a;
+  color: #7a4408;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+html[data-tema="oscuro"] .aviso-ajuste-modal {
+  background: rgba(242, 178, 92, 0.14);
+  border-color: rgba(242, 178, 92, 0.35);
+  color: #f4cb8e;
+}
+
+.ajuste-cobro-wrap { margin: 8px 0 10px; }
+.btn-ajuste-toggle { font-size: 0.88rem; min-height: 40px; }
+.box-ajuste-cobro {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--crema-2);
+  border: 1px solid var(--borde);
+}
+.manual-todos-bar {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+.manual-todos-bar input {
+  flex: 1 1 auto;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: var(--superficie);
+  color: var(--tinta);
+  font-size: 0.92rem;
+}
+.lista-manual-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+.fila-manual-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: var(--superficie);
+  border: 1px solid var(--borde-suave);
+}
+.fila-manual-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 0.86rem;
+}
+.fila-manual-inp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--borde);
+  background: var(--crema-2);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.fila-manual-inp .inp-precio-caja {
+  width: 62px;
+  height: 30px;
+  font-weight: 700;
+}
+
+.box-bs {
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--crema-2);
+  border: 1px solid var(--borde);
+}
+.tasa-bcv-box {
+  margin: 8px 0;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: var(--superficie);
+  border: 1px solid var(--borde-suave);
+}
+.tasa-bcv-linea {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.88rem;
+}
+.btn-link-chico {
+  border: 0;
+  background: transparent;
+  color: var(--acento, #b5450a);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.tasa-esperado-linea {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--borde);
+}
+.tasa-esperado-monto {
+  display: block;
+  font-size: 1.05rem;
+  color: var(--tinta);
+}
+
+.estado-cobro-aviso {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+.estado-cobro-aviso.es-completo {
+  background: #e7f6ec;
+  border: 1px solid #84cfa0;
+  color: #145a32;
+}
+.estado-cobro-aviso.es-abono {
+  background: #fff4df;
+  border: 1px solid #e6b86a;
+  color: #7a4408;
+}
+html[data-tema="oscuro"] .estado-cobro-aviso.es-completo {
+  background: rgba(46, 204, 113, 0.14);
+  border-color: rgba(46, 204, 113, 0.4);
+  color: #8ee6b0;
+}
+html[data-tema="oscuro"] .estado-cobro-aviso.es-abono {
+  background: rgba(242, 178, 92, 0.15);
+  border-color: rgba(242, 178, 92, 0.4);
+  color: #f5cb8c;
+}
+
+.aviso-ajuste-card {
+  border-left: 4px solid #d98a1c;
+}
+.chip-ajuste {
+  background: #fff1dc;
+  color: #8a4a0f;
+}
+.lista-abonos {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.abono-item {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--crema-2);
+  border: 1px solid var(--borde-suave);
+}
+.abono-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.abonos-resumen {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--borde-suave);
+  font-size: 0.9rem;
+}
+
+/* ---------- Conciliación directa y cambios exactos de precios ---------- */
+.conciliar-resumen-card {
+  margin: 6px 0 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--crema-2);
+  border: 1px solid var(--borde);
+}
+.conciliar-monto-principal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--borde-suave);
+}
+.conciliar-monto-principal > strong {
+  font-size: 1.4rem;
+  color: var(--tinta);
+}
+.conciliar-monto-principal .chip {
+  align-self: flex-start;
+}
+.conciliar-datos-lista {
+  margin: 0 0 10px;
+}
+.conciliar-corregir-bar {
+  text-align: right;
+  padding-top: 6px;
+  border-top: 1px dashed var(--borde-suave);
+}
+.lista-cambios-precio {
+  margin: 4px 0 6px;
+  padding-left: 18px;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+.lista-cambios-precio s,
+.resumen-cambios-vivo s,
+.aviso-ajuste-card s {
+  opacity: 0.7;
+}
+.resumen-cambios-vivo {
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: #fff4df;
+  border: 1px solid #e6b86a;
+  color: #7a4408;
+  font-size: 0.84rem;
+}
+.resumen-cambios-vivo ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+html[data-tema="oscuro"] .resumen-cambios-vivo {
+  background: rgba(242, 178, 92, 0.14);
+  border-color: rgba(242, 178, 92, 0.35);
+  color: #f4cb8e;
+}
+
+/* ---------- Pestaña de Comisiones ---------- */
+.com-barra-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.com-barra-top .periodos {
+  margin: 0;
+  flex: 1 1 auto;
+}
+.btn-engranaje {
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.chip-pct {
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--crema-2);
+  border: 1px solid var(--borde);
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+.com-resumen-card {
+  margin-bottom: 10px;
+}
+.com-resumen-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.com-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--crema-2);
+  border: 1px solid var(--borde-suave);
+}
+.com-stat strong {
+  font-size: 1.15rem;
+  color: var(--tinta);
+}
+.com-stat.es-pagada {
+  border-color: rgba(46, 204, 113, 0.35);
+}
+.com-resumen-pagadas-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  background: var(--crema-2);
+  border: 1px solid rgba(46, 204, 113, 0.45);
+}
+.com-hero-usd {
+  font-size: 1.65rem;
+  line-height: 1.15;
+  color: var(--tinta);
+}
+.com-monto-usd-grande {
+  font-size: 1.25rem !important;
+}
+.com-periodos-fecha {
+  margin-top: -2px;
+  margin-bottom: 6px;
+}
+.com-seccion-fecha {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin: 8px 0 2px;
+  border-radius: 10px;
+  background: var(--crema-2);
+  border: 1px solid var(--borde-suave);
+  font-weight: 600;
+}
+.com-seccion-fecha strong {
+  font-size: 1.05rem;
+  color: var(--tinta);
+}
+.com-resumen-ambas {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.com-grupo-header {
+  list-style: none;
+  margin: 6px 2px 2px;
+}
+.com-vacio-chico {
+  padding: 12px !important;
+  font-size: 0.9rem;
+}
+.com-pagado-linea {
+  margin: 10px 2px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--borde-suave);
+}
+.com-item {
+  list-style: none;
+}
+.com-item.con-check {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  align-items: stretch;
+  gap: 6px;
+}
+.com-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  cursor: default;
+}
+.com-negocio-link {
+  color: var(--tinta);
+  text-decoration: none;
+}
+.com-negocio-link:hover {
+  text-decoration: underline;
+}
+.com-cobro-origen {
+  padding: 4px 0;
+}
+.com-monto-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--crema-2);
+  border: 1px solid var(--borde-suave);
+}
+.com-monto-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.com-monto-principal {
+  font-size: 1.05rem;
+  color: var(--tinta);
+}
+.com-acciones-pagada {
+  display: flex;
+  gap: 6px;
+}
+.com-modal-lista {
+  max-height: 150px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.com-liquidar-box {
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--crema-2);
+  border: 1px solid var(--borde);
+}
+.com-liquidar-monto {
+  display: block;
+  font-size: 1.2rem;
+  margin-top: 2px;
+}
+.com-dias-fieldset {
+  margin: 8px 0;
+}
+.com-dias-sel {
+  flex-wrap: wrap;
+}
+.chip-ok {
+  background: #e7f6ec;
+  color: #145a32;
+}
+.chip-pend {
+  background: #fff4df;
+  color: #8a4a0f;
+}
+html[data-tema="oscuro"] .chip-ok {
+  background: rgba(46, 204, 113, 0.18);
+  color: #8ee6b0;
+}
+html[data-tema="oscuro"] .chip-pend {
+  background: rgba(242, 178, 92, 0.18);
+  color: #f4cb8e;
+}

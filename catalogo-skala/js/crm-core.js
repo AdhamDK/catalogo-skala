@@ -100,7 +100,7 @@ function accionesDeRol(rol, uid, p) {
     if (e === "confirmado") return ["en_ruta", "entregado", "cancelar"];
     if (e === "en_ruta") return ["entregado", "cancelar"];
     if (e === "entregado") {
-      if (cobro === "cancelado") return ["conciliar", "rechazar"];
+      if (cobro === "cancelado" || Number(p.pagos_pend) > 0) return ["conciliar", "rechazar"];
       if (cobro === "conciliado") return ["desconciliar"];
       return ["conciliar", "reabrir"];
     }
@@ -347,6 +347,137 @@ function proximaSync(ahora = new Date()) {
   return null;
 }
 
+/* Evalúa si el monto ingresado cubre el saldo pendiente (Canceló completo) o si queda como Abono.
+   Tolerancia: hasta 1% o $1 USD de diferencia para absorber redondeos de tasa. */
+function evaluarCobro({ totalUsd, pagadoPrevioUsd = 0, monto = 0, moneda = "USD", tasa = 0 } = {}) {
+  const tot = r2(Math.max(0, Number(totalUsd) || 0));
+  const previo = r2(Math.max(0, Number(pagadoPrevioUsd) || 0));
+  const saldoBaseUsd = r2(Math.max(0, tot - previo));
+  const m = r2(Math.max(0, Number(monto) || 0));
+  const t = Number(tasa) > 0 ? Math.round(Number(tasa) * 10000) / 10000 : 0;
+  const esBs = String(moneda).toUpperCase() === "BS";
+  const esperadoBs = t > 0 ? r2(saldoBaseUsd * t) : 0;
+  const montoUsd = esBs ? (t > 0 ? r2(m / t) : 0) : m;
+  const tolUsd = Math.max(1, r2(saldoBaseUsd * 0.01));
+  const completo = montoUsd > 0 && (saldoBaseUsd <= 0 || montoUsd + tolUsd >= saldoBaseUsd);
+  const restanteUsd = completo ? 0 : r2(Math.max(0, saldoBaseUsd - montoUsd));
+  const restanteBs = t > 0 ? r2(restanteUsd * t) : 0;
+  return { totalUsd: tot, pagadoPrevioUsd: previo, saldoBaseUsd, monto: m, moneda: esBs ? "Bs" : "USD", tasa: t, esperadoBs, montoUsd, tolUsd, completo, restanteUsd, restanteBs };
+}
+
+/* Detalle exacto de qué precios cambiaron en el pedido (de cuánto a cuánto por caja y en el total) */
+function cambiosDePrecio(p) {
+  if (!p || !p.ajuste_previo) return { cambios: [], totalAntes: 0, totalAhora: 0 };
+  let prev = {};
+  try { prev = typeof p.ajuste_previo === "string" ? JSON.parse(p.ajuste_previo) : p.ajuste_previo; } catch (_) {}
+  const prevItems = Array.isArray(prev) ? prev : (Array.isArray(prev.items) ? prev.items : []);
+  if (!prevItems.length) return { cambios: [], totalAntes: 0, totalAhora: 0 };
+  const mapPrev = {};
+  prevItems.forEach((x) => { if (x && x.code) mapPrev[String(x.code).toUpperCase()] = x; });
+  const tipo = p.tipo_pago_real || p.tipo_pago || tipoPagoDe(p.pago);
+  const cambios = [];
+  let totalAntes = 0;
+  let totalAhora = 0;
+  (p.items || []).forEach((it) => {
+    const code = String(it.code || "").toUpperCase();
+    const cajas = Number(it.cajas) || 0;
+    const ant = mapPrev[code];
+    const uAntes = ant ? precioUnitario(ant, tipo) : precioUnitario(it, tipo);
+    const uAhora = precioUnitario(it, tipo);
+    totalAntes = r2(totalAntes + cajas * uAntes);
+    totalAhora = r2(totalAhora + cajas * uAhora);
+    if (ant && Math.abs(uAntes - uAhora) >= 0.01) {
+      cambios.push({
+        code: it.code,
+        producto: it.producto,
+        cajas,
+        antes: uAntes,
+        ahora: uAhora,
+        subtotalAntes: r2(cajas * uAntes),
+        subtotalAhora: r2(cajas * uAhora),
+      });
+    }
+  });
+  return { cambios, totalAntes, totalAhora };
+}
+
+/* Extrae la lista de pagos conciliados con su cálculo de comisión para cada vendedor */
+function extraerComisiones(pedidos, cfg = {}) {
+  const defPct = Number(cfg.porcentaje_default) > 0 ? Number(cfg.porcentaje_default) : 3;
+  const mapaVend = cfg.por_vendedor || {};
+  const pctDe = (p) => {
+    const porId = Number(mapaVend[String(p.vendedor_id)]);
+    if (porId > 0) return porId;
+    const porNom = Number(mapaVend[String(p.vendedor || "").trim().toLowerCase()]);
+    if (porNom > 0) return porNom;
+    return defPct;
+  };
+  const items = [];
+  (pedidos || []).forEach((p) => {
+    if (p.estado === "cancelado") return;
+    let pagos = Array.isArray(p.pagos) ? p.pagos.filter((x) => x.estado === "conciliado") : [];
+    if (!pagos.length && p.cobro === "conciliado" && Number(p.monto) > 0) {
+      const totU = Number(p.total_final || p.total) || (p.moneda === "Bs" ? 0 : Number(p.monto) || 0);
+      pagos = [{
+        id: "PED-" + p.id,
+        pedido_id: p.id,
+        fecha_pago: String(p.cobrado_at || p.conciliado_at || p.entregado_at || p.fecha || "").slice(0, 10),
+        moneda: p.moneda === "Bs" ? "Bs" : "USD",
+        monto: Number(p.monto) || 0,
+        tasa: p.moneda === "Bs" && totU > 0 ? r2((Number(p.monto) || 0) / totU) : 0,
+        monto_usd: totU,
+        estado: "conciliado",
+        conciliado_at: p.conciliado_at || "",
+        conciliado_por: p.conciliado_por || "",
+      }];
+    }
+    const pagadasLocal = cfg.pagadas_locales || {};
+    pagos.forEach((pgOrig) => {
+      const pid = String(pgOrig.id || ("PED-" + p.id));
+      const loc = pagadasLocal[pid];
+      const pg = loc
+        ? (loc.comision_estado === "pendiente" ? { ...pgOrig, comision_estado: "" } : { ...pgOrig, ...loc })
+        : pgOrig;
+      const pct = Number(pg.comision_pct) > 0 ? Number(pg.comision_pct) : pctDe(p);
+      const mon = pg.moneda === "Bs" ? "Bs" : "USD";
+      const montoCobrado = Number(pg.monto) || 0;
+      const tasaCobro = Number(pg.tasa) || 0;
+      const montoUsd = Number(pg.monto_usd) || (mon === "Bs" ? (tasaCobro > 0 ? r2(montoCobrado / tasaCobro) : 0) : montoCobrado) || Number(p.total_final || p.total) || 0;
+      const comisionUsd = Number(pg.comision_usd) > 0 ? Number(pg.comision_usd) : r2(montoUsd * pct / 100);
+      const comisionBsOrigen = mon === "Bs" ? r2(montoCobrado * pct / 100) : 0;
+      const pagada = pg.comision_estado === "pagada";
+      items.push({
+        pago_id: pid,
+        pedido_id: String(p.id),
+        negocio: String(p.negocio || ""),
+        cliente: String(p.cliente || ""),
+        vendedor_id: String(p.vendedor_id || ""),
+        vendedor: String(p.vendedor || "—"),
+        factura: String(p.factura || ""),
+        fecha_pago: String(pg.fecha_pago || (p.conciliado_at || p.cobrado_at || p.fecha || "")).slice(0, 10),
+        conciliado_at: String(pg.conciliado_at || p.conciliado_at || ""),
+        moneda: mon,
+        monto_cobrado: montoCobrado,
+        tasa_cobro: tasaCobro,
+        monto_usd: montoUsd,
+        referencia_cobro: String(pg.referencia || ""),
+        pct,
+        comision_usd: comisionUsd,
+        comision_bs_origen: comisionBsOrigen,
+        pagada,
+        comision_moneda: String(pg.comision_moneda || mon),
+        comision_monto: pagada && Number(pg.comision_monto) > 0 ? Number(pg.comision_monto) : (mon === "Bs" ? comisionBsOrigen : comisionUsd),
+        comision_tasa: Number(pg.comision_tasa) || tasaCobro || 0,
+        comision_fecha: String(pg.comision_fecha || ""),
+        comision_ref: String(pg.comision_ref || ""),
+        comision_pagada_at: String(pg.comision_pagada_at || ""),
+        comision_pagada_por: String(pg.comision_pagada_por || ""),
+      });
+    });
+  });
+  return items.sort((a, b) => String(b.conciliado_at || b.fecha_pago).localeCompare(String(a.conciliado_at || a.fecha_pago)));
+}
+
 /* Mismos filtros que el servidor (crm/Code.gs → accionPedidos_), sobre la copia del teléfono */
 function filtrarPedidosLocal(pedidos, p = {}, hoy = new Date()) {
   const dias = Math.min(Math.max(Number(p.dias) || 30, 1), 365);
@@ -355,8 +486,11 @@ function filtrarPedidosLocal(pedidos, p = {}, hoy = new Date()) {
   return (pedidos || []).filter((x) => {
     if (p.cliente_id) return String(x.cliente_id) === String(p.cliente_id);
     if (p.por_cobrar) return x.estado !== "cancelado" && !x.cobro && (Number(x.dias_credito) > 0 || x.estado === "entregado");
-    if (p.por_conciliar) return x.cobro === "cancelado";
-    if (p.conciliados) return x.cobro === "conciliado" && String(x.conciliado_at) >= desde;
+    if (p.por_conciliar) return x.cobro === "cancelado" || Number(x.pagos_pend) > 0;
+    if (p.conciliados) {
+      if (x.cobro === "conciliado" && String(x.conciliado_at) >= desde) return true;
+      return Array.isArray(x.pagos) && x.pagos.some((pg) => pg.estado === "conciliado" && (String(pg.conciliado_at) >= desde || pg.comision_estado !== "pagada"));
+    }
     if (estados.length && !estados.includes(x.estado)) return false;
     return ["pendiente", "confirmado", "en_ruta"].includes(x.estado) || String(x.created_at) >= desde;
   }).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
@@ -408,14 +542,14 @@ function vistasPedidos(rol) {
   return [
     { id: "hacer", nombre: "Por hacer" },
     { id: "curso", nombre: "En curso" },
-    { id: "cobros", nombre: "Cobros", ver: [{ id: "cobrar", nombre: "Por cobrar" }, ...(gestion ? [{ id: "conciliar", nombre: "Por conciliar" }] : []), { id: "conciliados", nombre: "Conciliados" }] },
+    { id: "cobros", nombre: "Cobros", ver: [{ id: "cobrar", nombre: "Por cobrar" }, ...(gestion ? [{ id: "conciliar", nombre: "Por conciliar" }] : []), { id: "conciliados", nombre: "Conciliados" }, { id: "comisiones", nombre: "Comisiones" }] },
     { id: "historial", nombre: "Historial", ver: [{ id: "entregado", nombre: "Entregados" }, { id: "cancelado", nombre: "Anulados" }] },
   ];
 }
 /* Enlaces viejos (?tab=pendiente, ?tab=cobrar…) → pestaña nueva */
 const ALIAS_VISTA = {
   pendiente: ["hacer"], web: ["hacer"], curso: ["curso"], cobrar: ["cobros", "cobrar"], conciliar: ["cobros", "conciliar"],
-  conciliados: ["cobros", "conciliados"], entregado: ["historial", "entregado"], cancelado: ["historial", "cancelado"],
+  conciliados: ["cobros", "conciliados"], comisiones: ["cobros", "comisiones"], entregado: ["historial", "entregado"], cancelado: ["historial", "cancelado"],
 };
 function resolverVista(rol, tab, ver) {
   const vistas = vistasPedidos(rol);
@@ -438,7 +572,7 @@ function porHacer(pedidos, rol, uid, hoy = new Date()) {
   if (gestion) {
     return [
       { id: "aprobar", titulo: "Por aprobar", pedidos: L.filter((p) => p.estado === "pendiente") },
-      { id: "conciliar", titulo: "Pagos por conciliar", pedidos: L.filter((p) => p.cobro === "cancelado") },
+      { id: "conciliar", titulo: "Pagos por conciliar", pedidos: L.filter((p) => p.cobro === "cancelado" || Number(p.pagos_pend) > 0) },
     ];
   }
   return [
@@ -454,7 +588,7 @@ function pedidosDeVista(pedidos, vista, ver, { rol, uid, hoy = new Date(), dias 
     case "curso": return filtrarPedidosLocal(L, { estados: ["pendiente", "confirmado", "en_ruta"] }, hoy);
     case "cobros":
       if (ver === "conciliar") return filtrarPedidosLocal(L, { por_conciliar: true }, hoy);
-      if (ver === "conciliados") return filtrarPedidosLocal(L, { conciliados: true, dias }, hoy).sort((a, b) => String(b.conciliado_at).localeCompare(String(a.conciliado_at)));
+      if (ver === "conciliados" || ver === "comisiones") return filtrarPedidosLocal(L, { conciliados: true, dias }, hoy).sort((a, b) => String(b.conciliado_at || b.created_at).localeCompare(String(a.conciliado_at || a.created_at)));
       return filtrarPedidosLocal(L, { por_cobrar: true }, hoy);
     case "historial": return filtrarPedidosLocal(L, { estados: [ver === "cancelado" ? "cancelado" : "entregado"], dias: 365 }, hoy);
     default: return [].concat(...porHacer(L, rol, uid, hoy).map((s) => s.pedidos));
@@ -551,7 +685,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = { itemsDePedido, telefonoWhatsapp, linkMapa, fechaLegible, mensajeGrupo, validarCliente, expiracionToken, nuevoRef,
     nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, cajasPorEntregar, cajasPendientes, esParcial, coordsDeTexto, estadoCredito, totalCarga,
     monedaDePago, formatoMonto, resumenConciliados,
-    CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, descuentoMaximo, sinPrecio, dinero,
+    CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, descuentoMaximo, sinPrecio, dinero, evaluarCobro, cambiosDePrecio, extraerComisiones,
     limitePronto, prontoVigente, textoStock, topeStock, puedeBorrar, refWeb, mensajeWeb,
     vistasPedidos, resolverVista, porHacer, urgenciaCobro, pedidosDeVista, buscarPedidos, grupoDia, agruparPorDia, contadoresVistas,
     HORAS_SYNC, debeSincronizar, proximaSync, filtrarPedidosLocal, buscarClientesLocal, respuestaLocal, estadoApp };

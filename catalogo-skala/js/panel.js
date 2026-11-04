@@ -61,13 +61,35 @@
   const spin = (texto = "Cargando…") => `<div class="cargando" role="status"><span class="spinner" aria-hidden="true"></span><span>${texto}</span></div>`;
   const $ = (id) => document.getElementById(id);
   const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  /* "1.234,56" · "1234.56" · "120,5" → número con 2 decimales (0 si no es válido) */
+  /* "1.234,56" · "12.500" · "120,5" → número con 2 decimales (0 si no es válido) */
   const montoNum = (t) => {
     let x = String(t ?? "").trim().replace(/\s|USD|Bs\.?|\$/gi, "");
     if (x.includes(",")) x = x.replace(/\./g, "").replace(",", ".");
+    else if (/^\d{1,3}(\.\d{3})+$/.test(x)) x = x.replace(/\./g, "");
     const n = Number(x);
     return isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
   };
+  /* Formatea en vivo con puntos de miles y coma decimal ("54.200,50").
+     Si en el teclado del móvil tocan "." al final para abrir decimales, se convierte en ",". */
+  function formatoMilesInput(raw, maxDec = 2) {
+    let s = String(raw ?? "").replace(/[^\d.,]/g, "");
+    if (!s) return "";
+    if (s.endsWith(".") && !s.includes(",")) s = s.slice(0, -1) + ",";
+    const tieneComa = s.includes(",");
+    const partes = s.split(",");
+    const ent = partes[0].replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+    const entFmt = ent.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    if (!tieneComa) return entFmt;
+    const dec = partes.slice(1).join("").replace(/\D/g, "").slice(0, maxDec);
+    return `${entFmt || "0"},${dec}`;
+  }
+  function formatoNumInput(n, siempreDecimales = false) {
+    const num = Math.round((Number(n) || 0) * 100) / 100;
+    if (!(num > 0)) return "";
+    const [ent, dec] = num.toFixed(2).split(".");
+    const entFmt = ent.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return !siempreDecimales && dec === "00" ? entFmt : `${entFmt},${dec}`;
+  }
   const K_CARRITO = "skala_pedido_v1";   // compartido con el catálogo
   const K_CLIENTE = "skala_vcliente_v1"; // borrador del cliente del pedido
   const K_LISTO = "skala_ultimo_pedido";
@@ -78,6 +100,65 @@
   const K_INV = "skala_inv_borrador";     // carga de inventario a medias: { entrada: {code: n}, conteo: {code: n} }
   const K_ENLACE = "skala_enlace_wa";     // pedido que llegó por WhatsApp con "Código de pedido para vendedor": { ref, tipo_pago, tel }
   const K_PRECIOS_MANUAL = "skala_precios_manual"; // precios personalizados por caja { code: precio } en el pedido en curso
+  const K_TASAS_BCV = "skala_tasas_bcv_v1"; // caché local de tasas históricas del BCV { ts, mapa: { "YYYY-MM-DD": tasa } }
+  const K_COMISION_CFG = "skala_comision_cfg_v1"; // configuración de % de comisiones { porcentaje_default: 3, por_vendedor: {}, vendedores: [] }
+  const K_COMISION_PAGADAS = "skala_comisiones_pagadas_v1"; // respaldo local de comisiones marcadas como pagadas { [pago_id]: { comision_estado, ... } }
+
+  /* Consulta la tasa oficial del BCV para una fecha (YYYY-MM-DD).
+     Primero intenta el servidor CRM (que incluye tasas manuales de la hoja 'Tasas' y DolarApi)
+     y respalda con consulta directa a ve.dolarapi.com + caché en el teléfono. */
+  async function obtenerTasaBcv(fecha) {
+    const f = String(fecha || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return { tasa: 0, fechaEfectiva: f, fuente: "" };
+    const buscarEnMapa = (mapa) => {
+      if (!mapa || typeof mapa !== "object") return null;
+      if (Number(mapa[f]) > 0) return { tasa: Number(mapa[f]), fechaEfectiva: f };
+      const previas = Object.keys(mapa).filter((d) => d <= f && Number(mapa[d]) > 0).sort();
+      if (previas.length) {
+        const ult = previas[previas.length - 1];
+        return { tasa: Number(mapa[ult]), fechaEfectiva: ult };
+      }
+      return null;
+    };
+    // 1) Intentar acción 'tasa' del CRM (sin bloquear si aún no está desplegada o no hay señal)
+    try {
+      const r = await SkalaAPI.api("tasa", { fecha: f });
+      if (r && Number(r.tasa) > 0) {
+        const cache = leerLS(K_TASAS_BCV, { ts: 0, mapa: {} });
+        cache.mapa = cache.mapa || {};
+        cache.mapa[r.fecha_efectiva || f] = Number(r.tasa);
+        guardarLS(K_TASAS_BCV, cache);
+        return { tasa: Math.round(Number(r.tasa) * 10000) / 10000, fechaEfectiva: r.fecha_efectiva || f, fuente: r.fuente || "BCV" };
+      }
+    } catch (_) {}
+    // 2) Caché local reciente (< 6 horas) si ya contiene la fecha
+    const cache = leerLS(K_TASAS_BCV, { ts: 0, mapa: {} });
+    const hoyIso = new Date().toISOString().slice(0, 10);
+    if (cache && cache.mapa && Date.now() - (Number(cache.ts) || 0) < 6 * 3600000) {
+      const enc = buscarEnMapa(cache.mapa);
+      if (enc && (enc.fechaEfectiva === f || f < hoyIso)) return { ...enc, fuente: "BCV" };
+    }
+    // 3) Consultar histórico oficial de BCV en DolarApi directamente
+    try {
+      const resp = await fetch("https://ve.dolarapi.com/v1/historicos/dolares/oficial");
+      if (resp.ok) {
+        const lista = await resp.json();
+        if (Array.isArray(lista)) {
+          const mapa = { ...(cache && cache.mapa ? cache.mapa : {}) };
+          lista.forEach((x) => {
+            const fd = String(x.fecha || "").slice(0, 10);
+            const prom = Math.round((Number(x.promedio) || 0) * 10000) / 10000;
+            if (/^\d{4}-\d{2}-\d{2}$/.test(fd) && prom > 0) mapa[fd] = prom;
+          });
+          guardarLS(K_TASAS_BCV, { ts: Date.now(), mapa });
+          const enc = buscarEnMapa(mapa);
+          if (enc) return { ...enc, fuente: "BCV" };
+        }
+      }
+    } catch (_) {}
+    const encFinal = buscarEnMapa(cache && cache.mapa);
+    return encFinal ? { ...encFinal, fuente: "BCV (guardada)" } : { tasa: 0, fechaEfectiva: f, fuente: "" };
+  }
   const TODOS = ["master", "admin", "vendedor", "despachador"];
   const TOMAN = ["master", "admin", "vendedor"];
   const rol = () => (sesion() || { usuario: {} }).usuario.rol; // el de más rango
@@ -1010,11 +1091,21 @@
   /* ---------- Pedidos / Entregas ---------- */
   /* Bandera de cobro: crédito por vencimiento, o estado del pago de un pedido entregado */
   function bandera(p) {
-    const ec = estadoCredito(p);
-    if (ec) return { clase: ec.nivel, texto: ec.texto };
-    if (p.estado !== "entregado") return null;
     if (p.cobro === "cancelado") return { clase: "por_conciliar", texto: "Cancelado · por conciliar" };
     if (p.cobro === "conciliado") return { clase: "pagado", texto: "Conciliado" };
+    if (Number(p.pagos_pend) > 0) {
+      const rest = Number(p.saldo) > 0 ? ` · resta ${dinero(p.saldo)}` : "";
+      return { clase: "por_conciliar", texto: `Abono por conciliar${rest}` };
+    }
+    const ec = estadoCredito(p);
+    if (ec) {
+      const ab = Number(p.pagado_usd) > 0 && Number(p.saldo) > 0 ? ` · resta ${dinero(p.saldo)}` : "";
+      return { clase: ec.nivel, texto: ec.texto + ab };
+    }
+    if (p.estado !== "entregado") return null;
+    if (Number(p.pagado_usd) > 0 && Number(p.saldo) > 0) {
+      return { clase: "por_cobrar", texto: `Abonado ${dinero(p.pagado_usd)} · resta ${dinero(p.saldo)}` };
+    }
     return { clase: "por_cobrar", texto: "Por cobrar" };
   }
   const chipBandera = (p) => {
@@ -1032,11 +1123,16 @@
   function filaPedido(p, elegible) {
     const r = enEntregas() ? "despachador" : rolPedidos();
     const extra = r === "vendedor" ? "" : r === "despachador" ? ((p.cliente_datos || {}).direccion || "") : `Vendedor: ${p.vendedor}`;
+    const infoCobro = p.monto && p.cobro
+      ? ` · cobrado <strong>${esc(formatoMonto(p.monto, p.moneda))}</strong>`
+      : Number(p.pagado_usd) > 0 && !p.cobro
+        ? ` · abonado <strong>${esc(dinero(p.pagado_usd))}</strong> (resta <strong>${esc(dinero(p.saldo))}</strong>)`
+        : "";
     return `<li class="${elegible ? "con-check" : ""}">${elegible ? `<label class="check-ped"><input type="checkbox" value="${esc(p.id)}" aria-label="Elegir ${esc(p.negocio)} para la carga" /></label>` : ""}
       <a class="fila-ped est-borde-${esc(p.estado)}" href="#/pedido/${encodeURIComponent(p.id)}">
       <div class="fila-top"><strong>${esc(p.negocio)}</strong>${chipEstado(p.estado)}</div>
       <div class="fila-linea"><span class="ped-det">${esc(p.id)} · ${esc(fechaLegible(p.fecha))}</span>${montoFila(p)}</div>
-      <div class="ped-det">${esc(p.total_cajas)} caja(s)${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}${p.monto && p.cobro ? ` · cobrado <strong>${esc(formatoMonto(p.monto, p.moneda))}</strong>` : ""}</div>
+      <div class="ped-det">${esc(p.total_cajas)} caja(s)${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}${infoCobro}</div>
       ${extra ? `<div class="ped-det">${esc(extra)}</div>` : ""}
       ${chipBandera(p)}
     </a></li>`;
@@ -1074,6 +1170,7 @@
     if (enEntregas()) return vEntregas(v, query, vigente);
     const rp = rolPedidos();
     const { vistas, vista, sub } = resolverVista(rp, query.get("tab"), query.get("ver"));
+    if (sub && sub.id === "comisiones") return vComisiones(v, vistas, vista, sub, query, vigente);
     const PERIODOS = [[1, "Hoy"], [7, "7 días"], [30, "30 días"], [90, "90 días"]];
     const esConc = sub && sub.id === "conciliados";
     const dias = esConc ? (PERIODOS.find(([d]) => d === Number(query.get("dias"))) || [30])[0] : 30;
@@ -1520,6 +1617,724 @@
       <h3 class="sub-titulo">Pedidos conciliados</h3>`;
   }
 
+  /* ---------- Comisiones de vendedores (sobre pagos conciliados) ---------- */
+  let estadoFiltroCom = "pendientes";
+  let periodoCom = 0; // 0 = Todo, 7 = Esta semana, 14 = Últimas 2 semanas, 30 = Últimos 30 días
+  async function obtenerConfigComisiones(forzar = false) {
+    const local = leerLS(K_COMISION_CFG, null);
+    if (!forzar && local && typeof local === "object" && Number(local.porcentaje_default) > 0) {
+      SkalaAPI.api("comisiones").then((r) => { if (r && r.config) guardarLS(K_COMISION_CFG, r.config); }).catch(() => {});
+      return local;
+    }
+    try {
+      const r = await SkalaAPI.api("comisiones");
+      if (r && r.config) {
+        guardarLS(K_COMISION_CFG, r.config);
+        return r.config;
+      }
+    } catch (_) {}
+    return local || { porcentaje_default: 3, por_vendedor: {}, vendedores: [] };
+  }
+
+  async function vComisiones(v, vistas, vista, sub, query, vigente) {
+    const rp = rolPedidos();
+    const esAdmin = gestion();
+    const url = (t, ver) => `#/pedidos?tab=${t}${ver ? `&ver=${ver}` : ""}`;
+    v.innerHTML = `
+      <div class="buscador buscador-ped"><input type="search" id="pBuscar" placeholder="Buscar cliente, pedido o vendedor" autocomplete="off" enterkeyhint="search" value="${esc(busquedaPed)}" /></div>
+      <div class="periodos tabs-ped" role="tablist">${vistas.map((t) => `<a role="tab" class="tab${t.id === vista.id ? " active" : ""}" aria-selected="${t.id === vista.id}" href="${url(t.id)}" data-vista="${t.id}">${esc(t.nombre)}<b class="cuenta" data-cuenta="${t.id}"></b></a>`).join("")}</div>
+      ${vista.ver ? `<div class="periodos periodos-chicos" id="pVer">${vista.ver.map((x) => `<a class="tab${x.id === sub.id ? " active" : ""}"${x.id === sub.id ? ' aria-current="true"' : ""} href="${url(vista.id, x.id)}">${esc(x.nombre)}</a>`).join("")}</div>` : ""}
+      <div class="com-barra-top">
+        <div class="periodos periodos-chicos" id="cEstadoTabs">
+          ${[["pendientes", "Por pagar"], ["pagadas", "Pagadas"], ["todas", "Todas"]].map(([k, t]) => `<button type="button" class="tab${estadoFiltroCom === k ? " active" : ""}" data-cest="${k}">${t}</button>`).join("")}
+        </div>
+        ${esAdmin
+          ? `<button type="button" class="btn btn-ghost btn-engranaje" id="btnConfigComision" title="Configurar porcentaje de comisión">⚙️ <span id="lblPctCom">3%</span></button>`
+          : `<span class="chip chip-pct" id="lblPctCom">Comisión: 3%</span>`}
+      </div>
+      <div class="periodos periodos-chicos com-periodos-fecha" id="cPeriodoTabs" ${estadoFiltroCom === "pendientes" ? "hidden" : ""}>
+        ${[[7, "Esta semana"], [14, "Últimas 2 semanas"], [30, "Últimos 30 días"], [0, "Todo"]].map(([d, t]) => `<button type="button" class="tab${periodoCom === d ? " active" : ""}" data-cper="${d}">${t}</button>`).join("")}
+      </div>
+      ${esAdmin ? '<label class="filtro-vend"><span>Vendedor</span><select id="pVend"><option value="">Todos</option></select></label>' : ""}
+      <div id="comResumen"></div>
+      ${esAdmin ? '<div class="fila-elegir" id="cElegirWrap" hidden><label class="check"><input type="checkbox" id="cTodos" /> Elegir todas las comisiones pendientes visibles</label></div>' : ""}
+      <ul class="lista-ped lista-comisiones" id="pLista"><li>${spin()}</li></ul>
+      ${esAdmin ? '<div class="barra-accion" id="cBarra" hidden><div><strong id="cSel">0 comisiones</strong><span id="cSelMonto"></span></div><button type="button" class="btn btn-primary" id="btnPagarLote">Cancelar comisión</button></div>' : ""}`;
+
+    let cfgCom = await obtenerConfigComisiones(false);
+    let pedidosConc = null;
+    const selCom = new Set();
+    let comisionesVisibles = [];
+
+    const textoWhastappComision = (items, fechaPago, tasaUsada, ref) => {
+      const vend = items[0] ? items[0].vendedor : "Vendedor";
+      const enUsd = items.filter((x) => x.moneda !== "Bs");
+      const enBs = items.filter((x) => x.moneda === "Bs");
+      const totUsdEf = Math.round(enUsd.reduce((a, x) => a + x.comision_usd, 0) * 100) / 100;
+      const totBs = Math.round(enBs.reduce((a, x) => {
+        const m = x.pagada && x.comision_monto ? x.comision_monto : (tasaUsada > 0 ? Math.round(x.comision_usd * tasaUsada * 100) / 100 : x.comision_bs_origen);
+        return a + m;
+      }, 0) * 100) / 100;
+      return [
+        `*COMISIONES SKALA — ${vend}*`,
+        `Fecha de liquidación: ${fechaLegible(fechaPago || new Date().toISOString().slice(0, 10))}`,
+        "",
+        ...items.map((x) => {
+          const montoItem = x.moneda === "Bs"
+            ? formatoMonto(x.pagada && x.comision_monto ? x.comision_monto : (tasaUsada > 0 ? Math.round(x.comision_usd * tasaUsada * 100) / 100 : x.comision_bs_origen), "Bs")
+            : dinero(x.comision_usd);
+          return `• *${x.negocio}* (${x.pedido_id}) · Cobro: ${formatoMonto(x.monto_cobrado, x.moneda)} → Comisión (${x.pct}%): *${montoItem}*`;
+        }),
+        "",
+        totUsdEf > 0 ? `*Total Efectivo ($): ${dinero(totUsdEf)}*` : null,
+        totBs > 0 ? `*Total Bolívares (Bs): ${formatoMonto(totBs, "Bs")}*${tasaUsada > 0 ? ` (Tasa BCV: ${formatoNumInput(tasaUsada, true)})` : ""}` : null,
+        ref ? `Referencia: ${ref}` : null,
+      ].filter(Boolean).join("\n");
+    };
+
+    const pintarBarraSel = () => {
+      if (!esAdmin) return;
+      const b = $("cBarra");
+      if (!b) return;
+      const pendVisibles = comisionesVisibles.filter((x) => !x.pagada);
+      const elegidas = pendVisibles.filter((x) => selCom.has(x.pago_id));
+      b.hidden = !elegidas.length;
+      $("cSel").textContent = `${elegidas.length} factura${elegidas.length === 1 ? "" : "s"}`;
+      const usd = Math.round(elegidas.filter((x) => x.moneda !== "Bs").reduce((a, x) => a + x.comision_usd, 0) * 100) / 100;
+      const bs = Math.round(elegidas.filter((x) => x.moneda === "Bs").reduce((a, x) => a + x.comision_bs_origen, 0) * 100) / 100;
+      const partes = [usd > 0 ? dinero(usd) : "", bs > 0 ? formatoMonto(bs, "Bs") : ""].filter(Boolean);
+      $("cSelMonto").textContent = partes.length ? ` · ${partes.join(" + ")}` : "";
+      const chkTodos = $("cTodos");
+      if (chkTodos) chkTodos.checked = pendVisibles.length > 0 && elegidas.length === pendVisibles.length;
+    };
+
+    const pintar = () => {
+      if (!document.body.contains($("pLista"))) return;
+      const todos = memoria.pedidos || [];
+      const c = contadoresVistas(todos, rp, yo().id);
+      c.hacer += (memoria.web || []).filter((w) => w.estado === "nuevo").length;
+      v.querySelectorAll("[data-cuenta]").forEach((b) => { const n = c[b.dataset.cuenta]; b.textContent = n ? String(n) : ""; });
+
+      const pctDef = Number(cfgCom && cfgCom.porcentaje_default) || 3;
+      const lblPct = $("lblPctCom");
+      if (lblPct) {
+        if (esAdmin) lblPct.textContent = `${formatoNumInput(pctDef)}%`;
+        else {
+          const miPct = (cfgCom && cfgCom.por_vendedor && (cfgCom.por_vendedor[yo().id] || cfgCom.por_vendedor[String(yo().nombre || "").toLowerCase()])) || pctDef;
+          lblPct.textContent = `Comisión: ${formatoNumInput(miPct)}%`;
+        }
+      }
+
+      // Combinar pedidos en memoria y conciliados traídos del servidor
+      const mapaPed = {};
+      todos.concat(pedidosConc || []).forEach((p) => { if (p && p.id) mapaPed[p.id] = p; });
+      const basePedidos = Object.values(mapaPed).filter((p) => esAdmin || String(p.vendedor_id) === String(yo().id));
+      const pagadasLocal = leerLS(K_COMISION_PAGADAS, {});
+      const todasCom = extraerComisiones(basePedidos, { ...cfgCom, pagadas_locales: pagadasLocal });
+
+      const sel = $("pVend");
+      if (sel && sel.options.length === 1) {
+        [...new Set(todasCom.map((x) => x.vendedor).filter(Boolean))].sort().forEach((n) => sel.add(new Option(n, n, false, n === vendedorPed)));
+      }
+
+      const q = busquedaPed.trim().toLowerCase();
+      const filtradasVendedor = todasCom.filter((x) => {
+        if (vendedorPed && x.vendedor !== vendedorPed) return false;
+        if (q && ![x.pedido_id, x.negocio, x.cliente, x.vendedor, x.factura, x.referencia_cobro].join(" ").toLowerCase().includes(q)) return false;
+        return true;
+      });
+
+      // Mostrar/ocultar barra de períodos para Pagadas y Todas
+      const barraPer = $("cPeriodoTabs");
+      if (barraPer) barraPer.hidden = estadoFiltroCom === "pendientes";
+
+      const diasDesdeHoy = (fechaIso) => {
+        const f = String(fechaIso || "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return 0;
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        const [y, m, d] = f.split("-").map(Number);
+        const dt = new Date(y, m - 1, d);
+        return Math.max(0, Math.floor((hoy.getTime() - dt.getTime()) / 86400000));
+      };
+      const fechaDePagada = (x) => x.comision_fecha || x.fecha_pago || String(x.conciliado_at || "").slice(0, 10);
+
+      // Resumen de pendientes (Por pagar) y pagadas (sobre el vendedor filtrado y período elegido)
+      const pend = filtradasVendedor.filter((x) => !x.pagada);
+      const pagTodas = filtradasVendedor.filter((x) => x.pagada);
+      const pag = periodoCom > 0
+        ? pagTodas.filter((x) => diasDesdeHoy(fechaDePagada(x)) <= periodoCom)
+        : pagTodas;
+
+      const pendUsdEf = Math.round(pend.filter((x) => x.moneda !== "Bs").reduce((a, x) => a + x.comision_usd, 0) * 100) / 100;
+      const pendBs = Math.round(pend.filter((x) => x.moneda === "Bs").reduce((a, x) => a + x.comision_bs_origen, 0) * 100) / 100;
+      const pendBsUsd = Math.round(pend.filter((x) => x.moneda === "Bs").reduce((a, x) => a + x.comision_usd, 0) * 100) / 100;
+      const pagUsdEf = Math.round(pag.filter((x) => x.comision_moneda !== "Bs").reduce((a, x) => a + x.comision_usd, 0) * 100) / 100;
+      const pagBsUsd = Math.round(pag.filter((x) => x.comision_moneda === "Bs").reduce((a, x) => a + x.comision_usd, 0) * 100) / 100;
+      const pagTotalUsd = Math.round((pagUsdEf + pagBsUsd) * 100) / 100;
+
+      // Actualizar contadores en las pestañas (Por pagar / Pagadas / Todas)
+      const tabsEst = $("cEstadoTabs");
+      if (tabsEst) {
+        const conts = { pendientes: pend.length, pagadas: pagTodas.length, todas: pend.length + pagTodas.length };
+        const nombres = { pendientes: "Por pagar", pagadas: "Pagadas", todas: "Todas" };
+        tabsEst.querySelectorAll("[data-cest]").forEach((btn) => {
+          const k = btn.dataset.cest;
+          const n = conts[k] || 0;
+          btn.innerHTML = `${nombres[k] || k}${n ? ` <b class="cuenta">${n}</b>` : ""}`;
+        });
+      }
+
+      const nomPeriodo = periodoCom === 7 ? " · Esta semana" : periodoCom === 14 ? " · Últimas 2 semanas" : periodoCom === 30 ? " · Últimos 30 días" : "";
+
+      const htmlResumenPorPagar = `
+        <div class="com-resumen-grid">
+          <div class="com-stat">
+            <span class="ped-det">Por pagar · Efectivo ($)</span>
+            <strong>${esc(dinero(pendUsdEf))}</strong>
+            <span class="ped-det">${pend.filter((x) => x.moneda !== "Bs").length} cobro(s) en $</span>
+          </div>
+          <div class="com-stat">
+            <span class="ped-det">Por pagar · Bolívares (Bs)</span>
+            <strong>${esc(formatoMonto(pendBs, "Bs"))}</strong>
+            <span class="ped-det">${pend.filter((x) => x.moneda === "Bs").length} cobro(s) en Bs · equiv. ${esc(dinero(pendBsUsd))}</span>
+          </div>
+        </div>`;
+
+      const htmlResumenPagadas = `
+        <div class="com-resumen-pagadas-hero">
+          <span class="ped-det">Comisiones pagadas · Equivalente en dólares ($)${esc(nomPeriodo)}</span>
+          <strong class="com-hero-usd">${esc(dinero(pagTotalUsd))}</strong>
+          <span class="ped-det">${pag.length} comisión(es) liquidada(s)</span>
+        </div>
+        <div class="com-resumen-grid">
+          <div class="com-stat es-pagada">
+            <span class="ped-det">Pagadas · Efectivo ($)</span>
+            <strong>${esc(dinero(pagUsdEf))}</strong>
+            <span class="ped-det">${pag.filter((x) => x.comision_moneda !== "Bs").length} comisión(es) en efectivo</span>
+          </div>
+          <div class="com-stat es-pagada">
+            <span class="ped-det">Pagadas en Bs · Equiv. ($)</span>
+            <strong>${esc(dinero(pagBsUsd))}</strong>
+            <span class="ped-det">${pag.filter((x) => x.comision_moneda === "Bs").length} comisión(es) transferida(s) en Bs</span>
+          </div>
+        </div>`;
+
+      if (estadoFiltroCom === "pagadas") {
+        $("comResumen").innerHTML = `
+          <section class="tarjeta com-resumen-card">
+            ${htmlResumenPagadas}
+            ${pend.length ? `<p class="ped-det com-pagado-linea">Por pagar: <strong>${esc(dinero(pendUsdEf))}</strong> en efectivo · <strong>${esc(formatoMonto(pendBs, "Bs"))}</strong> en Bs (${pend.length} pendiente${pend.length === 1 ? "" : "s"})</p>` : ""}
+          </section>`;
+      } else if (estadoFiltroCom === "todas") {
+        $("comResumen").innerHTML = `
+          <section class="tarjeta com-resumen-card com-resumen-ambas">
+            ${htmlResumenPorPagar}
+            ${htmlResumenPagadas}
+          </section>`;
+      } else {
+        $("comResumen").innerHTML = `
+          <section class="tarjeta com-resumen-card">
+            ${htmlResumenPorPagar}
+            ${pagTodas.length ? `<p class="ped-det com-pagado-linea">Pagadas (equiv. en $): <strong>${esc(dinero(Math.round(pagTodas.reduce((a, x) => a + x.comision_usd, 0) * 100) / 100))}</strong> (${pagTodas.length} pago${pagTodas.length === 1 ? "" : "s"})</p>` : ""}
+          </section>`;
+      }
+
+      comisionesVisibles = estadoFiltroCom === "pendientes"
+        ? pend
+        : estadoFiltroCom === "pagadas"
+          ? pag
+          : pend.concat(pag);
+
+      const elegirWrap = $("cElegirWrap");
+      if (elegirWrap) elegirWrap.hidden = !comisionesVisibles.some((x) => !x.pagada);
+
+      if (!comisionesVisibles.length) {
+        const msgVacio = estadoFiltroCom === "pendientes"
+          ? "No hay comisiones pendientes por pagar."
+          : estadoFiltroCom === "pagadas"
+            ? `No hay comisiones pagadas registradas${nomPeriodo ? ` (${nomPeriodo.slice(3).toLowerCase()})` : ""}.`
+            : "No hay comisiones registradas.";
+        $("pLista").innerHTML = `<li class="vacio-panel">${msgVacio}</li>`;
+        pintarBarraSel();
+        return;
+      }
+
+      const htmlItemCom = (it) => {
+        const esBs = it.moneda === "Bs";
+        const chk = esAdmin && !it.pagada
+          ? `<label class="check-ped"><input type="checkbox" data-com-check="${esc(it.pago_id)}" ${selCom.has(it.pago_id) ? "checked" : ""} aria-label="Elegir comisión de ${esc(it.negocio)}" /></label>`
+          : "";
+        return `<li class="com-item${chk ? " con-check" : ""}">
+          ${chk}
+          <div class="fila-ped com-card ${it.pagada ? "es-pagada" : "es-pendiente"}">
+            <div class="fila-top">
+              <a class="com-negocio-link" href="#/pedido/${encodeURIComponent(it.pedido_id)}"><strong>${esc(it.negocio)}</strong></a>
+              <span class="chip ${it.pagada ? "chip-ok" : "chip-pend"}">${it.pagada ? "✓ Comisión pagada" : `Por pagar (${formatoNumInput(it.pct)}%)`}</span>
+            </div>
+            <div class="ped-det">${esc(it.pedido_id)}${it.factura ? ` · Fact. ${esc(it.factura)}` : ""} · Vendedor: <strong>${esc(it.vendedor)}</strong></div>
+            <div class="ped-det com-cobro-origen">
+              Cliente canceló en <strong>${esBs ? "Bolívares (Bs)" : "Efectivo ($)"}</strong>:
+              <strong>${esc(formatoMonto(it.monto_cobrado, it.moneda))}</strong>
+              ${it.fecha_pago ? ` el ${esc(fechaLegible(it.fecha_pago))}` : ""}
+              ${esBs && it.tasa_cobro ? ` · Tasa BCV: ${esc(formatoNumInput(it.tasa_cobro, true))} (= ${esc(dinero(it.monto_usd))})` : ""}
+              ${it.referencia_cobro ? ` · Ref: ${esc(it.referencia_cobro)}` : ""}
+            </div>
+            <div class="com-monto-box">
+              ${!it.pagada
+                ? `<div class="com-monto-info">
+                    <span class="ped-det">Comisión (${formatoNumInput(it.pct)}%) en ${esBs ? "Bolívares (Bs)" : "Efectivo ($)"}:</span>
+                    <strong class="com-monto-principal">${esBs ? esc(formatoMonto(it.comision_bs_origen, "Bs")) : esc(dinero(it.comision_usd))}</strong>
+                    ${esBs ? `<span class="ped-det">Base: ${esc(dinero(it.comision_usd))} (se ajusta según el día en que se transfiera la comisión)</span>` : ""}
+                  </div>
+                  ${esAdmin ? `<button type="button" class="btn btn-primary btn-chico" data-com-pagar="${esc(it.pago_id)}">Cancelar comisión</button>` : ""}`
+                : `<div class="com-monto-info">
+                    <span class="ped-det">Comisión cancelada (${formatoNumInput(it.pct)}%) · Equivalente en $:</span>
+                    <strong class="com-monto-principal com-monto-usd-grande">${esc(dinero(it.comision_usd))}</strong>
+                    <span class="ped-det">
+                      ${it.comision_fecha ? `Día de pago: ${esc(fechaLegible(it.comision_fecha))}` : ""}
+                      ${it.comision_moneda === "Bs"
+                        ? ` · Pagada en Bs (${esc(formatoMonto(it.comision_monto, "Bs"))}${it.comision_tasa ? ` · BCV ${esc(formatoNumInput(it.comision_tasa, true))}` : ""})`
+                        : " · Pagada en Efectivo ($)"}
+                      ${it.comision_ref ? ` · Ref: ${esc(it.comision_ref)}` : ""}
+                      ${it.comision_pagada_por ? ` · Por: ${esc(it.comision_pagada_por)}` : ""}
+                    </span>
+                  </div>
+                  <div class="com-acciones-pagada">
+                    <button type="button" class="btn btn-ghost btn-chico" data-com-wa="${esc(it.pago_id)}">WhatsApp</button>
+                    ${esAdmin ? `<button type="button" class="btn btn-ghost btn-chico" data-com-deshacer="${esc(it.pago_id)}">Deshacer</button>` : ""}
+                  </div>`}
+            </div>
+          </div>
+        </li>`;
+      };
+
+      // Agrupar comisiones pagadas por secciones de fecha (Esta semana · Últimas 2 semanas · Últimos 30 días · Anteriores)
+      const renderPagadasPorSecciones = (listaPag) => {
+        if (!listaPag.length) return [`<li class="vacio-panel com-vacio-chico">No hay comisiones pagadas registradas.</li>`];
+        const grupos = [
+          { titulo: "Esta semana", items: [] },
+          { titulo: "Últimas 2 semanas", items: [] },
+          { titulo: "Últimos 30 días", items: [] },
+          { titulo: "Más de 30 días", items: [] },
+        ];
+        listaPag.forEach((it) => {
+          const d = diasDesdeHoy(fechaDePagada(it));
+          if (d <= 7) grupos[0].items.push(it);
+          else if (d <= 14) grupos[1].items.push(it);
+          else if (d <= 30) grupos[2].items.push(it);
+          else grupos[3].items.push(it);
+        });
+        const salida = [];
+        grupos.forEach((g) => {
+          if (!g.items.length) return;
+          const subUsd = Math.round(g.items.reduce((a, x) => a + x.comision_usd, 0) * 100) / 100;
+          salida.push(`<li class="com-seccion-fecha">
+            <span>${esc(g.titulo)} <span class="ped-det">(${g.items.length})</span></span>
+            <strong>${esc(dinero(subUsd))}</strong>
+          </li>`);
+          g.items.forEach((it) => salida.push(htmlItemCom(it)));
+        });
+        return salida;
+      };
+
+      if (estadoFiltroCom === "todas") {
+        $("pLista").innerHTML = [
+          `<li class="com-grupo-header"><span class="chip chip-pend">Por pagar (${pend.length})</span></li>`,
+          ...(pend.length ? pend.map(htmlItemCom) : [`<li class="vacio-panel com-vacio-chico">No hay comisiones pendientes por pagar.</li>`]),
+          `<li class="com-grupo-header"><span class="chip chip-ok">Pagadas (${pag.length})</span></li>`,
+          ...renderPagadasPorSecciones(pag),
+        ].join("");
+      } else if (estadoFiltroCom === "pagadas") {
+        $("pLista").innerHTML = renderPagadasPorSecciones(pag).join("");
+      } else {
+        $("pLista").innerHTML = comisionesVisibles.map(htmlItemCom).join("");
+      }
+      pintarBarraSel();
+    };
+
+    // Modal de engranaje ⚙️: configurar porcentaje por defecto (3%) y por vendedor
+    const abrirConfigComision = async () => {
+      cfgCom = await obtenerConfigComisiones(true);
+      const pctDef = Number(cfgCom.porcentaje_default) || 3;
+      const vends = Array.isArray(cfgCom.vendedores) && cfgCom.vendedores.length
+        ? cfgCom.vendedores
+        : [...new Set((memoria.pedidos || []).map((p) => p.vendedor).filter(Boolean))].map((n) => ({
+            id: n.toLowerCase(),
+            nombre: n,
+            comision_pct: (cfgCom.por_vendedor && cfgCom.por_vendedor[n.toLowerCase()]) || pctDef,
+          }));
+      const d = await hoja({
+        titulo: "⚙️ Porcentaje de comisiones",
+        cuerpo: `<p class="modal-sub">Definí el porcentaje de comisión sobre los pagos conciliados (por defecto <strong>3%</strong>).</p>
+          <label class="field field-full"><span>Porcentaje por defecto (%) *</span>
+            <input name="pct_default" inputmode="decimal" autocomplete="off" value="${esc(formatoNumInput(pctDef))}" placeholder="3" />
+          </label>
+          ${vends.length ? `<fieldset class="pay"><legend>Porcentaje por vendedor</legend>
+            ${vends.map((u) => `<div class="fila-manual-item">
+              <div class="fila-manual-info"><strong>${esc(u.nombre)}</strong></div>
+              <label class="fila-manual-inp"><input type="text" class="inp-precio-caja" name="vend_${esc(u.id)}" inputmode="decimal" value="${esc(formatoNumInput(u.comision_pct || pctDef))}" /><span>%</span></label>
+            </div>`).join("")}
+          </fieldset>` : ""}`,
+        ok: "Guardar porcentajes",
+        validar: (x) => {
+          const p = montoNum(x.pct_default);
+          return p > 0 && p <= 100 ? "" : "Indicá un porcentaje válido entre 0,1 y 100.";
+        },
+      });
+      if (!d) return;
+      const nuevoDef = montoNum(d.pct_default) || 3;
+      const porcentajes = {};
+      const nuevoMapa = {};
+      vends.forEach((u) => {
+        const val = montoNum(d[`vend_${u.id}`]) || nuevoDef;
+        porcentajes[u.id] = val;
+        nuevoMapa[u.id] = val;
+        nuevoMapa[String(u.nombre || "").trim().toLowerCase()] = val;
+        u.comision_pct = val;
+      });
+      cfgCom = { porcentaje_default: nuevoDef, por_vendedor: nuevoMapa, vendedores: vends };
+      guardarLS(K_COMISION_CFG, cfgCom);
+      pintar();
+      try {
+        const res = await api("guardarComisionConfig", { porcentaje_default: nuevoDef, porcentajes });
+        if (res && res.config) { cfgCom = res.config; guardarLS(K_COMISION_CFG, cfgCom); pintar(); }
+        toast("Porcentajes de comisión actualizados");
+      } catch (e) {
+        toast("Guardado en el teléfono · subí el nuevo Code.gs para sincronizar en la hoja");
+      }
+    };
+
+    // Modal para cancelar (liquidar) una o varias comisiones al vendedor
+    const liquidarComisiones = async (itemsElegidos) => {
+      if (!itemsElegidos.length) return;
+      const diaFmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const diaHoy = diaFmt(new Date());
+      const enUsd = itemsElegidos.filter((x) => x.moneda !== "Bs");
+      const enBs = itemsElegidos.filter((x) => x.moneda === "Bs");
+      const totalUsdEfectivo = Math.round(enUsd.reduce((a, x) => a + x.comision_usd, 0) * 100) / 100;
+      const totalBaseUsdBs = Math.round(enBs.reduce((a, x) => a + x.comision_usd, 0) * 100) / 100;
+      const totalBsOrigen = Math.round(enBs.reduce((a, x) => a + x.comision_bs_origen, 0) * 100) / 100;
+      // Si todos los cobros en Bs son del mismo día, por defecto seleccionamos ese día (normalmente se cancela el mismo día)
+      const fechasBs = [...new Set(enBs.map((x) => x.fecha_pago).filter(Boolean))];
+      const fechaCobroUnica = fechasBs.length === 1 ? fechasBs[0] : "";
+      const tasaCobroUnica = fechaCobroUnica && enBs.every((x) => x.tasa_cobro === enBs[0].tasa_cobro) ? enBs[0].tasa_cobro : 0;
+      const fechaInicial = fechaCobroUnica || diaHoy;
+      const vendsNombres = [...new Set(itemsElegidos.map((x) => x.vendedor))].join(", ");
+
+      let tasaComActual = fechaInicial === fechaCobroUnica && tasaCobroUnica > 0 ? tasaCobroUnica : 0;
+      let montoBsTransferir = fechaInicial === fechaCobroUnica ? totalBsOrigen : 0;
+
+      const d = await hoja({
+        titulo: itemsElegidos.length === 1 ? `Cancelar comisión · ${itemsElegidos[0].pedido_id}` : `Cancelar ${itemsElegidos.length} comisiones`,
+        cuerpo: `<p class="modal-sub">Vendedor: <strong>${esc(vendsNombres)}</strong> · ${itemsElegidos.length === 1 ? `Comisión del ${formatoNumInput(itemsElegidos[0].pct)}% sobre pago conciliado` : `${itemsElegidos.length} pagos conciliados seleccionados`}.</p>
+          <ul class="resumen-items com-modal-lista">
+            ${itemsElegidos.map((x) => `<li>
+              <span><strong>${esc(x.negocio)}</strong> <span class="ped-det">${esc(x.pedido_id)} · cobrado ${esc(formatoMonto(x.monto_cobrado, x.moneda))}</span></span>
+              <em>${x.moneda === "Bs" ? `${esc(dinero(x.comision_usd))} (${formatoNumInput(x.pct)}%)` : esc(dinero(x.comision_usd))}</em>
+            </li>`).join("")}
+          </ul>
+
+          ${enUsd.length ? `<div class="com-liquidar-box es-usd">
+            <span class="ped-det">Pago(s) recibido(s) en Efectivo → Comisión en Efectivo ($):</span>
+            <strong class="com-liquidar-monto">${esc(dinero(totalUsdEfectivo))}</strong>
+          </div>` : ""}
+
+          ${enBs.length ? `<div class="com-liquidar-box es-bs">
+            <span class="ped-det">Pago(s) recibido(s) en Bolívares → Comisión en Bolívares (Bs):</span>
+            <fieldset class="pay com-dias-fieldset">
+              <legend>¿Qué día se canceló la comisión?</legend>
+              <div class="selector-tema com-dias-sel">
+                ${fechaCobroUnica ? `<button type="button" data-cdia="${esc(fechaCobroUnica)}" aria-pressed="true">Mismo día del cobro (${esc(fechaLegible(fechaCobroUnica))})</button>` : ""}
+                ${fechaCobroUnica !== diaHoy ? `<button type="button" data-cdia="${diaHoy}" aria-pressed="${!fechaCobroUnica}">Hoy (${esc(fechaLegible(diaHoy))})</button>` : ""}
+                <button type="button" data-cdia="otro" aria-pressed="false">Otro día</button>
+              </div>
+              <label class="field field-full" id="cFechaWrap" hidden>
+                <span>Seleccionar fecha de pago de comisión</span>
+                <input type="date" id="cFechaInput" max="${diaHoy}" value="${esc(fechaInicial)}" />
+              </label>
+            </fieldset>
+            <div class="tasa-bcv-box">
+              <div class="tasa-bcv-linea">
+                <span id="cTasaTexto">Consultando tasa BCV…</span>
+                <button type="button" class="btn-link-chico" id="btnCEditarTasa">Editar tasa</button>
+              </div>
+              <label class="field field-full" id="cTasaManualWrap" hidden>
+                <span>Tasa BCV (Bs por $)</span>
+                <input type="text" name="tasa" id="cTasaInput" inputmode="decimal" autocomplete="off" value="${tasaComActual ? esc(formatoNumInput(tasaComActual, true)) : ""}" />
+              </label>
+              <div class="tasa-esperado-linea">
+                <div>
+                  <span class="ped-det">Monto a transferir al vendedor en Bs:</span>
+                  <strong class="tasa-esperado-monto" id="cMontoBsTxt">${esc(formatoMonto(totalBsOrigen, "Bs"))}</strong>
+                  <span class="ped-det" id="cDetalleBsTxt"></span>
+                </div>
+                <button type="button" class="btn btn-ghost btn-chico" id="btnCopiarComBs">Copiar Bs</button>
+              </div>
+            </div>
+          </div>` : `<input type="hidden" id="cFechaInput" value="${diaHoy}" />`}
+
+          <input type="hidden" name="fecha_comision" id="cFechaElegida" value="${esc(fechaInicial)}" />
+          <label class="field field-full"><span>Referencia o nota <span class="ped-det">(opcional · pago móvil / transferencia / efectivo)</span></span>
+            <input name="referencia" maxlength="80" autocomplete="off" placeholder="Ej. Ref 987654" />
+          </label>`,
+        ok: "Confirmar comisión pagada",
+        validar: (x) => {
+          if (enBs.length && !(tasaComActual > 0 || montoNum(x.tasa) > 0)) {
+            return "No se encontró la tasa BCV para esa fecha. Tocá 'Editar tasa' e ingresala.";
+          }
+          return "";
+        },
+        alAbrir: (form) => {
+          if (!enBs.length) return;
+          let reqId = 0;
+          const fElegida = form.querySelector("#cFechaElegida");
+          const fWrap = form.querySelector("#cFechaWrap");
+          const fInp = form.querySelector("#cFechaInput");
+          const tasaTxt = form.querySelector("#cTasaTexto");
+          const tasaWrap = form.querySelector("#cTasaManualWrap");
+          const tasaInp = form.querySelector("#cTasaInput");
+          const montoTxt = form.querySelector("#cMontoBsTxt");
+          const detTxt = form.querySelector("#cDetalleBsTxt");
+
+          const recalcularBs = () => {
+            const f = fElegida.value;
+            if (f === fechaCobroUnica && tasaCobroUnica > 0 && (!tasaInp.dataset.manual)) {
+              tasaComActual = tasaCobroUnica;
+              montoBsTransferir = totalBsOrigen;
+              tasaTxt.innerHTML = `Tasa BCV del día del cobro (${esc(fechaLegible(f))}): <strong>Bs ${esc(formatoNumInput(tasaComActual, true))} / $</strong>`;
+              montoTxt.textContent = formatoMonto(montoBsTransferir, "Bs");
+              detTxt.textContent = `Equivale a ${dinero(totalBaseUsdBs)} (mismo día en que canceló el cliente).`;
+              return;
+            }
+            if (tasaComActual > 0) {
+              montoBsTransferir = Math.round(totalBaseUsdBs * tasaComActual * 100) / 100;
+              montoTxt.textContent = formatoMonto(montoBsTransferir, "Bs");
+              detTxt.textContent = `Base ${dinero(totalBaseUsdBs)} × BCV ${formatoNumInput(tasaComActual, true)} (el día del cobro eran ${formatoMonto(totalBsOrigen, "Bs")}).`;
+            }
+          };
+
+          const buscarTasa = async (f) => {
+            const id = ++reqId;
+            if (f === fechaCobroUnica && tasaCobroUnica > 0 && !tasaInp.dataset.manual) {
+              recalcularBs();
+              return;
+            }
+            tasaTxt.textContent = "Consultando tasa BCV…";
+            const info = await obtenerTasaBcv(f);
+            if (id !== reqId) return;
+            if (info.tasa > 0) {
+              tasaComActual = info.tasa;
+              tasaInp.value = formatoNumInput(info.tasa, true);
+              tasaTxt.innerHTML = `Tasa BCV (${esc(fechaLegible(info.fechaEfectiva || f))}): <strong>Bs ${esc(formatoNumInput(info.tasa, true))} / $</strong>`;
+              recalcularBs();
+            } else {
+              tasaTxt.innerHTML = `<span class="ped-det">Ingresá la tasa BCV manualmente:</span>`;
+              tasaWrap.hidden = false;
+            }
+          };
+
+          form.querySelector(".com-dias-sel").addEventListener("click", (e) => {
+            const b = e.target.closest("[data-cdia]");
+            if (!b) return;
+            form.querySelectorAll(".com-dias-sel [data-cdia]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+            const otro = b.dataset.cdia === "otro";
+            fWrap.hidden = !otro;
+            delete tasaInp.dataset.manual;
+            fElegida.value = otro ? fInp.value : b.dataset.cdia;
+            buscarTasa(fElegida.value);
+          });
+          fInp.addEventListener("change", () => {
+            if (fInp.value) {
+              delete tasaInp.dataset.manual;
+              fElegida.value = fInp.value;
+              buscarTasa(fInp.value);
+            }
+          });
+          form.querySelector("#btnCEditarTasa").addEventListener("click", () => {
+            tasaWrap.hidden = !tasaWrap.hidden;
+            if (!tasaWrap.hidden) tasaInp.focus();
+          });
+          tasaInp.addEventListener("input", () => {
+            tasaInp.dataset.manual = "1";
+            tasaComActual = montoNum(tasaInp.value);
+            if (tasaComActual > 0) tasaTxt.innerHTML = `Tasa BCV aplicada: <strong>Bs ${esc(formatoNumInput(tasaComActual, true))} / $</strong>`;
+            recalcularBs();
+          });
+          form.querySelector("#btnCopiarComBs").addEventListener("click", async () => {
+            const numStr = formatoNumInput(montoBsTransferir, true);
+            if (await copiarTexto(numStr)) toast(`Copiado: ${numStr}`);
+          });
+
+          buscarTasa(fechaInicial);
+        },
+      });
+      if (!d) return;
+
+      const fechaFinal = d.fecha_comision || fechaInicial;
+      const tasaFinal = montoNum(d.tasa) || tasaComActual || 0;
+      const refFinal = String(d.referencia || "").trim();
+
+      // Guardar en respaldo local y actualizar en memoria inmediatamente
+      const pagadasLocal = leerLS(K_COMISION_PAGADAS, {});
+      itemsElegidos.forEach((match) => {
+        const montoLiq = match.moneda === "Bs"
+          ? (fechaFinal === fechaCobroUnica ? match.comision_bs_origen : Math.round(match.comision_usd * tasaFinal * 100) / 100)
+          : match.comision_usd;
+        pagadasLocal[match.pago_id] = {
+          comision_estado: "pagada",
+          comision_pct: match.pct,
+          comision_usd: match.comision_usd,
+          comision_moneda: match.moneda,
+          comision_tasa: match.moneda === "Bs" ? tasaFinal : 0,
+          comision_monto: montoLiq,
+          comision_fecha: fechaFinal,
+          comision_ref: refFinal,
+          comision_pagada_por: yo().nombre,
+        };
+      });
+      guardarLS(K_COMISION_PAGADAS, pagadasLocal);
+
+      const aplicarEnLista = (listaPeds) => {
+        (listaPeds || []).forEach((ped) => {
+          const matchesPed = itemsElegidos.filter((x) => x.pedido_id === ped.id);
+          if (!matchesPed.length) return;
+          if (!Array.isArray(ped.pagos) || !ped.pagos.length) {
+            ped.pagos = matchesPed.map((m) => ({
+              id: m.pago_id,
+              pedido_id: ped.id,
+              fecha_pago: m.fecha_pago,
+              moneda: m.moneda,
+              monto: m.monto_cobrado,
+              tasa: m.tasa_cobro,
+              monto_usd: m.monto_usd,
+              referencia: m.referencia_cobro,
+              estado: "conciliado",
+              conciliado_at: m.conciliado_at,
+            }));
+          }
+          ped.pagos.forEach((pg) => {
+            const match = matchesPed.find((x) => x.pago_id === pg.id);
+            if (!match) return;
+            Object.assign(pg, pagadasLocal[match.pago_id]);
+          });
+        });
+      };
+      aplicarEnLista(memoria.pedidos);
+      aplicarEnLista(pedidosConc);
+      itemsElegidos.forEach((x) => selCom.delete(x.pago_id));
+      pintar();
+
+      try {
+        await api("pagarComision", {
+          modo: "pagar",
+          fecha_comision: fechaFinal,
+          tasa: tasaFinal,
+          referencia: refFinal,
+          items: itemsElegidos.map((x) => ({ pago_id: x.pago_id, pedido_id: x.pedido_id, pct: x.pct })),
+        });
+        toast(itemsElegidos.length === 1 ? "Comisión marcada como pagada" : `${itemsElegidos.length} comisiones marcadas como pagadas`);
+      } catch (e) {
+        toast("Comisión marcada como pagada en el teléfono");
+      }
+    };
+
+    // Eventos de la vista de Comisiones
+    $("cEstadoTabs").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-cest]");
+      if (!b) return;
+      estadoFiltroCom = b.dataset.cest;
+      $("cEstadoTabs").querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
+      pintar();
+    });
+    const perTabs = $("cPeriodoTabs");
+    if (perTabs) perTabs.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-cper]");
+      if (!b) return;
+      periodoCom = Number(b.dataset.cper) || 0;
+      perTabs.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
+      pintar();
+    });
+    const btnCfg = $("btnConfigComision");
+    if (btnCfg) btnCfg.addEventListener("click", abrirConfigComision);
+    const sv = $("pVend");
+    if (sv) sv.addEventListener("change", () => { vendedorPed = sv.value; pintar(); });
+    let tBus = null;
+    $("pBuscar").addEventListener("input", (e) => { clearTimeout(tBus); tBus = setTimeout(() => { busquedaPed = e.target.value; pintar(); }, 120); });
+    const chkTodos = $("cTodos");
+    if (chkTodos) chkTodos.addEventListener("change", () => {
+      comisionesVisibles.filter((x) => !x.pagada).forEach((x) => {
+        if (chkTodos.checked) selCom.add(x.pago_id);
+        else selCom.delete(x.pago_id);
+      });
+      pintar();
+    });
+    const btnLote = $("btnPagarLote");
+    if (btnLote) btnLote.addEventListener("click", () => {
+      const elegidas = comisionesVisibles.filter((x) => !x.pagada && selCom.has(x.pago_id));
+      liquidarComisiones(elegidas);
+    });
+    $("pLista").addEventListener("change", (e) => {
+      const chk = e.target.closest("[data-com-check]");
+      if (!chk) return;
+      if (chk.checked) selCom.add(chk.dataset.comCheck);
+      else selCom.delete(chk.dataset.comCheck);
+      pintarBarraSel();
+    });
+    $("pLista").addEventListener("click", async (e) => {
+      const bPagar = e.target.closest("[data-com-pagar]");
+      if (bPagar) {
+        const it = comisionesVisibles.find((x) => x.pago_id === bPagar.dataset.comPagar);
+        if (it) await liquidarComisiones([it]);
+        return;
+      }
+      const bWa = e.target.closest("[data-com-wa]");
+      if (bWa) {
+        const it = comisionesVisibles.find((x) => x.pago_id === bWa.dataset.comWa);
+        if (!it) return;
+        const msg = textoWhastappComision([it], it.comision_fecha || it.fecha_pago, it.comision_tasa, it.comision_ref);
+        const vendObj = (cfgCom && cfgCom.vendedores || []).find((u) => u.id === it.vendedor_id || u.nombre === it.vendedor);
+        const tel = vendObj ? telefonoWhatsapp(vendObj.telefono) : "";
+        window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
+        return;
+      }
+      const bDes = e.target.closest("[data-com-deshacer]");
+      if (bDes) {
+        const it = comisionesVisibles.find((x) => x.pago_id === bDes.dataset.comDeshacer);
+        if (!it) return;
+        const ok = await hoja({
+          titulo: "¿Volver comisión a Por pagar?",
+          cuerpo: `<p class="modal-sub">La comisión de <strong>${esc(it.negocio)}</strong> (${esc(it.pedido_id)}) volverá a figurar como pendiente por pagar.</p>`,
+          ok: "Sí, deshacer pago",
+        });
+        if (!ok) return;
+        const pagadasLocal = leerLS(K_COMISION_PAGADAS, {});
+        pagadasLocal[it.pago_id] = { comision_estado: "pendiente" };
+        guardarLS(K_COMISION_PAGADAS, pagadasLocal);
+        [memoria.pedidos, pedidosConc].forEach((l) => (l || []).forEach((ped) => (ped.pagos || []).forEach((pg) => {
+          if (pg.id === it.pago_id) pg.comision_estado = "";
+        })));
+        pintar();
+        try {
+          await api("pagarComision", { modo: "deshacer", items: [{ pago_id: it.pago_id, pedido_id: it.pedido_id }] });
+        } catch (_) {}
+        toast("Comisión devuelta a Por pagar");
+      }
+    });
+
+    const guardado = pedidosEnMemoria();
+    if (guardado) { memoria.pedidos = guardado; pintar(); }
+    try {
+      const [_, rConc] = await Promise.all([
+        Date.now() - memoria.t > 4000 ? refrescarPedidos().catch(() => {}) : Promise.resolve(),
+        api("pedidos", { conciliados: true, dias: 180 }).catch(() => ({ pedidos: [] })),
+      ]);
+      if (!vigente()) return;
+      pedidosConc = rConc.pedidos || [];
+      pintar();
+    } catch (_) {}
+  }
+
   /* ---------- Pedidos web (los arma el cliente en el catálogo) ---------- */
   function filaWeb(w) {
     const monto = totalPorPago(w.items, w.tipo_pago);
@@ -1900,6 +2715,9 @@
     const ec = estadoCredito(p);
     const conPrecio = vende() && p.items.some((it) => Number(it.precio) > 0);
     const tipoAcordado = p.tipo_pago || tipoPagoDe(p.pago);
+    const pagosLista = Array.isArray(p.pagos) ? p.pagos : [];
+    const tieneAjuste = p.ajuste_motivo && p.ajuste_estado !== "revertido";
+    const infoCambios = tieneAjuste ? cambiosDePrecio(p) : { cambios: [], totalAntes: 0, totalAhora: 0 };
     v.innerHTML = `
       <section class="tarjeta">
         <div class="fila-top"><h2 class="ped-titulo">${esc(p.negocio)}</h2>${chipEstado(p.estado)}</div>
@@ -1914,6 +2732,33 @@
         </div>
       </section>
       ${acciones.length ? `<div class="acciones-ped">${acciones.map((a) => `<button type="button" class="btn ${principal.includes(a) ? "btn-primary" : "btn-ghost"}" data-acc="${a}">${ETIQUETAS[a]}</button>`).join("")}</div>` : ""}
+      ${vende() && tieneAjuste ? `<section class="tarjeta aviso-ajuste-card">
+        <div class="fila-top"><strong>Cambio de precios por facturación</strong><span class="chip chip-ajuste">${p.ajuste_estado === "aprobado" || p.cobro === "conciliado" ? "Verificado" : "Reportado"}</span></div>
+        ${infoCambios.cambios.length ? `<ul class="lista-cambios-precio">
+          ${infoCambios.cambios.map((ch) => `<li><strong>${esc(ch.producto)}</strong> <span class="ped-det">(${esc(ch.code)} · ${ch.cajas} cj.)</span>: de <s>${esc(dinero(ch.antes))}</s> a <strong>${esc(dinero(ch.ahora))}</strong> / caja</li>`).join("")}
+        </ul>
+        <p class="ped-det">Total del pedido: de <s>${esc(dinero(infoCambios.totalAntes))}</s> a <strong>${esc(dinero(infoCambios.totalAhora))}</strong></p>` : ""}
+        <p class="ped-det">Motivo: <strong>${esc(p.ajuste_motivo)}</strong>${p.ajuste_por ? ` · por ${esc(p.ajuste_por)}` : ""}</p>
+        ${gestion() && p.ajuste_previo ? `<button type="button" class="btn btn-ghost btn-chico" id="btnRevertirAjuste">Revertir a precios originales</button>` : ""}
+      </section>` : ""}
+      ${vende() && (pagosLista.length > 0 || Number(p.pagado_usd) > 0) ? `<section class="tarjeta">
+        <h3 class="sub-titulo">Pagos y abonos registrados</h3>
+        <ul class="lista-abonos">
+          ${pagosLista.map((pg) => `<li class="abono-item">
+            <div class="abono-top">
+              <strong>${esc(formatoMonto(pg.monto, pg.moneda))}${pg.moneda === "Bs" && pg.monto_usd ? ` <span class="ped-det">(${esc(dinero(pg.monto_usd))} a tasa BCV ${esc(String(pg.tasa).replace(".", ","))})</span>` : ""}</strong>
+              <span class="chip ${pg.estado === "conciliado" ? "chip-ok" : "chip-pend"}">${pg.estado === "conciliado" ? "Conciliado" : "Por conciliar"}</span>
+            </div>
+            <div class="ped-det">
+              ${pg.fecha_pago ? `Fecha pago: ${esc(fechaLegible(pg.fecha_pago))} · ` : ""}Reportó: ${esc(pg.registrado_por || "—")}${pg.referencia ? ` · Ref: ${esc(pg.referencia)}` : ""}${pg.conciliado_por ? ` · Concilió: ${esc(pg.conciliado_por)}` : ""}
+            </div>
+          </li>`).join("")}
+        </ul>
+        <div class="abonos-resumen">
+          <span>Abonado: <strong>${esc(dinero(p.pagado_usd || 0))}</strong></span>
+          <span>Saldo pendiente: <strong>${esc(dinero(p.saldo != null ? p.saldo : Math.max(0, (Number(p.total_final || p.total) || 0) - (Number(p.pagado_usd) || 0))))}</strong></span>
+        </div>
+      </section>` : ""}
       <section class="tarjeta">
         <h3 class="sub-titulo">Productos</h3>
         <table class="tabla"><thead><tr><th>Producto</th><th>Cajas</th>${conPrecio ? '<th class="num">Precio</th>' : ""}</tr></thead><tbody>
@@ -1944,9 +2789,27 @@
       ${p.historial === null ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3>${spin("Cargando historial…")}</section>` : ""}
       ${p.historial && p.historial.length ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3><ol class="historial">${p.historial.map((h) =>
         `<li><strong>${esc({ creado: "Enviado (en proceso)", reasignado: "Despachador cambiado", pendiente: "Vuelto a En proceso", confirmado: "Aprobado",
-          cobrado: "Cancelado (pago reportado)", conciliado: "Pago conciliado", borrado: "Borrado", entregado: "Entregado", entrega_parcial: "Entrega parcial", editado: "Editado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
+          cobrado: "Cancelado (pago reportado)", abono: "Abono reportado", conciliado: "Pago conciliado", abono_conciliado: "Abono conciliado",
+          ajuste_precio: "Ajuste de precios por facturación", ajuste_revertido: "Precios originales restaurados",
+          comision_pagada: "Comisión pagada al vendedor", comision_deshecha: "Pago de comisión revertido",
+          borrado: "Borrado", entregado: "Entregado", entrega_parcial: "Entrega parcial", editado: "Editado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
 
     $("btnReenviar").addEventListener("click", () => enviarAlGrupo(mensajeGrupo(p, c)));
+    const btnRev = $("btnRevertirAjuste");
+    if (btnRev) btnRev.addEventListener("click", async () => {
+      const ok = await hoja({
+        titulo: `¿Revertir cambio de precios en ${p.id}?`,
+        cuerpo: `<p class="modal-sub">Se restaurarán los precios originales que tenía el pedido antes del ajuste de <strong>${esc(p.ajuste_por || "vendedor")}</strong> (${esc(p.ajuste_motivo)}).</p>`,
+        ok: "Sí, restaurar precios",
+      });
+      if (!ok) return;
+      try {
+        const rc = await api("cobro", { pedido_id: p.id, accion: "revertir_ajuste" });
+        guardarEnMemoria(rc.pedido);
+        toast("Precios originales restaurados");
+        render();
+      } catch (e) { toast(e.message); }
+    });
     const bb = $("btnBorrarPed");
     if (bb) bb.addEventListener("click", async () => {
       const d = await hoja({
@@ -2167,59 +3030,429 @@
 
   async function accionCobro(p, acc) {
     const textos = {
-      cobrar: [`¿El cliente pagó ${p.id}?`, "Indicá cuánto cobraste. Queda como <strong>Cancelado</strong> hasta que Administración verifique el pago y lo concilie.", "Sí, cancelado"],
-      conciliar: [`¿Recibiste el pago de ${p.id}?`, "Queda como <strong>Conciliado</strong> (pago verificado) y suma en Conciliados.", "Sí, conciliar"],
+      cobrar: [`¿Cómo cancelaron ${p.id}?`, "Indicá si fue en efectivo ($) o en Bs, la fecha del pago y el monto recibido. Si cubre el total queda como <strong>Cancelado completo</strong>; si es menor, se registrará como un <strong>Abono</strong>.", "Sí, canceló completo"],
+      conciliar: [`Conciliar pago · ${p.id}`, "Verificá los datos del pago reportado por el vendedor. Si todo está correcto, tocá <strong>Es correcto · Conciliar</strong>.", "✓ Es correcto · Conciliar"],
       desconciliar: [`¿Deshacer la conciliación de ${p.id}?`, "Vuelve a Cancelado · por conciliar.", "Deshacer"],
     };
     let extra = {};
     if (acc === "cobrar" || acc === "conciliar") {
       const [titulo, cuerpo, ok] = textos[acc];
-      const mon = p.moneda || monedaDePago(p.pago);
-      const previo = p.monto ? String(p.monto).replace(".", ",") : "";
+      const diaFmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const diaHoy = diaFmt(new Date());
+      const pagosLista = Array.isArray(p.pagos) ? p.pagos : [];
+      const pagosRep = pagosLista.filter((x) => x.estado === "reportado");
+      const ultRep = acc === "conciliar" && pagosRep.length ? pagosRep[pagosRep.length - 1] : null;
+      const pagadoPrevioUsd = acc === "conciliar"
+        ? Math.round(pagosLista.filter((x) => x.estado === "conciliado").reduce((a, x) => a + (Number(x.monto_usd) || 0), 0) * 100) / 100
+        : Math.round((pagosLista.length ? pagosLista.filter((x) => x.estado !== "rechazado").reduce((a, x) => a + (Number(x.monto_usd) || 0), 0) : (Number(p.pagado_usd) || 0)) * 100) / 100;
+      const mon = (ultRep && ultRep.moneda) || p.moneda || monedaDePago(p.pago);
+      const montoRepNum = Number((ultRep && ultRep.monto) || p.monto) || 0;
+      const previo = acc === "conciliar" && montoRepNum > 0 ? formatoNumInput(montoRepNum, mon === "Bs") : "";
+      const fechaIni = (ultRep && ultRep.fecha_pago) || diaHoy;
+      const tasaIni = ultRep && Number(ultRep.tasa) > 0 ? Number(ultRep.tasa) : 0;
+      const refIni = (ultRep && ultRep.referencia) || "";
       const conPrecio = p.items.some((it) => Number(it.precio) > 0);
       const acordado = p.tipo_pago || tipoPagoDe(p.pago);
-      const elegido = p.tipo_pago_real || acordado;
+      const elegido = (ultRep && ultRep.tipo_pago_real) || p.tipo_pago_real || acordado;
       const vigente = prontoVigente(p.entregado_at);
       const limite = limitePronto(p.entregado_at);
+      const preciosAjustados = {}; // { code: nuevoPrecio } si el vendedor corrige precios por error en facturación
+
+      // En Conciliar: si ya hay un monto reportado por el vendedor, mostrar la ventana emergente directa de confirmación
+      const vistaDirectaConciliar = acc === "conciliar" && montoRepNum > 0;
+      const tieneAjustePrev = p.ajuste_motivo && p.ajuste_estado !== "revertido";
+      const infoCambios = tieneAjustePrev ? cambiosDePrecio(p) : { cambios: [], totalAntes: 0, totalAhora: 0 };
+      const totActualPed = totalPorPago(p.items || [], elegido);
+      const evInicial = evaluarCobro({ totalUsd: totActualPed, pagadoPrevioUsd, monto: montoRepNum, moneda: mon, tasa: tasaIni });
+
+      const itemsConAjuste = () => (p.items || []).map((it) => {
+        const nuevo = preciosAjustados[it.code];
+        if (nuevo > 0) return { ...it, precio: nuevo, desc_pronto: 0, desc_efectivo_credito: 0, desc_efectivo_pronto: 0 };
+        return it;
+      });
+      const hayAjustePrecios = () => Object.keys(preciosAjustados).length > 0;
+
       const r = await hoja({
         titulo,
         cuerpo: `<p class="modal-sub">${cuerpo}</p>
-          ${acc === "conciliar" && p.monto ? `<p class="modal-sub">Reportado: <strong>${esc(formatoMonto(p.monto, p.moneda))}</strong>${p.cobrado_por ? ` por ${esc(p.cobrado_por)}` : ""}. Corregilo si recibiste otro monto.</p>` : ""}
-          <fieldset class="pay pagos" id="hPagos"><legend>¿Cómo pagó? <span class="ped-det">(acordado: ${esc((pagoPorId(acordado) || {}).nombre || p.pago)})</span></legend>
-            ${totalesPorPago(p.items).map((pg) => `<label class="pay-opt pago-opt"><input type="radio" name="tipo_pago_real" value="${pg.id}"${pg.id === elegido ? " checked" : ""} />
-              <span class="pago-txt"><strong>${esc(pg.nombre)}</strong>${pg.id === acordado ? "<span>Lo acordado</span>" : ""}</span>
-              ${conPrecio ? `<span class="pago-monto"><strong>${dinero(pg.total)}</strong></span>` : ""}</label>`).join("")}
-            ${!vigente && limite ? `<p class="form-warn" id="hProntoAviso" hidden>El plazo de pronto pago venció el ${esc(limite.toLocaleDateString("es-VE"))}. Aplicalo solo si lo autorizaron.</p>` : ""}
-          </fieldset>
-          <fieldset class="pay moneda"><legend>Moneda</legend>
-            ${["USD", "Bs"].map((m) => `<label class="pay-opt"><input type="radio" name="moneda" value="${m}"${m === mon ? " checked" : ""} /> ${m === "USD" ? "Dólares (USD)" : "Bolívares (Bs)"}</label>`).join("")}
-          </fieldset>
-          <label class="field field-full"><span>${acc === "cobrar" ? "Monto cobrado *" : "Monto recibido *"}</span>
-            <input name="monto" id="hMonto" inputmode="decimal" autocomplete="off" placeholder="Ej. 120,50" value="${esc(previo)}" /></label>`,
+          ${pagadoPrevioUsd > 0 ? `<div class="aviso-abono-previo">Abonado anteriormente: <strong>${esc(dinero(pagadoPrevioUsd))}</strong></div>` : ""}
+
+          ${vistaDirectaConciliar ? `<div class="conciliar-resumen-card" id="hVistaResumenConciliar">
+            <div class="conciliar-monto-principal">
+              <span class="ped-det">El vendedor <strong>${esc((ultRep && ultRep.registrado_por) || p.cobrado_por || p.vendedor || "")}</strong> indicó que el cliente canceló:</span>
+              <strong>${esc(formatoMonto(montoRepNum, mon))}</strong>
+              <span class="chip ${evInicial.completo ? "chip-ok" : "chip-pend"}" id="hConcChipEstado">${evInicial.completo ? "✓ Canceló completo" : "⚠️ Abono parcial"}</span>
+            </div>
+            <dl class="datos conciliar-datos-lista">
+              <dt>Modalidad</dt><dd><strong>${mon === "Bs" ? "Bolívares (Bs)" : "Efectivo / Dólares ($)"}</strong> · ${esc((pagoPorId(elegido) || {}).nombre || p.pago)}</dd>
+              ${mon === "Bs" ? `
+                <dt>Fecha pago</dt><dd><strong>${esc(fechaLegible(fechaIni))}</strong></dd>
+                <dt>Tasa BCV</dt><dd id="hConcTasaVal">${tasaIni > 0 ? `<strong>Bs ${esc(formatoNumInput(tasaIni, true))} / $</strong>` : "Consultando…"}</dd>
+                <dt>Al cambio</dt><dd id="hConcUsdVal"><strong>${evInicial.montoUsd > 0 ? esc(dinero(evInicial.montoUsd)) : "—"}</strong> <span class="ped-det">(de ${esc(dinero(evInicial.saldoBaseUsd))} del pedido)</span></dd>
+                <dt>Referencia</dt><dd>${refIni ? `<strong>${esc(refIni)}</strong>` : '<span class="ped-det">No indicada</span>'}</dd>
+              ` : `
+                <dt>Total pedido</dt><dd><strong>${esc(dinero(evInicial.saldoBaseUsd))}</strong>${!evInicial.completo ? ` · restan <strong>${esc(dinero(evInicial.restanteUsd))}</strong>` : ""}</dd>
+              `}
+            </dl>
+            ${tieneAjustePrev ? `<div class="aviso-ajuste-modal">
+              <strong>⚠️ Cambio de precios por facturación${p.ajuste_por ? ` (${esc(p.ajuste_por)})` : ""}:</strong>
+              ${infoCambios.cambios.length ? `<ul class="lista-cambios-precio">
+                ${infoCambios.cambios.map((ch) => `<li><strong>${esc(ch.producto)}</strong> (${esc(ch.code)} · ${ch.cajas} cj.): de <s>${esc(dinero(ch.antes))}</s> a <strong>${esc(dinero(ch.ahora))}</strong> / caja</li>`).join("")}
+              </ul>
+              <span class="ped-det">Total factura: de <s>${esc(dinero(infoCambios.totalAntes))}</s> a <strong>${esc(dinero(infoCambios.totalAhora))}</strong></span>` : ""}
+              <span>Motivo: <strong>«${esc(p.ajuste_motivo)}»</strong></span>
+            </div>` : ""}
+            <div class="conciliar-corregir-bar">
+              <button type="button" class="btn-link-chico" id="btnAbrirEdicionConciliar">¿Recibiste un monto distinto? Corregir datos</button>
+            </div>
+          </div>` : ""}
+
+          <div id="hFormCompletoCobro" ${vistaDirectaConciliar ? "hidden" : ""}>
+            <fieldset class="pay pagos" id="hPagos"><legend>Condición de pago <span class="ped-det">(acordado: ${esc((pagoPorId(acordado) || {}).nombre || p.pago)})</span></legend>
+              ${totalesPorPago(p.items).map((pg) => `<label class="pay-opt pago-opt"><input type="radio" name="tipo_pago_real" value="${pg.id}"${pg.id === elegido ? " checked" : ""} />
+                <span class="pago-txt"><strong>${esc(pg.nombre)}</strong>${pg.id === acordado ? "<span>Lo acordado</span>" : ""}</span>
+                ${conPrecio ? `<span class="pago-monto" data-pago-monto="${pg.id}"><strong>${dinero(pg.total)}</strong></span>` : ""}</label>`).join("")}
+              ${!vigente && limite ? `<p class="form-warn" id="hProntoAviso" hidden>El plazo de pronto pago venció el ${esc(limite.toLocaleDateString("es-VE"))}. Aplicalo solo si lo autorizaron.</p>` : ""}
+            </fieldset>
+
+            ${acc === "cobrar" ? `<div class="ajuste-cobro-wrap">
+              <button type="button" class="btn btn-ghost btn-bloque btn-ajuste-toggle" id="btnToggleAjuste" aria-expanded="false">✏️ Cambiar precios por error en facturación</button>
+              <div class="box-ajuste-cobro" id="hBoxAjuste" hidden>
+                <p class="nota-chica">Modificá el precio por caja de los productos con diferencia en la factura e indicá el motivo obligatorio.</p>
+                <div class="manual-todos-bar">
+                  <input type="text" id="hPrecioTodos" inputmode="decimal" autocomplete="off" placeholder="Mismo precio por caja ($)" />
+                  <button type="button" class="btn btn-ghost" id="btnHPrecioTodos">Aplicar a todos</button>
+                </div>
+                <div class="lista-manual-items" id="hItemsAjuste">
+                  ${(p.items || []).map((it) => {
+                    const u = precioUnitario(it, elegido);
+                    return `<div class="fila-manual-item">
+                      <div class="fila-manual-info">
+                        <strong>${esc(it.producto)}</strong>
+                        <span class="ped-det">${esc(it.code)} · ${it.cajas} caja${it.cajas === 1 ? "" : "s"} · orig. ${esc(dinero(u))}</span>
+                      </div>
+                      <label class="fila-manual-inp">
+                        <span>$ / caja</span>
+                        <input type="text" class="inp-precio-caja" data-cprecio-code="${esc(it.code)}" data-orig="${u}" inputmode="decimal" autocomplete="off" value="${esc(formatoNumInput(u))}" />
+                      </label>
+                    </div>`;
+                  }).join("")}
+                </div>
+                <div class="resumen-cambios-vivo" id="hResumenCambiosVivo" hidden></div>
+                <label class="field field-full"><span>Motivo del cambio de precios *</span>
+                  <textarea name="ajuste_motivo" id="hAjusteMotivo" rows="2" maxlength="250" placeholder="Ej. Error en facturación: se facturó a precio distinto"></textarea>
+                </label>
+                <button type="button" class="btn btn-ghost btn-chico" id="btnResetAjuste" hidden>Restaurar precios sin cambios</button>
+              </div>
+            </div>` : ""}
+
+            <fieldset class="pay moneda"><legend>¿Cómo cancelaron?</legend>
+              <label class="pay-opt"><input type="radio" name="moneda" value="USD"${mon !== "Bs" ? " checked" : ""} /> Efectivo / Dólares ($)</label>
+              <label class="pay-opt"><input type="radio" name="moneda" value="Bs"${mon === "Bs" ? " checked" : ""} /> Bolívares (Bs)</label>
+            </fieldset>
+
+            <div class="box-bs" id="hBoxBs" ${mon === "Bs" ? "" : "hidden"}>
+              <label class="field field-full"><span>Fecha del pago en Bs *</span>
+                <input type="date" name="fecha_pago" id="hFechaPago" max="${diaHoy}" value="${esc(fechaIni)}" />
+              </label>
+              <div class="tasa-bcv-box" id="hTasaBox">
+                <div class="tasa-bcv-linea">
+                  <span id="hTasaTexto">Consultando tasa BCV…</span>
+                  <button type="button" class="btn-link-chico" id="btnEditarTasa" title="Corregir tasa BCV manualmente">Editar tasa</button>
+                </div>
+                <label class="field field-full" id="hTasaManualWrap" hidden>
+                  <span>Tasa BCV del día (Bs por $)</span>
+                  <input type="text" name="tasa" id="hTasaInput" inputmode="decimal" autocomplete="off" placeholder="Ej. 450,25" value="${tasaIni ? esc(formatoNumInput(tasaIni, true)) : ""}" />
+                </label>
+                <div class="tasa-esperado-linea" id="hEsperadoWrap" hidden>
+                  <div>
+                    <span class="ped-det">Monto que debe recibirse en Bs:</span>
+                    <strong class="tasa-esperado-monto" id="hEsperadoBs">Bs 0,00</strong>
+                  </div>
+                  <button type="button" class="btn btn-ghost btn-chico" id="btnUsarEsperado">Usar monto</button>
+                </div>
+              </div>
+              <label class="field field-full"><span>Referencia <span class="ped-det">(opcional · pago móvil / transferencia)</span></span>
+                <input name="referencia" id="hRef" maxlength="60" autocomplete="off" placeholder="Ej. 001234" value="${esc(refIni)}" />
+              </label>
+            </div>
+
+            <label class="field field-full"><span id="hMontoLabel">${mon === "Bs" ? "Monto recibido en Bs *" : (acc === "cobrar" ? "Monto cobrado en $ *" : "Monto recibido en $ *")}</span>
+              <input name="monto" id="hMonto" inputmode="decimal" autocomplete="off" placeholder="${mon === "Bs" ? "Ej. 54.200,00" : "Ej. 120,50"}" value="${esc(previo)}" />
+            </label>
+            <div class="estado-cobro-aviso" id="hEstadoCobro" hidden></div>
+          </div>`,
         ok,
-        validar: (d) => (montoNum(d.monto) > 0 ? "" : "Escribí el monto (mayor que 0)."),
+        validar: (d) => {
+          if (!(montoNum(d.monto) > 0)) return "Escribí el monto recibido (mayor que 0).";
+          if (d.moneda === "Bs") {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(d.fecha_pago || "")) return "Indicá la fecha en que realizaron el pago en Bs.";
+            if (d.fecha_pago > diaHoy) return "La fecha del pago no puede ser futura.";
+            if (!(montoNum(d.tasa) > 0)) return "No se pudo obtener la tasa BCV para esa fecha. Tocá 'Editar tasa' e ingresala.";
+          }
+          if (hayAjustePrecios() && !String(d.ajuste_motivo || "").trim()) {
+            return "Escribí el motivo del cambio de precios por error en facturación.";
+          }
+          return "";
+        },
         alAbrir: (form) => {
-          // El monto sigue a la forma de pago (en dólares) mientras no lo escriban a mano
           let tocado = !!previo;
+          let tasaActual = tasaIni || 0;
+          let reqId = 0;
+          let enModoDirecto = vistaDirectaConciliar;
           const m = form.querySelector("#hMonto");
-          const sync = () => {
-            const tipo = (form.querySelector('input[name="tipo_pago_real"]:checked') || {}).value;
-            const usd = (form.querySelector('input[name="moneda"]:checked') || {}).value !== "Bs";
+          const mLabel = form.querySelector("#hMontoLabel");
+          const boxBs = form.querySelector("#hBoxBs");
+          const fechaInp = form.querySelector("#hFechaPago");
+          const tasaTxt = form.querySelector("#hTasaTexto");
+          const tasaWrap = form.querySelector("#hTasaManualWrap");
+          const tasaInp = form.querySelector("#hTasaInput");
+          const espWrap = form.querySelector("#hEsperadoWrap");
+          const espBs = form.querySelector("#hEsperadoBs");
+          const estadoBox = form.querySelector("#hEstadoCobro");
+          const btnOk = $("hojaOk");
+          const boxAjuste = form.querySelector("#hBoxAjuste");
+          const btnToggleAjuste = form.querySelector("#btnToggleAjuste");
+          const btnResetAjuste = form.querySelector("#btnResetAjuste");
+          const resumenVivo = form.querySelector("#hResumenCambiosVivo");
+
+          const btnAbrirEd = form.querySelector("#btnAbrirEdicionConciliar");
+          if (btnAbrirEd) {
+            btnAbrirEd.addEventListener("click", () => {
+              enModoDirecto = false;
+              const cardRes = form.querySelector("#hVistaResumenConciliar");
+              if (cardRes) cardRes.hidden = true;
+              form.querySelector("#hFormCompletoCobro").hidden = false;
+              evaluarYMostrar();
+              m.focus();
+            });
+          }
+
+          const tipoActual = () => (form.querySelector('input[name="tipo_pago_real"]:checked') || {}).value || elegido;
+          const esBsActual = () => (form.querySelector('input[name="moneda"]:checked') || {}).value === "Bs";
+          const totalPedidoUsd = () => {
+            const its = itemsConAjuste();
+            return totalPorPago(its, tipoActual());
+          };
+
+          const evaluarYMostrar = () => {
+            const tipo = tipoActual();
+            const esBs = esBsActual();
+            const totUsd = totalPedidoUsd();
+            if (conPrecio || hayAjustePrecios()) {
+              totalesPorPago(itemsConAjuste()).forEach((pg) => {
+                const sp = form.querySelector(`[data-pago-monto="${pg.id}"] strong`);
+                if (sp) sp.textContent = dinero(pg.total);
+              });
+            }
+            // Mostrar qué precios cambiaron exactamente de cuánto a cuánto mientras edita el vendedor
+            if (resumenVivo) {
+              const cods = Object.keys(preciosAjustados);
+              if (cods.length) {
+                const totOrig = totalPorPago(p.items || [], tipo);
+                resumenVivo.hidden = false;
+                resumenVivo.innerHTML = `<strong>Cambios aplicados:</strong><ul>${cods.map((c) => {
+                  const itO = (p.items || []).find((x) => x.code === c) || {};
+                  const ant = precioUnitario(itO, tipo);
+                  const nvo = preciosAjustados[c];
+                  return `<li>${esc(itO.producto || c)} (${esc(c)}): de <s>${esc(dinero(ant))}</s> a <strong>${esc(dinero(nvo))}</strong> / caja</li>`;
+                }).join("")}</ul><span>Total: de <s>${esc(dinero(totOrig))}</s> a <strong>${esc(dinero(totUsd))}</strong></span>`;
+              } else {
+                resumenVivo.hidden = true;
+              }
+            }
+
             const aviso = form.querySelector("#hProntoAviso");
             if (aviso) aviso.hidden = !/pronto/.test(tipo || "");
-            if (!tocado && conPrecio) m.value = usd ? String(totalPorPago(p.items, tipo)).replace(".", ",") : "";
+            boxBs.hidden = !esBs;
+            mLabel.textContent = esBs ? "Monto recibido en Bs *" : (acc === "cobrar" ? "Monto cobrado en $ *" : "Monto recibido en $ *");
+            m.placeholder = esBs ? "Ej. 54.200,00" : "Ej. 120,50";
+
+            const saldoUsd = Math.max(0, Math.round((totUsd - pagadoPrevioUsd) * 100) / 100);
+            if (!tocado && (conPrecio || hayAjustePrecios())) {
+              m.value = !esBs && saldoUsd > 0 ? formatoNumInput(saldoUsd) : "";
+            }
+
+            if (esBs && tasaActual > 0 && saldoUsd > 0) {
+              const esp = Math.round(saldoUsd * tasaActual * 100) / 100;
+              espWrap.hidden = false;
+              espBs.textContent = formatoMonto(esp, "Bs");
+              espBs.dataset.valor = formatoNumInput(esp, true);
+            } else {
+              espWrap.hidden = true;
+            }
+
+            const montoVal = montoNum(m.value);
+            if (!(montoVal > 0) || (esBs && !(tasaActual > 0))) {
+              estadoBox.hidden = true;
+              if (btnOk && !enModoDirecto) btnOk.textContent = ok;
+              return;
+            }
+            const ev = evaluarCobro({ totalUsd: totUsd, pagadoPrevioUsd, monto: montoVal, moneda: esBs ? "Bs" : "USD", tasa: tasaActual });
+            // Si está en vista directa de Conciliar, actualizar tasa/equivalente en la tarjeta resumen si se consultó en vivo
+            const concTasaEl = form.querySelector("#hConcTasaVal");
+            const concUsdEl = form.querySelector("#hConcUsdVal");
+            const concChipEl = form.querySelector("#hConcChipEstado");
+            if (concTasaEl && tasaActual > 0) concTasaEl.innerHTML = `<strong>Bs ${esc(formatoNumInput(tasaActual, true))} / $</strong>`;
+            if (concUsdEl && ev.montoUsd > 0) concUsdEl.innerHTML = `<strong>${esc(dinero(ev.montoUsd))}</strong> <span class="ped-det">(de ${esc(dinero(ev.saldoBaseUsd))} del pedido)</span>`;
+            if (concChipEl) {
+              concChipEl.className = `chip ${ev.completo ? "chip-ok" : "chip-pend"}`;
+              concChipEl.textContent = ev.completo ? "✓ Canceló completo" : `⚠️ Abono parcial (resta ${dinero(ev.restanteUsd)})`;
+            }
+
+            estadoBox.hidden = false;
+            if (ev.completo) {
+              estadoBox.className = "estado-cobro-aviso es-completo";
+              estadoBox.innerHTML = `<strong>✓ Canceló completo</strong><span>${esBs ? `Equivale a <strong>${esc(dinero(ev.montoUsd))}</strong> a tasa BCV y cubre el saldo de ${esc(dinero(ev.saldoBaseUsd))}.` : `Cubre el saldo total de <strong>${esc(dinero(ev.saldoBaseUsd))}</strong>.`}</span>`;
+              if (btnOk) btnOk.textContent = enModoDirecto ? "✓ Es correcto · Conciliar" : (acc === "cobrar" ? "Sí, canceló completo" : "Sí, conciliar completo");
+            } else {
+              estadoBox.className = "estado-cobro-aviso es-abono";
+              estadoBox.innerHTML = `<strong>⚠️ Se marcará como un ABONO</strong><span>${esBs
+                ? `El monto indicado equivale a <strong>${esc(dinero(ev.montoUsd))}</strong> (de ${esc(formatoMonto(ev.esperadoBs, "Bs"))} esperados). Quedarán pendientes <strong>${esc(dinero(ev.restanteUsd))}</strong> (${esc(formatoMonto(ev.restanteBs, "Bs"))}).`
+                : `Abona <strong>${esc(dinero(ev.montoUsd))}</strong> de ${esc(dinero(ev.saldoBaseUsd))}. Quedarán pendientes <strong>${esc(dinero(ev.restanteUsd))}</strong>.`}</span>`;
+              if (btnOk) btnOk.textContent = enModoDirecto ? "✓ Es correcto · Conciliar abono" : (acc === "cobrar" ? "Registrar como abono" : "Conciliar como abono");
+            }
           };
-          m.addEventListener("input", () => { tocado = true; });
-          form.addEventListener("change", (e) => { if (e.target.name === "tipo_pago_real" || e.target.name === "moneda") sync(); });
-          sync();
+
+          const consultarTasaFecha = async (f) => {
+            const id = ++reqId;
+            tasaTxt.textContent = "Consultando tasa BCV del día…";
+            const info = await obtenerTasaBcv(f);
+            if (id !== reqId) return;
+            if (info.tasa > 0) {
+              tasaActual = info.tasa;
+              tasaInp.value = formatoNumInput(info.tasa, true);
+              const fMostrar = fechaLegible(info.fechaEfectiva || f);
+              tasaTxt.innerHTML = `Tasa BCV (${esc(fMostrar)}): <strong>Bs ${esc(formatoNumInput(info.tasa, true))} / $</strong>`;
+            } else {
+              tasaActual = montoNum(tasaInp.value);
+              tasaTxt.innerHTML = `<span class="ped-det">Sin tasa automática para esa fecha. Ingresala abajo:</span>`;
+              tasaWrap.hidden = false;
+            }
+            evaluarYMostrar();
+          };
+
+          // Eventos de cambio de precios por error en facturación (solo en cobrar)
+          if (btnToggleAjuste) {
+            btnToggleAjuste.addEventListener("click", () => {
+              const abrir = boxAjuste.hidden;
+              boxAjuste.hidden = !abrir;
+              btnToggleAjuste.setAttribute("aria-expanded", String(abrir));
+            });
+            const leerPreciosInputs = () => {
+              const tipo = tipoActual();
+              form.querySelectorAll("[data-cprecio-code]").forEach((inp) => {
+                const code = inp.dataset.cprecioCode;
+                const itOrig = (p.items || []).find((x) => x.code === code);
+                const base = itOrig ? precioUnitario(itOrig, tipo) : 0;
+                const val = montoNum(inp.value);
+                if (val > 0 && Math.abs(val - base) >= 0.01) preciosAjustados[code] = val;
+                else delete preciosAjustados[code];
+              });
+              btnResetAjuste.hidden = !hayAjustePrecios();
+              evaluarYMostrar();
+            };
+            form.querySelector("#hItemsAjuste").addEventListener("input", (e) => {
+              const inp = e.target.closest("[data-cprecio-code]");
+              if (inp) inp.value = formatoMilesInput(inp.value, 2);
+              leerPreciosInputs();
+            });
+            const inpTodos = form.querySelector("#hPrecioTodos");
+            inpTodos.addEventListener("input", () => { inpTodos.value = formatoMilesInput(inpTodos.value, 2); });
+            form.querySelector("#btnHPrecioTodos").addEventListener("click", () => {
+              const n = montoNum(inpTodos.value);
+              if (!(n > 0)) return toast("Escribí un precio por caja válido.");
+              const fmt = formatoNumInput(n);
+              form.querySelectorAll("[data-cprecio-code]").forEach((inp) => { inp.value = fmt; });
+              leerPreciosInputs();
+            });
+            btnResetAjuste.addEventListener("click", () => {
+              const tipo = tipoActual();
+              Object.keys(preciosAjustados).forEach((k) => delete preciosAjustados[k]);
+              form.querySelectorAll("[data-cprecio-code]").forEach((inp) => {
+                const itOrig = (p.items || []).find((x) => x.code === inp.dataset.cprecioCode);
+                const u = itOrig ? precioUnitario(itOrig, tipo) : 0;
+                inp.value = formatoNumInput(u);
+              });
+              btnResetAjuste.hidden = true;
+              evaluarYMostrar();
+            });
+          }
+
+          // Eventos de fecha, tasa BCV y moneda
+          form.querySelector("#btnEditarTasa").addEventListener("click", () => {
+            tasaWrap.hidden = !tasaWrap.hidden;
+            if (!tasaWrap.hidden) tasaInp.focus();
+          });
+          tasaInp.addEventListener("input", () => {
+            tasaInp.value = formatoMilesInput(tasaInp.value, 4);
+            tasaActual = montoNum(tasaInp.value);
+            if (tasaActual > 0) tasaTxt.innerHTML = `Tasa BCV aplicada: <strong>Bs ${esc(formatoNumInput(tasaActual, true))} / $</strong>`;
+            evaluarYMostrar();
+          });
+          fechaInp.addEventListener("change", () => {
+            if (fechaInp.value) consultarTasaFecha(fechaInp.value);
+          });
+          form.querySelector("#btnUsarEsperado").addEventListener("click", () => {
+            if (espBs.dataset.valor) {
+              m.value = espBs.dataset.valor;
+              tocado = true;
+              evaluarYMostrar();
+            }
+          });
+          m.addEventListener("input", () => {
+            tocado = true;
+            m.value = formatoMilesInput(m.value, 2);
+            evaluarYMostrar();
+          });
+          form.addEventListener("change", (e) => {
+            if (e.target.name === "tipo_pago_real") {
+              if (!hayAjustePrecios()) {
+                const tipo = tipoActual();
+                form.querySelectorAll("[data-cprecio-code]").forEach((inp) => {
+                  const itOrig = (p.items || []).find((x) => x.code === inp.dataset.cprecioCode);
+                  const u = itOrig ? precioUnitario(itOrig, tipo) : 0;
+                  inp.value = formatoNumInput(u);
+                });
+              }
+              evaluarYMostrar();
+            } else if (e.target.name === "moneda") {
+              if (esBsActual()) {
+                if (!previo) { m.value = ""; tocado = false; }
+                if (!(tasaActual > 0)) consultarTasaFecha(fechaInp.value || diaHoy);
+              } else if (!previo) {
+                tocado = false;
+              }
+              evaluarYMostrar();
+            }
+          });
+
+          if (esBsActual()) {
+            if (tasaIni > 0) {
+              tasaActual = tasaIni;
+              tasaTxt.innerHTML = `Tasa BCV (${esc(fechaLegible(fechaIni))}): <strong>Bs ${esc(formatoNumInput(tasaIni, true))} / $</strong>`;
+              evaluarYMostrar();
+            } else {
+              consultarTasaFecha(fechaIni);
+            }
+          } else {
+            evaluarYMostrar();
+          }
         },
       });
       if (!r) return;
-      extra = { monto: montoNum(r.monto), moneda: r.moneda === "Bs" ? "Bs" : "USD", tipo_pago_real: r.tipo_pago_real };
+      const esBs = r.moneda === "Bs";
+      extra = {
+        monto: montoNum(r.monto),
+        moneda: esBs ? "Bs" : "USD",
+        tipo_pago_real: r.tipo_pago_real,
+        ...(esBs ? { fecha_pago: r.fecha_pago, tasa: montoNum(r.tasa), referencia: String(r.referencia || "").trim() } : {}),
+        ...(hayAjustePrecios() ? { ajuste_precios: preciosAjustados, ajuste_motivo: String(r.ajuste_motivo || "").trim() } : {}),
+      };
     } else if (acc === "rechazar") {
       const r = await hoja({
         titulo: `Pago no recibido · ${p.id}`,
-        cuerpo: '<p class="modal-sub">El pedido vuelve a <strong>Por cobrar</strong>.</p><label class="field field-full"><span>¿Qué pasó?</span><textarea name="motivo" rows="3" maxlength="200" placeholder="Ej. no llegó la transferencia"></textarea></label>',
+        cuerpo: '<p class="modal-sub">El pago reportado se marcará como rechazado y el pedido seguirá en <strong>Por cobrar</strong>.</p><label class="field field-full"><span>¿Qué pasó?</span><textarea name="motivo" rows="3" maxlength="200" placeholder="Ej. no llegó la transferencia"></textarea></label>',
         ok: "Rechazar pago", validar: (d) => (d.motivo.trim() ? "" : "Escribí el motivo."),
       });
       if (!r) return;
@@ -2231,7 +3464,12 @@
     try {
       const rc = await api("cobro", { pedido_id: p.id, accion: { cobrar: "cancelar" }[acc] || acc, ...extra });
       guardarEnMemoria(rc.pedido);
-      toast({ cobrar: "Marcado como cancelado", conciliar: "Pago conciliado", rechazar: "Pago rechazado: vuelve a Por cobrar", desconciliar: "Conciliación deshecha" }[acc]);
+      const fueAbono = rc.es_abono || (rc.pedido && !rc.pedido.cobro && Number(rc.pedido.pagado_usd) > 0);
+      toast(acc === "cobrar"
+        ? (fueAbono ? `Abono registrado · restan ${dinero(rc.pedido.saldo)}` : "Marcado como cancelado completo")
+        : acc === "conciliar"
+          ? (fueAbono ? `Abono conciliado · restan ${dinero(rc.pedido.saldo)}` : "Pago conciliado completo")
+          : { rechazar: "Pago rechazado: vuelve a Por cobrar", desconciliar: "Conciliación deshecha" }[acc]);
       render();
     } catch (e) {
       toast(e.message);
@@ -2822,6 +4060,7 @@
     const u = yo();
     const r = u.rol;
     const items = [];
+    if (vende()) items.push(["#/pedidos?tab=comisiones", "Comisiones", "Comisiones por pagar y pagadas sobre cobros conciliados"]);
     if (vende()) items.push(["#/resumen", "Resumen", "Pedidos, cajas y productos más pedidos"]);
     if (gestion()) items.push(["#/inventario", "Inventario y precios", "Existencias, cargar mercancía, conteo y precios"]);
     if (tiene("master")) items.push(["#/usuarios", "Usuarios", "Crear usuarios, claves, roles y activar"]);

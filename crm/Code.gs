@@ -35,10 +35,13 @@ var ESTADOS = ['pendiente', 'confirmado', 'en_ruta', 'entregado', 'cancelado'];
 var DOCUMENTOS = ['Nota de entrega', 'Factura'];
 var MAX_DIAS_CREDITO = 180;
 var MONEDAS = ['USD', 'Bs'];
-/* Monto cobrado: número > 0 con hasta 2 decimales (acepta coma decimal) */
+/* Monto cobrado: número > 0 con hasta 2 decimales (acepta puntos de miles y coma decimal: "54.200,50") */
 function montoValido_(v) {
-  var n = Number(String(v === undefined || v === null ? '' : v).replace(/\s/g, '').replace(',', '.'));
-  return isFinite(n) && n > 0 && n < 1e9 ? Math.round(n * 100) / 100 : 0;
+  var x = String(v === undefined || v === null ? '' : v).trim().replace(/\s|USD|Bs\.?|\$/gi, '');
+  if (x.indexOf(',') !== -1) x = x.replace(/\./g, '').replace(',', '.');
+  else if (/^\d{1,3}(\.\d{3})+$/.test(x)) x = x.replace(/\./g, '');
+  var n = Number(x);
+  return isFinite(n) && n > 0 && n < 1e12 ? Math.round(n * 100) / 100 : 0;
 }
 var esCredito_ = function (pago) { return /cr[eé]dito/i.test(String(pago || '')); };
 
@@ -76,7 +79,7 @@ var TOMAN_PEDIDOS = ['master', 'admin', 'vendedor'];
 
 var HOJAS = {
   Usuarios: ['id', 'usuario', 'nombre', 'rol', 'pin_hash', 'activo', 'created_at',
-             'telefono'],   // WhatsApp del vendedor: los clientes le mandan su pedido desde el catálogo
+             'telefono', 'comision_pct'],   // WhatsApp del vendedor y % de comisión (por defecto 3%)
   // 10 primeras = GPS_CLIENTES (backend/Code.gs). No cambiar el orden.
   Clientes: ['id', 'nombre', 'rif_cedula', 'direccion', 'latitud', 'longitud', 'telefono',
              'updated_at', 'sync_status', 'deleted',
@@ -90,7 +93,11 @@ var HOJAS = {
             'monto', 'moneda',
             'nivel_precio', 'excepcion_precio', 'tipo_pago', 'total', 'tipo_pago_real', 'total_final',
             'web_id', 'borrado', 'borrado_motivo', 'borrado_por', 'borrado_at',
-            'factura', 'nota_credito'],
+            'factura', 'nota_credito',
+            // Pagos parciales (abonos): lo pagado en $ (sin rechazados), lo que falta y abonos sin conciliar
+            'pagado_usd', 'saldo', 'pagos_pend',
+            // Corrección de precios al cobrar (error de facturación): propuesto · aprobado · revertido
+            'ajuste_estado', 'ajuste_motivo', 'ajuste_por', 'ajuste_at', 'ajuste_previo'],
   PedidoItems: ['pedido_id', 'code', 'producto', 'cajas', 'unidades_caja', 'unidad', 'total_unidades',
                 'precio', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto',
                 'entregadas', 'devueltas'],  // entrega con diferencias: lo que ya recibió el cliente y lo que volvió al depósito
@@ -109,8 +116,108 @@ var HOJAS = {
                'items', 'tipo_pago', 'total_cajas', 'total', 'nota', 'estado', 'pedido_id', 'atendido_por', 'atendido_at', 'motivo',
                'cliente_id', 'latitud', 'longitud'],
   // Ajustes de la app Android (versión y enlaces de actualización)
-  Config: ['clave', 'valor', 'nota']
+  Config: ['clave', 'valor', 'nota'],
+  // Cada pago (o abono) de un pedido. estado: reportado (lo cargó el vendedor) · conciliado · rechazado
+  Pagos: ['id', 'pedido_id', 'fecha_pago', 'created_at', 'registrado_por', 'registrado_por_id', 'moneda', 'monto', 'tasa',
+          'monto_usd', 'referencia', 'tipo_pago_real', 'estado', 'conciliado_at', 'conciliado_por', 'motivo',
+          'comision_estado', 'comision_pct', 'comision_usd', 'comision_moneda', 'comision_monto', 'comision_tasa', 'comision_fecha', 'comision_ref', 'comision_pagada_at', 'comision_pagada_por'],
+  // Tasa oficial BCV (Bs por $) por día. Se llena sola desde internet; Administración puede escribirla a mano (fuente: manual).
+  Tasas: ['fecha', 'tasa', 'fuente', 'updated_at']
 };
+
+/* -------------------- Cobros: tasa BCV y abonos -------------------- */
+var TZ_COBRO = 'America/Caracas';
+var URL_TASAS_BCV = 'https://ve.dolarapi.com/v1/historicos/dolares/oficial';
+/* Margen para dar por "cancelado completo": hasta 1 $ o el 1 % del total (lo que sea mayor) */
+function toleranciaCobro_(total) { return Math.max(1, (Number(total) || 0) * 0.01); }
+function hoyIso_() { return Utilities.formatDate(new Date(), TZ_COBRO, 'yyyy-MM-dd'); }
+function fechaIso_(v) {
+  var s = String(v === undefined || v === null ? '' : v).trim();
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[1] + '-' + m[2] + '-' + m[3] : '';
+}
+function numTasa_(v) {
+  var x = String(v === undefined || v === null ? '' : v).trim().replace(/\s/g, '');
+  if (x.indexOf(',') !== -1) x = x.replace(/\./g, '').replace(',', '.');
+  var n = Number(x);
+  return isFinite(n) && n > 0 ? Math.round(n * 10000) / 10000 : 0;
+}
+/* Mejor tasa para una fecha: la de ese día o, si no hubo (fin de semana, feriado), la anterior más cercana */
+function buscarTasa_(filas, fecha) {
+  var mejor = null;
+  filas.forEach(function (x) {
+    var f = fechaIso_(x.fecha), t = numTasa_(x.tasa);
+    if (!f || !t || f > fecha) return;
+    if (!mejor || f > mejor.fecha || (f === mejor.fecha && String(x.fuente) === 'manual')) mejor = { fecha: f, tasa: t, fuente: String(x.fuente || '') };
+  });
+  return mejor;
+}
+/* Baja el histórico de la API y agrega a la hoja Tasas los días que falten (no pisa lo cargado a mano) */
+function actualizarTasas_() {
+  var cache = CacheService.getScriptCache();
+  if (cache.get('tasas_bajadas')) return false;
+  var r = UrlFetchApp.fetch(URL_TASAS_BCV, { muteHttpExceptions: true, headers: { Accept: 'application/json' } });
+  if (r.getResponseCode() !== 200) return false;
+  var lista = JSON.parse(r.getContentText() || '[]');
+  if (!Array.isArray(lista)) return false;
+  var tiene = {};
+  leer_('Tasas').forEach(function (x) { var f = fechaIso_(x.fecha); if (f) tiene[f] = true; });
+  var t = ahora_();
+  var filas = lista.map(function (x) { return { fecha: fechaIso_(x.fecha), tasa: numTasa_(x.promedio || x.venta || x.compra) }; })
+    .filter(function (x) { return x.fecha && x.tasa && !tiene[x.fecha]; })
+    .map(function (x) { return filaDe_('Tasas', { fecha: x.fecha, tasa: x.tasa, fuente: 'bcv', updated_at: t }); });
+  if (filas.length) {
+    var h = hoja_('Tasas');
+    h.getRange(h.getLastRow() + 1, 1, filas.length, HOJAS.Tasas.length).setValues(filas);
+  }
+  cache.put('tasas_bajadas', '1', 1800); // a lo sumo cada 30 minutos
+  return true;
+}
+/* Tasa BCV del día del pago: { fecha, tasa, fuente } o null */
+function tasaBcv_(fecha) {
+  fecha = fechaIso_(fecha) || hoyIso_();
+  var filas = leer_('Tasas');
+  var t = buscarTasa_(filas, fecha);
+  // si no está el día exacto y es reciente (o no hay nada), probar con internet
+  var ultima = filas.reduce(function (a, x) { var f = fechaIso_(x.fecha); return f > a ? f : a; }, '');
+  if (!t || (t.fecha !== fecha && fecha > ultima)) {
+    try { if (actualizarTasas_()) t = buscarTasa_(leer_('Tasas'), fecha) || t; } catch (e) {}
+  }
+  return t;
+}
+function accionTasa_(p) {
+  var fecha = fechaIso_(p.fecha) || hoyIso_();
+  if (fecha > hoyIso_()) return { ok: false, error: 'La fecha del pago no puede ser futura.', code: 'fecha' };
+  var t = tasaBcv_(fecha);
+  if (!t) return { ok: false, error: 'No hay tasa BCV para el ' + fecha + '. Administración puede cargarla en la hoja Tasas.', code: 'tasa' };
+  return { ok: true, fecha: fecha, fecha_tasa: t.fecha, tasa: t.tasa, fuente: t.fuente };
+}
+
+/* Total a cobrar en $ (lo que pagó de verdad si cambió la forma de pago) y estado de los abonos */
+function totalCobrar_(ped) {
+  var tf = ped.total_final;
+  return r2_(tf !== '' && tf !== undefined && tf !== null ? Number(tf) : Number(ped.total) || 0);
+}
+function pagosDe_(pagos, pedidoId) {
+  return (pagos || []).filter(function (x) { return String(x.pedido_id) === String(pedidoId); });
+}
+function recalcularCobro_(ped, pagos) {
+  var activos = pagosDe_(pagos, ped.id).filter(function (x) { return String(x.estado) !== 'rechazado'; });
+  ped.pagado_usd = r2_(activos.reduce(function (a, x) { return a + (Number(x.monto_usd) || 0); }, 0));
+  ped.saldo = r2_(Math.max(0, totalCobrar_(ped) - ped.pagado_usd));
+  ped.pagos_pend = activos.filter(function (x) { return String(x.estado) === 'reportado'; }).length;
+  return ped;
+}
+function pagoPublico_(x) {
+  return { id: String(x.id), pedido_id: String(x.pedido_id || ''), fecha_pago: fechaIso_(x.fecha_pago), created_at: String(x.created_at), registrado_por: String(x.registrado_por),
+    moneda: String(x.moneda), monto: Number(x.monto) || 0, tasa: Number(x.tasa) || 0, monto_usd: Number(x.monto_usd) || 0,
+    referencia: String(x.referencia || ''), tipo_pago_real: String(x.tipo_pago_real || ''), estado: String(x.estado),
+    conciliado_at: String(x.conciliado_at || ''), conciliado_por: String(x.conciliado_por || ''), motivo: String(x.motivo || ''),
+    comision_estado: String(x.comision_estado || ''), comision_pct: Number(x.comision_pct) || 0, comision_usd: Number(x.comision_usd) || 0,
+    comision_moneda: String(x.comision_moneda || ''), comision_monto: Number(x.comision_monto) || 0, comision_tasa: Number(x.comision_tasa) || 0,
+    comision_fecha: fechaIso_(x.comision_fecha), comision_ref: String(x.comision_ref || ''),
+    comision_pagada_at: String(x.comision_pagada_at || ''), comision_pagada_por: String(x.comision_pagada_por || '') };
+}
 
 /* -------------------- Entradas HTTP -------------------- */
 function doGet(e) {
@@ -142,6 +249,10 @@ var ACCIONES = {
   pedido: [accionPedido_, ROLES],
   estado: [accionEstado_, ROLES],
   cobro: [accionCobro_, TOMAN_PEDIDOS],
+  tasa: [accionTasa_, TOMAN_PEDIDOS],         // tasa BCV del día de un pago en Bs
+  comisiones: [accionComisiones_, TOMAN_PEDIDOS], // configuración de % y pagos para comisiones
+  guardarComisionConfig: [accionGuardarComisionConfig_, GESTION], // cambiar % de comisión (engranaje ⚙️)
+  pagarComision: [accionPagarComision_, GESTION], // liquidar comisión en Bs o Efectivo ($)
   catalogo: [accionCatalogo_, null],          // precios (público); con sesión también existencias
   vendedores: [accionVendedores_, null],      // para que el cliente elija su vendedor
   pedidoWeb: [accionPedidoWeb_, null],        // el cliente envía su pedido desde el catálogo
@@ -517,7 +628,7 @@ function detalleUnidades_(items) {
   return Object.keys(porUnidad).map(function (k) { return porUnidad[k] + ' ' + k; }).join(' + ');
 }
 
-function pedidoConItems_(ped, items) {
+function pedidoConItems_(ped, items, pagos) {
   var o = {};
   HOJAS.Pedidos.forEach(function (k) { o[k] = ped[k]; });
   o.total_cajas = Number(o.total_cajas);
@@ -529,11 +640,37 @@ function pedidoConItems_(ped, items) {
   o.excepcion_precio = o.excepcion_precio === true || String(o.excepcion_precio) === 'true';
   o.factura = String(o.factura || '');
   o.nota_credito = o.nota_credito === '' || o.nota_credito === undefined ? '' : Number(o.nota_credito);
+  o.pagado_usd = Number(o.pagado_usd) || 0;
+  o.saldo = o.saldo === '' || o.saldo === undefined ? '' : Number(o.saldo);
+  o.pagos_pend = Number(o.pagos_pend) || 0;
+  o.ajuste_estado = String(o.ajuste_estado || '');
+  o.ajuste_motivo = String(o.ajuste_motivo || '');
+  o.ajuste_por = String(o.ajuste_por || '');
+  o.ajuste_at = String(o.ajuste_at || '');
+  o.ajuste_previo = String(o.ajuste_previo || '');
   o.items = items.filter(function (it) { return String(it.pedido_id) === String(ped.id); }).map(function (it) {
     return { code: it.code, producto: it.producto, cajas: Number(it.cajas), unidades_caja: it.unidades_caja === '' ? '' : Number(it.unidades_caja), unidad: it.unidad, total_unidades: it.total_unidades === '' ? '' : Number(it.total_unidades),
       precio: Number(it.precio) || 0, desc_pronto: Number(it.desc_pronto) || 0, desc_efectivo_credito: Number(it.desc_efectivo_credito) || 0, desc_efectivo_pronto: Number(it.desc_efectivo_pronto) || 0,
       entregadas: Number(it.entregadas) || 0, devueltas: Number(it.devueltas) || 0 };
   });
+  if (pagos) {
+    var listaPagos = pagosDe_(pagos, ped.id).map(pagoPublico_);
+    if (!listaPagos.length && (o.cobro === 'conciliado' || o.cobro === 'cancelado') && Number(o.monto) > 0) {
+      var totUsd = totalCobrar_(ped) || (o.moneda === 'Bs' ? 0 : Number(o.monto) || 0);
+      listaPagos = [pagoPublico_({
+        id: 'PED-' + o.id, pedido_id: o.id,
+        fecha_pago: fechaIso_(o.cobrado_at || o.conciliado_at || o.entregado_at || o.fecha),
+        created_at: String(o.cobrado_at || o.conciliado_at || o.created_at || ''),
+        registrado_por: String(o.cobrado_por || o.vendedor || ''),
+        moneda: String(o.moneda || 'USD'), monto: Number(o.monto) || 0,
+        tasa: o.moneda === 'Bs' && totUsd > 0 ? r2_((Number(o.monto) || 0) / totUsd) : 0,
+        monto_usd: totUsd, referencia: '', tipo_pago_real: String(o.tipo_pago_real || o.tipo_pago || ''),
+        estado: o.cobro === 'conciliado' ? 'conciliado' : 'reportado',
+        conciliado_at: String(o.conciliado_at || ''), conciliado_por: String(o.conciliado_por || '')
+      })];
+    }
+    o.pagos = listaPagos;
+  }
   return o;
 }
 
@@ -582,13 +719,18 @@ function ponerPrecios_(items, precios, mayor) {
   return items;
 }
 
+/* Precio por caja según cómo paga */
+function precioUnitario_(it, tipo) {
+  var pg = pagoPorId_(tipo) || PAGOS[0];
+  var unit = Number(it.precio) || 0;
+  var d = pg.desc ? Number(it[pg.desc]) || 0 : 0;
+  return r2_(Math.max(0, unit - d));
+}
+
 /* Total del pedido según cómo paga (el descuento nunca deja la caja por debajo de 0) */
 function totalPorPago_(items, tipo) {
-  var pg = pagoPorId_(tipo) || PAGOS[0];
   return r2_(items.reduce(function (a, it) {
-    var unit = Number(it.precio) || 0;
-    var d = pg.desc ? Number(it[pg.desc]) || 0 : 0;
-    return a + (Number(it.cajas) || 0) * Math.max(0, unit - d);
+    return a + (Number(it.cajas) || 0) * precioUnitario_(it, tipo);
   }, 0));
 }
 
@@ -966,18 +1108,24 @@ function accionPedidos_(p, ses) {
     .filter(function (e) { return ESTADOS.indexOf(e) !== -1; });
   var clienteId = txt_(p.cliente_id, 60);
   var items = leer_('PedidoItems');
+  var pagos = leer_('Pagos');
   var lista = leer_('Pedidos').filter(function (x) {
     if (!puedeVer_(ses, x)) return false;
     if (clienteId) return String(x.cliente_id) === clienteId; // ficha del cliente: todo su historial visible
-    // Por cobrar: no anulados y sin pago; crédito en cualquier estado, contado ya entregado
+    // Por cobrar: no anulados y sin pago completo; crédito en cualquier estado, contado ya entregado
     if (p.por_cobrar) {
       if (String(x.estado) === 'cancelado' || String(x.cobro)) return false;
       return Number(x.dias_credito) > 0 || String(x.estado) === 'entregado';
     }
-    // Por conciliar: el vendedor lo marcó cancelado y Administración debe verificarlo
-    if (p.por_conciliar) return String(x.cobro) === 'cancelado';
-    // Conciliados en el período (por fecha de conciliación)
-    if (p.conciliados) return String(x.cobro) === 'conciliado' && String(x.conciliado_at) >= desde;
+    // Por conciliar: el vendedor lo marcó cancelado (o cargó un abono) y Administración debe verificarlo
+    if (p.por_conciliar) return String(x.cobro) === 'cancelado' || Number(x.pagos_pend) > 0;
+    // Conciliados en el período (por fecha de conciliación, o con algún abono conciliado / comisión pendiente)
+    if (p.conciliados) {
+      if (String(x.cobro) === 'conciliado' && String(x.conciliado_at) >= desde) return true;
+      return pagos.some(function (pg) {
+        return String(pg.pedido_id) === String(x.id) && String(pg.estado) === 'conciliado' && (String(pg.conciliado_at) >= desde || String(pg.comision_estado) !== 'pagada');
+      });
+    }
     if (estados.length && estados.indexOf(String(x.estado)) === -1) return false;
     // Lo que sigue abierto se muestra aunque sea viejo
     var abierto = ['pendiente', 'confirmado', 'en_ruta'].indexOf(String(x.estado)) !== -1;
@@ -989,7 +1137,7 @@ function accionPedidos_(p, ses) {
   return {
     ok: true,
     pedidos: lista.slice(0, 300).map(function (x) {
-      var o = pedidoConItems_(x, items);
+      var o = pedidoConItems_(x, items, pagos);
       var c = clientes[String(x.cliente_id)];
       if (c) o.cliente_datos = clientePublico_(c);
       return o;
@@ -997,12 +1145,12 @@ function accionPedidos_(p, ses) {
   };
 }
 
-/* Cobro de un pedido entregado:
-   ''  (por cobrar) --cancelar--> 'cancelado' (el vendedor reporta que el cliente pagó)
-       --conciliar--> 'conciliado' (Administración verificó que recibió el dinero)
-   rechazar: 'cancelado' -> '' (no se recibió; motivo obligatorio)
-   desconciliar: 'conciliado' -> 'cancelado' (corrección)
-   Vendedor: solo "cancelar" sus pedidos. Administración / Master: todo. */
+/* Cobro de un pedido entregado (con soporte de tasa BCV por fecha, abonos parciales y ajuste de precios por error de facturación):
+   ''  (por cobrar) --cancelar--> 'cancelado' si cubrió el total (margen 1 % o 1 $), o sigue en '' (Por cobrar) con saldo pendiente si fue un ABONO.
+       --conciliar--> 'conciliado' (Administración verificó que recibió el dinero; si era un abono parcial, concilia el abono y el resto sigue Por cobrar).
+   rechazar: rechaza el pago/abono reportado (motivo obligatorio).
+   desconciliar: 'conciliado' -> 'cancelado' (corrección).
+   revertir_ajuste: Administración restaura los precios originales previos al cambio del vendedor. */
 function accionCobro_(p, ses) {
   var accion = String(p.accion || 'cancelar');
   var gestion = esGestion_(ses);
@@ -1014,49 +1162,377 @@ function accionCobro_(p, ses) {
     if (String(ped.estado) !== 'entregado') return { ok: false, error: 'El cobro se registra cuando el pedido ya fue entregado.', code: 'estado' };
     var cobro = String(ped.cobro || '');
     var t = ahora_(), detalle = '';
+    var todosItems = leer_('PedidoItems');
+    var filasIt = todosItems.filter(function (it) { return String(it.pedido_id) === String(ped.id); });
+    var todosPagos = leer_('Pagos');
+
+    // Revertir un cambio de precios propuesto por el vendedor (solo Administración/Master)
+    if (accion === 'revertir_ajuste') {
+      if (!gestion) return { ok: false, error: 'Solo Administración puede revertir el cambio de precios.', code: 'forbidden' };
+      if (!String(ped.ajuste_previo || '')) return { ok: false, error: 'No hay precios anteriores guardados para revertir.', code: 'sin_ajuste' };
+      var prev = {};
+      try { prev = JSON.parse(String(ped.ajuste_previo)); } catch (e) {}
+      var mapPrev = {};
+      (prev.items || []).forEach(function (x) { mapPrev[String(x.code).toUpperCase()] = x; });
+      filasIt.forEach(function (f) {
+        var ant = mapPrev[String(f.code).toUpperCase()];
+        if (!ant) return;
+        f.precio = Number(ant.precio) || 0;
+        f.desc_pronto = Number(ant.desc_pronto) || 0;
+        f.desc_efectivo_credito = Number(ant.desc_efectivo_credito) || 0;
+        f.desc_efectivo_pronto = Number(ant.desc_efectivo_pronto) || 0;
+        actualizar_('PedidoItems', f._fila, f);
+      });
+      if (prev.nivel_precio) ped.nivel_precio = prev.nivel_precio;
+      ped.excepcion_precio = !!prev.excepcion_precio;
+      var tipoAc = String(ped.tipo_pago || '') || tipoPagoDe_(ped.pago);
+      ped.total = filasIt.some(function (it) { return Number(it.precio) > 0; }) ? totalPorPago_(filasIt, tipoAc) : '';
+      var tipoRe = String(ped.tipo_pago_real || '') || tipoAc;
+      ped.total_final = filasIt.some(function (it) { return Number(it.precio) > 0; }) ? totalPorPago_(filasIt, tipoRe) : '';
+      ped.ajuste_estado = 'revertido';
+      recalcularCobro_(ped, todosPagos);
+      if (cobro === 'cancelado' && ped.saldo > toleranciaCobro_(totalCobrar_(ped))) ped.cobro = '';
+      ped.updated_at = t;
+      actualizar_('Pedidos', ped._fila, ped);
+      historial_(ped.id, ses, 'ajuste_revertido', 'Se restauraron los precios originales (total ' + (ped.total_final || ped.total) + ' $)');
+      return { ok: true, pedido: pedidoConItems_(ped, leer_('PedidoItems'), todosPagos) };
+    }
+
+    // Cambio de precios al cobrar por error de facturación (motivo obligatorio)
+    var ajusteTxt = '';
+    if (p.ajuste_precios && typeof p.ajuste_precios === 'object') {
+      var codsAjuste = Object.keys(p.ajuste_precios).filter(function (k) { return numPrecio_(p.ajuste_precios[k]) > 0; });
+      if (codsAjuste.length) {
+        var motAjuste = txt_(p.ajuste_motivo, 200);
+        if (!motAjuste) return { ok: false, error: 'Indicá el motivo del cambio de precios por error de facturación.', code: 'motivo_ajuste' };
+        if (!String(ped.ajuste_previo || '')) {
+          ped.ajuste_previo = JSON.stringify({
+            nivel_precio: String(ped.nivel_precio || ''),
+            excepcion_precio: ped.excepcion_precio === true || String(ped.excepcion_precio) === 'true',
+            total: ped.total,
+            items: filasIt.map(function (f) {
+              return { code: String(f.code), precio: Number(f.precio) || 0, desc_pronto: Number(f.desc_pronto) || 0, desc_efectivo_credito: Number(f.desc_efectivo_credito) || 0, desc_efectivo_pronto: Number(f.desc_efectivo_pronto) || 0 };
+            })
+          });
+        }
+        var cambiosPr = [];
+        filasIt.forEach(function (f) {
+          var code = String(f.code).toUpperCase();
+          var nuevoP = numPrecio_(p.ajuste_precios[code]);
+          if (!(nuevoP > 0)) return;
+          var antesP = precioUnitario_(f, String(ped.tipo_pago_real || ped.tipo_pago || '') || tipoPagoDe_(ped.pago));
+          f.precio = nuevoP; f.desc_pronto = 0; f.desc_efectivo_credito = 0; f.desc_efectivo_pronto = 0;
+          actualizar_('PedidoItems', f._fila, f);
+          if (antesP !== nuevoP) cambiosPr.push(code + ': ' + antesP + ' → ' + nuevoP + ' $');
+        });
+        ped.nivel_precio = 'personalizado';
+        var tipoBase = String(ped.tipo_pago || '') || tipoPagoDe_(ped.pago);
+        ped.total = totalPorPago_(filasIt, tipoBase);
+        ped.ajuste_estado = gestion ? 'aprobado' : 'propuesto';
+        ped.ajuste_motivo = motAjuste;
+        ped.ajuste_por = ses.nombre;
+        ped.ajuste_at = t;
+        ajusteTxt = 'Ajuste de precio (' + (cambiosPr.join(', ') || 'nuevo total ' + ped.total + ' $') + ' · motivo: ' + motAjuste + ') · ';
+      }
+    }
+
     var monto = montoValido_(p.monto);
     var moneda = MONEDAS.indexOf(String(p.moneda)) !== -1 ? String(p.moneda) : '';
+    var fechaPago = fechaIso_(p.fecha_pago) || hoyIso_();
+    var referencia = txt_(p.referencia, 60);
     // Cómo pagó de verdad (puede cambiar el descuento: ej. era crédito y pagó en efectivo al contado)
     var real = pagoPorId_(String(p.tipo_pago_real || ''));
     var ponerReal = function () {
       var tipo = real ? real.id : (String(ped.tipo_pago_real || '') || String(ped.tipo_pago || '') || tipoPagoDe_(ped.pago));
-      var its = pedidoConItems_(ped, leer_('PedidoItems')).items;
+      var its = pedidoConItems_(ped, filasIt).items;
       var antes = String(ped.tipo_pago_real || ped.tipo_pago || tipoPagoDe_(ped.pago));
       ped.tipo_pago_real = tipo;
       ped.total_final = its.some(function (it) { return it.precio; }) ? totalPorPago_(its, tipo) : '';
       return tipo !== antes ? 'Pagó como ' + pagoPorId_(tipo).nombre + (ped.total_final !== '' ? ' (total ' + ped.total_final + ' $)' : '') + ' · ' : '';
     };
+
+    var resolverMontoUsd = function (mVal, monVal, fPago) {
+      if (monVal !== 'Bs') return { usd: mVal, tasa: 0, fechaTasa: '' };
+      var tManual = numTasa_(p.tasa);
+      var tObj = tasaBcv_(fPago);
+      var tasa = (tObj && tObj.tasa) || tManual;
+      if (!tasa) throw new Error('No se encontró la tasa BCV para el ' + fPago + '. Indicala o cargala en la hoja Tasas.');
+      return { usd: r2_(mVal / tasa), tasa: tasa, fechaTasa: (tObj && tObj.fecha) || fPago };
+    };
+
     if (accion === 'cancelar') {
-      if (cobro) return { ok: false, error: 'Ese pedido ya figura como ' + (cobro === 'conciliado' ? 'conciliado' : 'cancelado') + '.', code: 'repetido' };
+      if (cobro === 'conciliado' || cobro === 'cancelado') {
+        return { ok: false, error: 'Ese pedido ya figura como ' + (cobro === 'conciliado' ? 'conciliado' : 'cancelado') + '.', code: 'repetido' };
+      }
       if (!monto || !moneda) return { ok: false, error: 'Indicá cuánto cobraste y en qué moneda.', code: 'monto' };
-      ped.cobro = 'cancelado'; ped.cobrado_at = t; ped.cobrado_por = ses.nombre;
-      ped.monto = monto; ped.moneda = moneda; detalle = ponerReal() + monto + ' ' + moneda;
+      var cambioModo = ponerReal();
+      var conv;
+      try { conv = resolverMontoUsd(monto, moneda, fechaPago); }
+      catch (errT) { return { ok: false, error: errT.message, code: 'tasa' }; }
+      var nuevoPago = {
+        id: 'PAG-' + uuid_().replace(/-/g, '').slice(0, 8).toUpperCase(),
+        pedido_id: ped.id, fecha_pago: fechaPago, created_at: t,
+        registrado_por: ses.nombre, registrado_por_id: ses.id,
+        moneda: moneda, monto: monto, tasa: conv.tasa || '', monto_usd: conv.usd,
+        referencia: referencia, tipo_pago_real: String(ped.tipo_pago_real || ''),
+        estado: 'reportado', conciliado_at: '', conciliado_por: '', motivo: ''
+      };
+      agregar_('Pagos', nuevoPago);
+      todosPagos.push(nuevoPago);
+      recalcularCobro_(ped, todosPagos);
+      var totalReq = totalCobrar_(ped);
+      var completo = totalReq <= 0 || (ped.pagado_usd + toleranciaCobro_(totalReq) >= totalReq);
+      ped.cobrado_at = t; ped.cobrado_por = ses.nombre;
+      ped.monto = monto; ped.moneda = moneda;
+      if (completo) {
+        ped.cobro = 'cancelado';
+        ped.saldo = 0;
+      } else {
+        ped.cobro = ''; // queda en Por cobrar por el saldo restante, y en Por conciliar por pagos_pend > 0
+      }
+      var txtMon = monto + ' ' + moneda + (moneda === 'Bs' ? ' (fecha ' + fechaPago + ' · BCV ' + conv.tasa + ' = ' + conv.usd + ' $)' : '') + (referencia ? ' · ref ' + referencia : '');
+      detalle = ajusteTxt + cambioModo + (completo ? 'Canceló completo: ' : 'Abono: ') + txtMon + (!completo ? ' · resta ' + ped.saldo + ' $' : '');
     } else if (!gestion) {
       return { ok: false, error: 'Solo Administración verifica y concilia los pagos.', code: 'forbidden' };
     } else if (accion === 'conciliar') {
       if (cobro === 'conciliado') return { ok: false, error: 'Ese pago ya está conciliado.', code: 'repetido' };
-      // Administración confirma (o corrige) el monto recibido
-      if (monto && moneda) { ped.monto = monto; ped.moneda = moneda; }
-      if (!montoValido_(ped.monto) || MONEDAS.indexOf(String(ped.moneda)) === -1) return { ok: false, error: 'Indicá el monto recibido y la moneda.', code: 'monto' };
-      if (!cobro) { ped.cobrado_at = t; ped.cobrado_por = ses.nombre; } // Administración recibió el pago directo
       var cambio = (real || !cobro) ? ponerReal() : '';
-      ped.cobro = 'conciliado'; ped.conciliado_at = t; ped.conciliado_por = ses.nombre;
-      detalle = cambio + Number(ped.monto) + ' ' + ped.moneda;
+      var pends = todosPagos.filter(function (x) { return String(x.pedido_id) === String(ped.id) && String(x.estado) === 'reportado'; });
+      if (pends.length && !p.nuevo_abono) {
+        // Concilia los pagos/abonos reportados por el vendedor (y actualiza el último si Administración corrigió el monto)
+        if (monto && moneda && pends.length === 1) {
+          var u = pends[0];
+          var convC;
+          try { convC = resolverMontoUsd(monto, moneda, fechaIso_(p.fecha_pago) || fechaIso_(u.fecha_pago) || hoyIso_()); }
+          catch (errC) { return { ok: false, error: errC.message, code: 'tasa' }; }
+          u.monto = monto; u.moneda = moneda; u.tasa = convC.tasa || ''; u.monto_usd = convC.usd;
+          if (p.fecha_pago) u.fecha_pago = fechaIso_(p.fecha_pago);
+          if (referencia) u.referencia = referencia;
+          ped.monto = monto; ped.moneda = moneda;
+        }
+        pends.forEach(function (u) {
+          u.estado = 'conciliado'; u.conciliado_at = t; u.conciliado_por = ses.nombre;
+          actualizar_('Pagos', u._fila, u);
+        });
+      } else {
+        // Administración registra y concilia un pago directo (o un pedido viejo sin filas en Pagos)
+        if (monto && moneda) { ped.monto = monto; ped.moneda = moneda; }
+        if (!montoValido_(ped.monto) || MONEDAS.indexOf(String(ped.moneda)) === -1) return { ok: false, error: 'Indicá el monto recibido y la moneda.', code: 'monto' };
+        var convD;
+        try { convD = resolverMontoUsd(Number(ped.monto), String(ped.moneda), fechaPago); }
+        catch (errD) { return { ok: false, error: errD.message, code: 'tasa' }; }
+        var pagoDir = {
+          id: 'PAG-' + uuid_().replace(/-/g, '').slice(0, 8).toUpperCase(),
+          pedido_id: ped.id, fecha_pago: fechaPago, created_at: t,
+          registrado_por: ped.cobrado_por || ses.nombre, registrado_por_id: ses.id,
+          moneda: String(ped.moneda), monto: Number(ped.monto), tasa: convD.tasa || '', monto_usd: convD.usd,
+          referencia: referencia, tipo_pago_real: String(ped.tipo_pago_real || ''),
+          estado: 'conciliado', conciliado_at: t, conciliado_por: ses.nombre, motivo: ''
+        };
+        agregar_('Pagos', pagoDir);
+        todosPagos.push(pagoDir);
+        if (!cobro) { ped.cobrado_at = t; ped.cobrado_por = ses.nombre; }
+      }
+      if (String(ped.ajuste_estado) === 'propuesto') ped.ajuste_estado = 'aprobado';
+      recalcularCobro_(ped, todosPagos);
+      var totalReqC = totalCobrar_(ped);
+      var completoC = totalReqC <= 0 || (ped.pagado_usd + toleranciaCobro_(totalReqC) >= totalReqC);
+      if (completoC && ped.pagos_pend === 0) {
+        ped.cobro = 'conciliado'; ped.conciliado_at = t; ped.conciliado_por = ses.nombre; ped.saldo = 0;
+        detalle = ajusteTxt + cambio + 'Conciliado total: ' + ped.pagado_usd + ' $';
+      } else {
+        ped.cobro = ''; // abono conciliado; queda en Por cobrar por el saldo restante
+        detalle = ajusteTxt + cambio + 'Abono conciliado (pagado ' + ped.pagado_usd + ' $ · resta ' + ped.saldo + ' $)';
+      }
     } else if (accion === 'rechazar') {
-      if (cobro !== 'cancelado') return { ok: false, error: 'Solo se rechaza un pago reportado como cancelado.', code: 'estado' };
+      var pendsR = todosPagos.filter(function (x) { return String(x.pedido_id) === String(ped.id) && String(x.estado) === 'reportado'; });
+      if (cobro !== 'cancelado' && !pendsR.length) return { ok: false, error: 'Solo se rechaza un pago o abono reportado.', code: 'estado' };
       detalle = txt_(p.motivo, 200);
       if (!detalle) return { ok: false, error: 'Indicá por qué no se recibió el pago.', code: 'motivo' };
-      ped.cobro = ''; ped.cobrado_at = ''; ped.cobrado_por = ''; ped.monto = ''; ped.moneda = ''; ped.tipo_pago_real = ''; ped.total_final = '';
+      pendsR.forEach(function (u) {
+        u.estado = 'rechazado'; u.motivo = detalle; u.conciliado_at = t; u.conciliado_por = ses.nombre;
+        actualizar_('Pagos', u._fila, u);
+      });
+      recalcularCobro_(ped, todosPagos);
+      ped.cobro = '';
+      if (!ped.pagado_usd) { ped.cobrado_at = ''; ped.cobrado_por = ''; ped.monto = ''; ped.moneda = ''; ped.tipo_pago_real = ''; ped.total_final = ''; }
     } else if (accion === 'desconciliar') {
       if (cobro !== 'conciliado') return { ok: false, error: 'Ese pago no está conciliado.', code: 'estado' };
+      todosPagos.filter(function (x) { return String(x.pedido_id) === String(ped.id) && String(x.estado) === 'conciliado'; }).forEach(function (u) {
+        u.estado = 'reportado'; u.conciliado_at = ''; u.conciliado_por = '';
+        actualizar_('Pagos', u._fila, u);
+      });
+      recalcularCobro_(ped, todosPagos);
       ped.cobro = 'cancelado'; ped.conciliado_at = ''; ped.conciliado_por = '';
     } else {
       return { ok: false, error: 'Acción de cobro inválida.', code: 'accion' };
     }
     ped.updated_at = t;
     actualizar_('Pedidos', ped._fila, ped);
-    historial_(ped.id, ses, { cancelar: 'cobrado', conciliar: 'conciliado', rechazar: 'pago_rechazado', desconciliar: 'conciliacion_deshecha' }[accion], detalle);
-    return { ok: true, pedido: pedidoConItems_(ped, leer_('PedidoItems')) };
+    historial_(ped.id, ses, { cancelar: ped.cobro === 'cancelado' ? 'cobrado' : 'abono', conciliar: ped.cobro === 'conciliado' ? 'conciliado' : 'abono_conciliado', rechazar: 'pago_rechazado', desconciliar: 'conciliacion_deshecha' }[accion], detalle);
+    return { ok: true, pedido: pedidoConItems_(ped, leer_('PedidoItems'), todosPagos), es_abono: accion === 'cancelar' ? ped.cobro !== 'cancelado' : (accion === 'conciliar' ? ped.cobro !== 'conciliado' : false) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* -------------------- Comisiones de vendedores -------------------- */
+function configComisiones_() {
+  var defPct = 3;
+  leer_('Config').forEach(function (x) {
+    if (String(x.clave).trim() === 'comision_pct_default' && numPrecio_(x.valor) > 0) defPct = numPrecio_(x.valor);
+  });
+  var porVendedor = {};
+  var vendedores = [];
+  leer_('Usuarios').forEach(function (u) {
+    if (!activo_(u)) return;
+    var rs = rolesDe_(u.rol);
+    if (!tieneAlguno_({ roles: rs }, TOMAN_PEDIDOS)) return;
+    var pct = numPrecio_(u.comision_pct) > 0 ? numPrecio_(u.comision_pct) : defPct;
+    porVendedor[String(u.id)] = pct;
+    porVendedor[String(u.nombre).trim().toLowerCase()] = pct;
+    vendedores.push({ id: String(u.id), usuario: String(u.usuario), nombre: String(u.nombre), telefono: String(u.telefono || ''), comision_pct: pct });
+  });
+  return { porcentaje_default: defPct, por_vendedor: porVendedor, vendedores: vendedores };
+}
+
+function accionComisiones_(p, ses) {
+  return { ok: true, config: configComisiones_() };
+}
+
+function accionGuardarComisionConfig_(p, ses) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var defPct = numPrecio_(p.porcentaje_default);
+    if (!(defPct > 0 && defPct <= 100)) defPct = 3;
+    var cfgFilas = leer_('Config');
+    var exCfg = cfgFilas.filter(function (x) { return String(x.clave).trim() === 'comision_pct_default'; })[0];
+    if (exCfg) {
+      exCfg.valor = defPct;
+      actualizar_('Config', exCfg._fila, exCfg);
+    } else {
+      agregar_('Config', { clave: 'comision_pct_default', valor: defPct, nota: 'Porcentaje de comisión por defecto para vendedores (%)' });
+    }
+    var mapa = (p.porcentajes && typeof p.porcentajes === 'object') ? p.porcentajes : {};
+    leer_('Usuarios').forEach(function (u) {
+      var k = String(u.id);
+      if (mapa[k] !== undefined) {
+        var v = numPrecio_(mapa[k]);
+        u.comision_pct = (v > 0 && v <= 100) ? v : defPct;
+        actualizar_('Usuarios', u._fila, u);
+      }
+    });
+    return { ok: true, config: configComisiones_() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function accionPagarComision_(p, ses) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var modo = String(p.modo || 'pagar');
+    var listaReq = Array.isArray(p.items) ? p.items : [];
+    if (!listaReq.length) return { ok: false, error: 'Elegí al menos un pago conciliado para liquidar su comisión.', code: 'empty' };
+    var todosPedidos = leer_('Pedidos');
+    var mapPed = {};
+    todosPedidos.forEach(function (x) { mapPed[String(x.id)] = x; });
+    var todosPagos = leer_('Pagos');
+    var cfg = configComisiones_();
+    var t = ahora_();
+
+    if (modo === 'deshacer') {
+      var deshechos = 0;
+      listaReq.forEach(function (it) {
+        var pg = todosPagos.filter(function (x) { return String(x.id) === String(it.pago_id); })[0];
+        if (!pg || String(pg.comision_estado) !== 'pagada') return;
+        pg.comision_estado = ''; pg.comision_monto = ''; pg.comision_tasa = ''; pg.comision_fecha = ''; pg.comision_ref = ''; pg.comision_pagada_at = ''; pg.comision_pagada_por = '';
+        actualizar_('Pagos', pg._fila, pg);
+        deshechos++;
+        if (pg.pedido_id) historial_(String(pg.pedido_id), ses, 'comision_deshecha', 'Se revirtió el pago de comisión (' + pg.id + ')');
+      });
+      return { ok: true, deshechos: deshechos };
+    }
+
+    var fechaCom = fechaIso_(p.fecha_comision) || hoyIso_();
+    var tasaManual = numTasa_(p.tasa);
+    var ref = txt_(p.referencia, 80);
+    var tasaObj = null;
+    var obtenerTasaCom = function () {
+      if (tasaManual > 0) return tasaManual;
+      if (!tasaObj) tasaObj = tasaBcv_(fechaCom);
+      return (tasaObj && tasaObj.tasa) || 0;
+    };
+
+    var pagados = 0;
+    listaReq.forEach(function (it) {
+      var pedId = String(it.pedido_id || '');
+      var pagoId = String(it.pago_id || '');
+      var ped = mapPed[pedId];
+      if (!ped) return;
+      var pg = todosPagos.filter(function (x) { return String(x.id) === pagoId; })[0];
+      // Si es un pedido conciliado viejo que no tenía fila en Pagos, crearla ahora
+      if (!pg && pagoId === 'PED-' + ped.id && String(ped.cobro) === 'conciliado') {
+        var totUsd = totalCobrar_(ped) || (String(ped.moneda) === 'Bs' ? 0 : Number(ped.monto) || 0);
+        pg = {
+          id: 'PAG-' + uuid_().replace(/-/g, '').slice(0, 8).toUpperCase(),
+          pedido_id: ped.id,
+          fecha_pago: fechaIso_(ped.cobrado_at || ped.conciliado_at || ped.entregado_at || ped.fecha) || fechaCom,
+          created_at: String(ped.cobrado_at || ped.conciliado_at || t),
+          registrado_por: String(ped.cobrado_por || ped.vendedor || ''),
+          registrado_por_id: String(ped.vendedor_id || ''),
+          moneda: String(ped.moneda || 'USD'),
+          monto: Number(ped.monto) || 0,
+          tasa: String(ped.moneda) === 'Bs' && totUsd > 0 ? r2_((Number(ped.monto) || 0) / totUsd) : '',
+          monto_usd: totUsd,
+          referencia: '',
+          tipo_pago_real: String(ped.tipo_pago_real || ped.tipo_pago || ''),
+          estado: 'conciliado',
+          conciliado_at: String(ped.conciliado_at || t),
+          conciliado_por: String(ped.conciliado_por || ses.nombre),
+          motivo: ''
+        };
+        agregar_('Pagos', pg);
+        var recien = leer_('Pagos');
+        pg = recien.filter(function (x) { return String(x.id) === pg.id; })[0];
+        todosPagos = recien;
+      }
+      if (!pg || String(pg.estado) !== 'conciliado') return;
+      var pct = numPrecio_(it.pct) > 0 ? numPrecio_(it.pct) : (cfg.por_vendedor[String(ped.vendedor_id)] || cfg.por_vendedor[String(ped.vendedor || '').trim().toLowerCase()] || cfg.porcentaje_default || 3);
+      var baseUsd = Number(pg.monto_usd) || (String(pg.moneda) !== 'Bs' ? Number(pg.monto) || 0 : 0);
+      var comUsd = r2_(baseUsd * pct / 100);
+      var esBs = String(pg.moneda) === 'Bs';
+      var comMon = esBs ? 'Bs' : 'USD';
+      var comTasa = 0;
+      var comMonto = comUsd;
+      if (esBs) {
+        var fOrig = fechaIso_(pg.fecha_pago);
+        if (fOrig && fOrig === fechaCom && Number(pg.tasa) > 0 && !tasaManual) {
+          comTasa = Number(pg.tasa);
+          comMonto = r2_((Number(pg.monto) || 0) * pct / 100);
+        } else {
+          comTasa = obtenerTasaCom() || Number(pg.tasa) || 0;
+          if (!comTasa) throw new Error('No se encontró la tasa BCV para el día de pago de comisión (' + fechaCom + ').');
+          comMonto = r2_(comUsd * comTasa);
+        }
+      }
+      pg.comision_estado = 'pagada';
+      pg.comision_pct = pct;
+      pg.comision_usd = comUsd;
+      pg.comision_moneda = comMon;
+      pg.comision_monto = comMonto;
+      pg.comision_tasa = comTasa || '';
+      pg.comision_fecha = fechaCom;
+      pg.comision_ref = ref;
+      pg.comision_pagada_at = t;
+      pg.comision_pagada_por = ses.nombre;
+      actualizar_('Pagos', pg._fila, pg);
+      pagados++;
+      historial_(ped.id, ses, 'comision_pagada', 'Comisión ' + pct + '% (' + ped.vendedor + '): ' + comMonto + ' ' + comMon + (esBs ? ' (fecha ' + fechaCom + ' · BCV ' + comTasa + ' = ' + comUsd + ' $)' : '') + (ref ? ' · ref ' + ref : ''));
+    });
+    return { ok: true, pagados: pagados };
   } finally {
     lock.releaseLock();
   }
@@ -1066,7 +1542,7 @@ function accionCobro_(p, ses) {
 function accionPedido_(p, ses) {
   var x = leer_('Pedidos').filter(function (y) { return String(y.id) === String(p.pedido_id); })[0];
   if (!x || !puedeVer_(ses, x)) return { ok: false, error: 'Pedido no encontrado.', code: 'not_found' };
-  var o = pedidoConItems_(x, leer_('PedidoItems'));
+  var o = pedidoConItems_(x, leer_('PedidoItems'), leer_('Pagos'));
   var c = leer_('Clientes').filter(function (y) { return String(y.id) === String(x.cliente_id); })[0];
   if (c) o.cliente_datos = clientePublico_(c);
   o.historial = leer_('Historial').filter(function (h) { return String(h.pedido_id) === String(x.id); })
