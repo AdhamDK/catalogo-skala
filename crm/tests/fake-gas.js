@@ -83,6 +83,12 @@ function crearGas({ ahora } = {}) {
       getScriptCache: () => ({ get: (k) => (k in cache ? cache[k] : null), put: (k, v) => { cache[k] = v; }, remove: (k) => { delete cache[k]; } }),
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
+    UrlFetchApp: {
+      fetch: () => ({
+        getResponseCode: () => 200,
+        getContentText: () => JSON.stringify([{ fecha: "2026-10-25", promedio: 50 }]),
+      }),
+    },
     ContentService: {
       MimeType: { JSON: "application/json" },
       createTextOutput: (t) => ({ _t: t, setMimeType() { return this; }, getContent() { return this._t; } }),

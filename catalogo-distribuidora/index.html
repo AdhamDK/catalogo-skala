@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f5f9fc" />
+  <meta name="format-detection" content="telephone=no" />
+  <script src="js/tema.js"></script>
+  <meta name="description" content="Catálogo Oficial — Distribuciones Ontiveros. Productos Alive Cosmetic, Alisoft, Baby Finger, A-Z y Skala al mayor y por unidad." />
+  <title>Distribuciones Ontiveros — Catálogo Oficial Alive &amp; Mayorista</title>
+  <link rel="icon" href="assets/img/logo/favicon-32.png" sizes="32x32" type="image/png" />
+  <link rel="icon" href="assets/img/logo/logo-192.png" sizes="192x192" type="image/png" />
+  <link rel="apple-touch-icon" href="assets/img/logo/logo-192.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <!-- Formas orgánicas decorativas de fondo -->
+  <div class="blobs" aria-hidden="true">
+    <svg class="blob blob-a" viewBox="0 0 200 200"><path d="M46.7,-54.1C58.9,-44.9,64.4,-27.9,66.4,-10.5C68.4,6.9,66.8,24.7,58.5,38.2C50.2,51.7,35.1,60.9,18.5,65.6C1.9,70.3,-16.2,70.4,-31.7,63.2C-47.2,56,-60.1,41.4,-64.6,24.2C-69.1,7.1,-65.2,-12.5,-54.3,-24.7C-43.4,-36.9,-25.6,-41.6,-8.2,-51.4C9.2,-61.2,34.5,-63.3,46.7,-54.1Z" transform="translate(100 100)"/></svg>
+    <svg class="blob blob-b" viewBox="0 0 200 200"><path d="M43.4,-55.9C56.3,-47.3,66.6,-32.4,67.2,-16.7C67.8,-1,58.7,15.5,48.4,28.6C38.1,41.7,26.7,51.4,12.3,57.4C-2.1,63.4,-19.5,65.7,-34.6,60.2C-49.7,54.7,-62.5,41.4,-67.2,24.6C-71.9,7.8,-68.5,-12.5,-58.3,-26.1C-48.1,-39.7,-31.1,-46.6,-14.3,-53.7C2.5,-60.8,30.5,-64.5,43.4,-55.9Z" transform="translate(100 100)"/></svg>
+    <svg class="blob blob-c" viewBox="0 0 200 200"><path d="M52.3,-57.5C65.8,-49.6,72.7,-32.2,72.5,-14.9C72.3,2.4,65,20.3,54.1,33.4C43.2,46.5,28.7,54.8,12.4,59.8C-3.9,64.8,-21.9,66.5,-37.6,60.5C-53.3,54.5,-66.7,40.8,-70.2,24.2C-73.7,7.6,-67.3,-11.9,-56.3,-26.6C-45.3,-41.3,-29.7,-51.2,-13.3,-57.5C3.1,-63.8,38.8,-65.4,52.3,-57.5Z" transform="translate(100 100)"/></svg>
+  </div>
+
+  <!-- Barra superior limpia Mobile-First (inspirada en alive-cosmetic.com) -->
+  <header class="topbar topbar-alive">
+    <a class="brand brand-alive" href="#inicio" aria-label="Distribuciones Ontiveros — Inicio">
+      <img class="brand-logo-full" src="assets/img/logo/logo-ontiveros-transparente.png?v=3" alt="Distribuciones Ontiveros" width="156" height="52" />
+    </a>
+    <nav class="nav nav-desktop" aria-label="Principal">
+      <a href="#inicio">Inicio</a>
+      <a href="#catalogo">Catálogo</a>
+      <a href="#lineas">Divisiones</a>
+      <a href="#como-comprar">Cómo comprar</a>
+      <a href="#contacto">Contacto</a>
+    </nav>
+    <div class="topbar-cta-group">
+      <button type="button" class="btn-config-top" id="btnConfigUnidades" title="Configurar venta por unidad o caja" aria-label="Configurar venta por unidad">⚙️</button>
+      <button type="button" class="btn-cuenta btn-login-bars" id="btnCuenta" aria-label="Login al panel del equipo">
+        <span class="login-bars" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </span>
+        <span class="login-txt">Login</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- CARTA DE PRESENTACIÓN PRINCIPAL (Inspirada en https://alive-cosmetic.com) -->
+  <section id="inicio" class="alive-presentacion" aria-label="Carta de presentación principal">
+
+    <!-- 1. Panel Deslizable de Portadas Interactivas en Abanico 3D (Distribuciones Ontiveros · Alive Hogar · Alive Cuidado · Baby Finger · Skala Brasil) -->
+    <div class="alive-banner-carousel" id="aliveBannerCarousel">
+      <div class="alive-banner-track" id="aliveBannerTrack">
+
+        <!-- SLIDE 1: Portada Corporativa Distribuciones Ontiveros (Multimarca + Abanico Interactivo 3D + Píldoras de Marcas) -->
+        <div class="alive-banner-slide dist-fan-slide dist-slide-ontiveros is-active" role="region" aria-label="Distribuciones Ontiveros — Calidad y Economía para tu Negocio">
+          <svg class="dist-hero-leaf dist-leaf-tl" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M20,180 Q30,40 180,20 Q140,140 20,180 Z" />
+          </svg>
+          <svg class="dist-hero-leaf dist-leaf-br" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M20,180 Q30,40 180,20 Q140,140 20,180 Z" />
+          </svg>
+          <div class="dist-hero-inner">
+            <div class="dist-hero-content">
+              <div class="dist-ontiveros-top-row">
+                <div class="dist-ontiveros-logo-card">
+                  <img src="assets/img/logo/logo-ontiveros-transparente.png?v=3" alt="Distribuciones Ontiveros" width="210" height="72" fetchpriority="high" />
+                </div>
+                <span class="dist-hero-badge">⭐ DISTRIBUIDOR OFICIAL MAYORISTA · DIRECTO A TU NEGOCIO</span>
+              </div>
+              <h2 class="dist-hero-title">Calidad y Economía<br /><span>para tu Negocio</span></h2>
+              <p class="dist-hero-lede">
+                Surtí tu comercio con precios directos de distribuidora en detergentes, cuidado personal, línea bebé y cosmética capilar. <strong>Tocá cualquier producto del abanico</strong> o filtrá por marca:
+              </p>
+              <div class="dist-hero-brand-pills" role="group" aria-label="Filtrar rápidamente por marca líder">
+                <button type="button" class="dist-brand-mini-pill" style="--pill-delay: 0.18s" data-brand-filter="Alive" title="Filtrar productos Alive">
+                  <img src="assets/img/alive-web/logo-alive.png" alt="Alive" width="84" height="32" />
+                </button>
+                <button type="button" class="dist-brand-mini-pill" style="--pill-delay: 0.26s" data-brand-filter="Skala" title="Filtrar productos Skala Brasil">
+                  <img src="assets/img/alive-web/logo-skala.png" alt="Skala Brasil" width="84" height="32" />
+                </button>
+                <button type="button" class="dist-brand-mini-pill" style="--pill-delay: 0.34s" data-brand-filter="Baby Finger" title="Filtrar productos Baby Finger">
+                  <img src="assets/img/alive-web/logo-baby-finger.jpg" alt="Baby Finger" width="84" height="32" />
+                </button>
+                <button type="button" class="dist-brand-mini-pill" style="--pill-delay: 0.42s" data-brand-filter="Alisoft" title="Filtrar productos Alisoft">
+                  <img src="assets/img/alive-web/logo-alisoft.jpg" alt="Alisoft" width="84" height="32" />
+                </button>
+                <button type="button" class="dist-brand-mini-pill" style="--pill-delay: 0.50s" data-brand-filter="AZ" title="Filtrar detergentes A-Z">
+                  <img src="assets/img/alive-web/logo-az.jpg" alt="A-Z" width="84" height="32" />
+                </button>
+                <button type="button" class="dist-brand-mini-pill" style="--pill-delay: 0.58s" data-brand-keyword="Alident" title="Filtrar crema dental Alident">
+                  <img src="assets/img/alive-web/logo-alident.jpg" alt="Alident" width="84" height="32" />
+                </button>
+              </div>
+              <div class="dist-hero-actions">
+                <a class="btn dist-cta-main" href="#catalogo">Ver productos ↓</a>
+                <a class="btn dist-cta-sec" href="#como-comprar">Cómo comprar</a>
+              </div>
+            </div>
+
+            <div class="dist-hero-showcase">
+              <div class="dist-hero-glow" aria-hidden="true"></div>
+              <div class="dist-hero-seal" aria-hidden="true">
+                <strong>12+</strong>
+                <span>MARCAS</span>
+                <small>LÍDERES</small>
+              </div>
+              <div class="dist-hero-fan" role="group" aria-label="Abanico interactivo de productos líderes">
+                <button type="button" class="dist-fan-item dist-fan-mini-izq" data-open-group="GRP-ALV-SUA-1L" aria-label="Ver Suavizantes Alive">
+                  <img src="assets/img/hero-cutouts/ALV-SUA-celeste.png" alt="Suavizante Alive" width="220" height="290" loading="eager" />
+                  <span class="dist-fan-tip">Suavizante Alive · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-mini-der" data-open-group="GRP-AZ-DET" aria-label="Ver Detergente A-Z 1kg">
+                  <img src="assets/img/hero-cutouts/AZ-DET-1kg.png" alt="Detergente A-Z 1kg" width="220" height="290" loading="eager" />
+                  <span class="dist-fan-tip">Detergente A-Z · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-izq" data-open-group="GRP-BF-PAN" aria-label="Ver Pañales Baby Finger">
+                  <img src="assets/img/hero-cutouts/BF-PAN-g.png" alt="Pañales Baby Finger" width="260" height="330" loading="eager" />
+                  <span class="dist-fan-tip">Baby Finger · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-der" data-open-group="GRP-SKL-BANOS-DIST" aria-label="Ver Baños de Crema Skala 1000g">
+                  <img src="assets/img/hero-cutouts/BC-01.png" alt="Skala Brasil 1000g" width="260" height="330" loading="eager" />
+                  <span class="dist-fan-tip">Skala 1000g · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-centro" data-open-group="GRP-ALV-DET-1KG" aria-label="Ver Detergente Alive 1kg">
+                  <img src="assets/img/hero-cutouts/ALV-DET-floral.png" alt="Detergente Alive Floral 1kg" width="300" height="380" fetchpriority="high" />
+                  <span class="dist-fan-tip">Detergente Alive 1kg · Pedir</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SLIDE 2: Línea Hogar — Detergentes Alive, Suavizantes y Lavaplatos Aliclean -->
+        <div class="alive-banner-slide dist-fan-slide dist-slide-detergentes" role="region" aria-label="Alive Hogar — Detergentes, Suavizantes y Lavaplatos">
+          <svg class="dist-hero-leaf dist-leaf-tl" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M20,180 Q30,40 180,20 Q140,140 20,180 Z" />
+          </svg>
+          <svg class="dist-hero-leaf dist-leaf-br" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M20,180 Q30,40 180,20 Q140,140 20,180 Z" />
+          </svg>
+          <div class="dist-hero-inner">
+            <div class="dist-hero-content">
+              <span class="dist-hero-badge">🫧 LÍNEA HOGAR ALIVE &amp; ALICLEAN · MÁXIMA ROTACIÓN</span>
+              <h2 class="dist-hero-title">Limpieza Profunda y<br /><span>Aromas Duraderos</span></h2>
+              <p class="dist-hero-lede">
+                Detergentes enzimáticos <strong>Alive 1 kg en 7 fragancias</strong>, suavizantes acondicionadores y lavaplatos concentrados <strong>Aliclean</strong> con alto margen para tu negocio.
+              </p>
+              <div class="dist-hero-actions">
+                <button type="button" class="btn dist-cta-main" data-open-group="GRP-ALV-DET-1KG">Elegir aromas Alive</button>
+                <button type="button" class="btn dist-cta-sec" data-open-group="GRP-ALV-SUA-1L">Ver suavizantes</button>
+              </div>
+              <ul class="dist-hero-chips">
+                <li>✨ 7 Fragancias 1 kg</li>
+                <li>🌸 Cápsulas de Perfume</li>
+                <li>🍋 Lavaplatos Aliclean</li>
+                <li>📦 Venta por Bulto o Unidad</li>
+              </ul>
+            </div>
+
+            <div class="dist-hero-showcase">
+              <div class="dist-hero-glow" aria-hidden="true"></div>
+              <div class="dist-hero-seal dist-seal-cyan" aria-hidden="true">
+                <strong>1 KG</strong>
+                <span>ALTO PODER</span>
+                <small>7 AROMAS</small>
+              </div>
+              <div class="dist-hero-fan" role="group" aria-label="Abanico interactivo de Detergentes y Hogar Alive">
+                <button type="button" class="dist-fan-item dist-fan-mini-izq" data-open-group="GRP-ALV-LAV" aria-label="Ver Lavaplatos Aliclean">
+                  <img src="assets/img/hero-cutouts/ALV-LAV-limon.png" alt="Lavaplatos Aliclean Limón" width="220" height="290" loading="eager" />
+                  <span class="dist-fan-tip">Lavaplatos Aliclean · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-mini-der" data-open-group="GRP-ALV-SUA-1L" aria-label="Ver Suavizante Alive Floral">
+                  <img src="assets/img/hero-cutouts/ALV-SUA-rosado.png" alt="Suavizante Alive Rosado Floral" width="220" height="290" loading="eager" />
+                  <span class="dist-fan-tip">Suavizante Floral · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-izq" data-open-group="GRP-ALV-DET-1KG" aria-label="Ver Detergente Alive Blanco Perla">
+                  <img src="assets/img/hero-cutouts/ALV-DET-blanco.png" alt="Detergente Alive Blanco Perla 1kg" width="260" height="330" loading="eager" />
+                  <span class="dist-fan-tip">Alive Blanco Perla · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-der" data-open-group="GRP-ALV-DET-1KG" aria-label="Ver Detergente Alive Rosado con Suavizante">
+                  <img src="assets/img/hero-cutouts/ALV-DET-rosado.png" alt="Detergente Alive con Suavizante 1kg" width="260" height="330" loading="eager" />
+                  <span class="dist-fan-tip">Alive con Suavizante · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-centro" data-open-group="GRP-ALV-DET-1KG" aria-label="Ver Detergente Alive Morado Floral">
+                  <img src="assets/img/hero-cutouts/ALV-DET-floral.png" alt="Detergente Alive Morado Floral 1kg" width="300" height="380" loading="eager" />
+                  <span class="dist-fan-tip">Alive Morado Floral · Pedir</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SLIDE 3: Línea Cuidado Personal, Capilar e Higiene Femenina Alive -->
+        <div class="alive-banner-slide dist-fan-slide dist-slide-cuidado" role="region" aria-label="Alive Cuidado Personal — Champú, Baños de Crema, Lociones y Toallas">
+          <svg class="dist-hero-leaf dist-leaf-tl" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M20,180 Q30,40 180,20 Q140,140 20,180 Z" />
+          </svg>
+          <svg class="dist-hero-leaf dist-leaf-br" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M20,180 Q30,40 180,20 Q140,140 20,180 Z" />
+          </svg>
+          <div class="dist-hero-inner">
+            <div class="dist-hero-content">
+              <span class="dist-hero-badge">🌺 CUIDADO PERSONAL E HIGIENE FEMENINA ALIVE</span>
+              <h2 class="dist-hero-title">Belleza, Frescura y<br /><span>Protección Diaria</span></h2>
+              <p class="dist-hero-lede">
+                Champús con <strong>Pro-Vitamina B5</strong>, tratamientos capilares intensivos, lociones hidratantes y <strong>toallas sanitarias Alive</strong> con cubierta suave y máxima absorción.
+              </p>
+              <div class="dist-hero-actions">
+                <button type="button" class="btn dist-cta-main" data-open-group="GRP-ALV-SHA-350">Ver línea Champú</button>
+                <button type="button" class="btn dist-cta-sec" data-open-group="GRP-ALV-TOA-FEM">Ver Toallas Alive</button>
+              </div>
+              <ul class="dist-hero-chips">
+                <li>💆‍♀️ Champú 250 ml y 350 ml</li>
+                <li>🫒 Baños de Crema 400 g</li>
+                <li>🌸 Lociones Corporales</li>
+                <li>🛡️ Toallas Día y Noche</li>
+              </ul>
+            </div>
+
+            <div class="dist-hero-showcase">
+              <div class="dist-hero-glow" aria-hidden="true"></div>
+              <div class="dist-hero-seal dist-seal-pink" aria-hidden="true">
+                <strong>PRO-B5</strong>
+                <span>CUIDADO</span>
+                <small>PERSONAL</small>
+              </div>
+              <div class="dist-hero-fan" role="group" aria-label="Abanico interactivo de Cuidado Personal Alive">
+                <button type="button" class="dist-fan-item dist-fan-mini-izq" data-open-group="GRP-ALV-LOC" aria-label="Ver Lociones Corporales Alive">
+                  <img src="assets/img/hero-cutouts/ALV-LOC-granada.png" alt="Loción Corporal Alive Granada" width="220" height="290" loading="eager" />
+                  <span class="dist-fan-tip">Loción Alive · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-mini-der" data-open-group="GRP-ALV-CAP" aria-label="Ver Baño de Crema Capilar Alive">
+                  <img src="assets/img/hero-cutouts/ALV-CAP-oliva.png" alt="Baño de Crema Alive Oliva" width="220" height="290" loading="eager" />
+                  <span class="dist-fan-tip">Baño de Crema · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-izq" data-open-group="GRP-ALV-SHA-250" aria-label="Ver Shampoo Alive Manzana">
+                  <img src="assets/img/hero-cutouts/ALV-SHA-manzana.png" alt="Shampoo Alive Flor de Manzana" width="260" height="330" loading="eager" />
+                  <span class="dist-fan-tip">Shampoo Manzana · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-der" data-open-group="GRP-ALV-TOA-FEM" aria-label="Ver Toallas Sanitarias Alive">
+                  <img src="assets/img/hero-cutouts/ALV-TOA-nocturna.png" alt="Toallas Alive Nocturna" width="260" height="330" loading="eager" />
+                  <span class="dist-fan-tip">Toallas Alive · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-centro" data-open-group="GRP-ALV-SHA-350" aria-label="Ver Shampoo Alive Coco Tropical">
+                  <img src="assets/img/hero-cutouts/ALV-SHA-coco.png" alt="Shampoo Alive Coco Tropical" width="300" height="380" loading="eager" />
+                  <span class="dist-fan-tip">Shampoo Alive · Pedir</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SLIDE 4: Línea Bebé — Pañales, Toallas Húmedas y Cuidado Baby Finger -->
+        <div class="alive-banner-slide dist-fan-slide dist-slide-bebe" role="region" aria-label="Baby Finger — Pañales, Toallas Húmedas y Cuidado del Bebé">
+          <svg class="dist-hero-leaf dist-leaf-tl" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M20,180 Q30,40 180,20 Q140,140 20,180 Z" />
+          </svg>
+          <svg class="dist-hero-leaf dist-leaf-br" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M20,180 Q30,40 180,20 Q140,140 20,180 Z" />
+          </svg>
+          <div class="dist-hero-inner">
+            <div class="dist-hero-content">
+              <span class="dist-hero-badge">👶 LÍNEA BEBÉ BABY FINGER · CERTIFICACIÓN FDA</span>
+              <h2 class="dist-hero-title">Amor, Suavidad y<br /><span>Máxima Absorción</span></h2>
+              <p class="dist-hero-lede">
+                Pañales desechables <strong>Baby Finger en tallas P, M, G, XG y XXG</strong> con gel súper absorbente, toallas húmedas hipoalergénicas y línea suave de baño infantil.
+              </p>
+              <div class="dist-hero-actions">
+                <button type="button" class="btn dist-cta-main" data-open-group="GRP-BF-PAN">Elegir tallas de Pañales</button>
+                <button type="button" class="btn dist-cta-sec" data-open-group="GRP-BF-THU">Ver Toallas Húmedas</button>
+              </div>
+              <ul class="dist-hero-chips">
+                <li>🧷 Tallas P · M · G · XG · XXG</li>
+                <li>💧 Barreras Anti-Derrames</li>
+                <li>🧻 Toallas Húmedas 50 y 100 und</li>
+                <li>🍼 Shampoo y Colonia Bebé</li>
+              </ul>
+            </div>
+
+            <div class="dist-hero-showcase">
+              <div class="dist-hero-glow" aria-hidden="true"></div>
+              <div class="dist-hero-seal dist-seal-gold" aria-hidden="true">
+                <strong>FDA</strong>
+                <span>MÁXIMA</span>
+                <small>ABSORCIÓN</small>
+              </div>
+              <div class="dist-hero-fan" role="group" aria-label="Abanico interactivo de productos Baby Finger">
+                <button type="button" class="dist-fan-item dist-fan-mini-izq" data-open-group="GRP-BF-CUI" aria-label="Ver Cuidado Bebé Baby Finger">
+                  <img src="assets/img/hero-cutouts/BF-CUI-shampoo.png" alt="Shampoo Baby Finger" width="220" height="290" loading="eager" />
+                  <span class="dist-fan-tip">Cuidado Bebé · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-mini-der" data-open-group="GRP-BF-THU" aria-label="Ver Toallas Húmedas Baby Finger">
+                  <img src="assets/img/hero-cutouts/BF-THU-rosado.png" alt="Toallas Húmedas Baby Finger" width="220" height="290" loading="eager" />
+                  <span class="dist-fan-tip">Toallas Húmedas · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-izq" data-open-group="GRP-BF-PAN" aria-label="Ver Pañal Baby Finger Talla P">
+                  <img src="assets/img/hero-cutouts/BF-PAN-p.png" alt="Pañales Baby Finger Talla P" width="260" height="330" loading="eager" />
+                  <span class="dist-fan-tip">Pañal Talla P · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-der" data-open-group="GRP-BF-PAN" aria-label="Ver Pañal Baby Finger Talla M">
+                  <img src="assets/img/hero-cutouts/BF-PAN-m.png" alt="Pañales Baby Finger Talla M" width="260" height="330" loading="eager" />
+                  <span class="dist-fan-tip">Pañal Talla M · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-centro" data-open-group="GRP-BF-PAN" aria-label="Ver Pañal Baby Finger Talla G">
+                  <img src="assets/img/hero-cutouts/BF-PAN-g.png" alt="Pañales Baby Finger Talla G" width="300" height="380" loading="eager" />
+                  <span class="dist-fan-tip">Pañales Baby Finger · Pedir</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SLIDE 5: Línea Skala Brasil 100% Vegano — Baños de Crema 1000g y Kits -->
+        <div class="alive-banner-slide dist-fan-slide dist-slide-skala" role="region" aria-label="Skala Brasil 100% Vegano — Baños de Crema 1000g y Kits">
+          <svg class="dist-hero-leaf dist-leaf-tl" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M20,180 Q30,40 180,20 Q140,140 20,180 Z" />
+          </svg>
+          <svg class="dist-hero-leaf dist-leaf-br" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M20,180 Q30,40 180,20 Q140,140 20,180 Z" />
+          </svg>
+          <div class="dist-hero-inner">
+            <div class="dist-hero-content">
+              <span class="dist-hero-badge">🌿 SKALA BRASIL · 100% VEGANO · ORIGEN BRASIL</span>
+              <h2 class="dist-hero-title">Nutrición Brasileña<br /><span>para todo Cabello</span></h2>
+              <p class="dist-hero-lede">
+                Los icónicos potes <strong>2 en 1 de 1000g (crema de tratamiento + crema para peinar)</strong> en sus 16 variedades más buscadas y <strong>Kits Dúo Shampoo + Acondicionador</strong>.
+              </p>
+              <div class="dist-hero-actions">
+                <button type="button" class="btn dist-cta-main" data-open-group="GRP-SKL-BANOS-DIST">Elegir Baños 1000g</button>
+                <button type="button" class="btn dist-cta-sec" data-open-group="GRP-SKL-KITS-DIST">Ver Kits Dúo</button>
+              </div>
+              <ul class="dist-hero-chips">
+                <li>🌱 100% Vegano · 0% Parabenos</li>
+                <li>💛 16 Variedades 1000 g</li>
+                <li>🧴 10 Kits Shampoo + Acond.</li>
+                <li>📦 Cajas de 6 Unidades</li>
+              </ul>
+            </div>
+
+            <div class="dist-hero-showcase">
+              <div class="dist-hero-glow" aria-hidden="true"></div>
+              <div class="dist-hero-seal" aria-hidden="true">
+                <strong>#1</strong>
+                <span>EN BRASIL</span>
+                <small>1000g</small>
+              </div>
+              <div class="dist-hero-fan" role="group" aria-label="Abanico interactivo de Baños de Crema Skala 1000g">
+                <button type="button" class="dist-fan-item dist-fan-mini-izq" data-open-group="GRP-SKL-BANOS-DIST" aria-label="Ver Skala Babosa Aloe Vera 1000g">
+                  <img src="assets/img/hero-cutouts/BC-09.png" alt="Skala Babosa 1000g" width="220" height="290" loading="eager" />
+                  <span class="dist-fan-tip">Skala Babosa · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-mini-der" data-open-group="GRP-SKL-BANOS-DIST" aria-label="Ver Skala Amido de Milho 1000g">
+                  <img src="assets/img/hero-cutouts/BC-05.png" alt="Skala Amido de Milho 1000g" width="220" height="290" loading="eager" />
+                  <span class="dist-fan-tip">Amido de Milho · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-izq" data-open-group="GRP-SKL-BANOS-DIST" aria-label="Ver Skala Mais Cachos 1000g">
+                  <img src="assets/img/hero-cutouts/BC-02.png" alt="Skala Mais Cachos 1000g" width="260" height="330" loading="eager" />
+                  <span class="dist-fan-tip">Mais Cachos · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-der" data-open-group="GRP-SKL-BANOS-DIST" aria-label="Ver Skala Divino Potão 1000g">
+                  <img src="assets/img/hero-cutouts/BC-06.png" alt="Skala Divino Potão 1000g" width="260" height="330" loading="eager" />
+                  <span class="dist-fan-tip">Divino Potão · Pedir</span>
+                </button>
+                <button type="button" class="dist-fan-item dist-fan-centro" data-open-group="GRP-SKL-BANOS-DIST" aria-label="Ver Skala Dona Skala 1000g">
+                  <img src="assets/img/hero-cutouts/BC-01.png" alt="Skala Dona Skala 1000g" width="300" height="380" loading="eager" />
+                  <span class="dist-fan-tip">Baños Skala 1000g · Pedir</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <button type="button" class="alive-slider-arrow prev" id="bannerPrevBtn" aria-label="Banner anterior">‹</button>
+      <button type="button" class="alive-slider-arrow next" id="bannerNextBtn" aria-label="Siguiente banner">›</button>
+      <div class="alive-banner-dots" id="aliveBannerDots" role="tablist" aria-label="Diapositivas de portada">
+        <button type="button" class="alive-dot is-active" data-banner-idx="0" aria-label="Distribuciones Ontiveros — Portada Multimarca"></button>
+        <button type="button" class="alive-dot" data-banner-idx="1" aria-label="Línea Hogar Alive — Detergentes, Suavizantes y Lavaplatos"></button>
+        <button type="button" class="alive-dot" data-banner-idx="2" aria-label="Cuidado Personal e Higiene Femenina Alive"></button>
+        <button type="button" class="alive-dot" data-banner-idx="3" aria-label="Línea Bebé Baby Finger"></button>
+        <button type="button" class="alive-dot" data-banner-idx="4" aria-label="Skala Brasil 100% Vegano"></button>
+      </div>
+    </div>
+
+    <!-- 1.5. Barra Deslizable Compacta de Marcas Afiliadas (Inspirada en alive-cosmetic.com + SKALA, A-Z y Bernice) -->
+    <div class="alive-brands-bar" id="aliveBrandsBar" role="region" aria-label="Marcas afiliadas oficiales">
+      <div class="alive-brands-track" id="aliveBrandsTrack">
+        <button type="button" class="alive-brand-pill" data-brand-filter="Alive" title="Ver productos Alive" aria-label="Filtrar marca Alive">
+          <img src="assets/img/alive-web/logo-alive.png" alt="Alive" width="120" height="48" loading="eager" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill is-skala" data-brand-filter="Skala" title="Ver productos Skala Brasil" aria-label="Filtrar marca Skala Brasil">
+          <img src="assets/img/alive-web/logo-skala.png" alt="Skala Brasil" width="120" height="48" loading="eager" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="Alisoft" title="Ver productos Alisoft" aria-label="Filtrar marca Alisoft">
+          <img src="assets/img/alive-web/logo-alisoft.jpg" alt="Alisoft" width="120" height="48" loading="eager" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="Baby Finger" title="Ver productos Baby Finger" aria-label="Filtrar marca Baby Finger">
+          <img src="assets/img/alive-web/logo-baby-finger.jpg" alt="Baby Finger" width="120" height="48" loading="eager" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="AZ" title="Ver detergentes A-Z" aria-label="Filtrar marca A-Z">
+          <img src="assets/img/alive-web/logo-az.jpg" alt="Detergente A-Z" width="120" height="48" loading="eager" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="Bernice" title="Ver espirales Bernice" aria-label="Filtrar marca Bernice">
+          <img src="assets/img/alive-web/logo-bernice.jpg" alt="Bernice" width="120" height="48" loading="eager" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-keyword="Gold" title="Ver línea Alive Gold" aria-label="Filtrar línea Alive Gold">
+          <img src="assets/img/alive-web/logo-alive-gold.jpg" alt="Alive Gold" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-keyword="Aliclean" title="Ver lavaplatos Aliclean" aria-label="Filtrar línea Aliclean">
+          <img src="assets/img/alive-web/logo-aliclean.jpg" alt="Aliclean" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-keyword="Alident" title="Ver crema dental Alident" aria-label="Filtrar línea Alident">
+          <img src="assets/img/alive-web/logo-alident.jpg" alt="Alident" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-keyword="Anita" title="Ver jabones Anita" aria-label="Filtrar línea Anita">
+          <img src="assets/img/alive-web/logo-anita.jpg" alt="Anita" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="Harmony" title="Ver jabones Harmony" aria-label="Filtrar marca Harmony">
+          <img src="assets/img/alive-web/logo-harmony.jpg" alt="Harmony" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="Dorco" title="Ver afeitadoras Dorco" aria-label="Filtrar marca Dorco">
+          <img src="assets/img/alive-web/logo-dorco.jpg" alt="Dorco" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+
+        <!-- Duplicado de bucle continuo sin saltos (marquee infinito estilo alive-cosmetic.com) -->
+        <button type="button" class="alive-brand-pill" data-brand-filter="Alive" title="Ver productos Alive" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-alive.png" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill is-skala" data-brand-filter="Skala" title="Ver productos Skala Brasil" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-skala.png" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="Alisoft" title="Ver productos Alisoft" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-alisoft.jpg" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="Baby Finger" title="Ver productos Baby Finger" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-baby-finger.jpg" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="AZ" title="Ver detergentes A-Z" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-az.jpg" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="Bernice" title="Ver espirales Bernice" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-bernice.jpg" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-keyword="Gold" title="Ver línea Alive Gold" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-alive-gold.jpg" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-keyword="Aliclean" title="Ver lavaplatos Aliclean" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-aliclean.jpg" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-keyword="Alident" title="Ver crema dental Alident" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-alident.jpg" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-keyword="Anita" title="Ver jabones Anita" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-anita.jpg" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="Harmony" title="Ver jabones Harmony" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-harmony.jpg" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+        <button type="button" class="alive-brand-pill" data-brand-filter="Dorco" title="Ver afeitadoras Dorco" aria-hidden="true" tabindex="-1">
+          <img src="assets/img/alive-web/logo-dorco.jpg" alt="" width="120" height="48" loading="lazy" decoding="async" />
+        </button>
+      </div>
+    </div>
+
+    <!-- 2. Bloque Celeste de Bienvenida + Panel Deslizable de Tarjetas Destacadas -->
+    <div class="alive-welcome-section hero-content">
+      <div class="alive-welcome-inner">
+        <p class="alive-kicker">Productos que Destacan</p>
+        <h1 class="alive-welcome-title">
+          La Mejor Calidad/Precio<br />con <span class="alive-underline">Distribuciones Ontiveros
+            <svg class="alive-brush-svg" viewBox="0 0 220 14" fill="none" aria-hidden="true">
+              <path d="M3 10.5C58 4.2 145 2.8 217 7.5" stroke="#00a6e2" stroke-width="5.5" stroke-linecap="round"/>
+            </svg>
+          </span>
+        </h1>
+        <p class="alive-welcome-desc">
+          Un Oasis de Productos, al Mejor Precio! Trabajamos Día a dia! para darte las mejores ofertas con nuestras marcas afiliadas, <strong>Alive</strong>, <strong>BabyFinger</strong>, <strong>Skala</strong> y Mas próximamente..
+        </p>
+        <p class="alive-welcome-cta-text">
+          ¡Tu aliado de confianza para crecer con calidad, variedad y economía!
+        </p>
+
+        <!-- Panel Deslizable de Líneas Destacadas (Alive Detergentes, Champú, Toallas, Baby Finger Pañales y Skala) -->
+        <div class="alive-featured-wrap hero-art">
+          <button type="button" class="alive-feat-arrow prev" id="featPrevBtn" aria-label="Anterior destacado">‹</button>
+          <div class="alive-featured-track" id="aliveFeaturedTrack">
+            <article class="alive-feat-card hero-tile tile-alive-card" data-open-group="GRP-ALV-DET-1KG" role="button" tabindex="0">
+              <div class="alive-feat-img">
+                <img src="assets/img/catalogo-aprobado/01-ALV-DET-detergente-alive/portada-7-variantes-detergente-alive-800.jpg" srcset="assets/img/catalogo-aprobado/01-ALV-DET-detergente-alive/portada-7-variantes-detergente-alive-800.jpg 1x, assets/img/catalogo-aprobado/01-ALV-DET-detergente-alive/portada-7-variantes-detergente-alive-hq.jpg 2x" alt="Alive Detergentes para la ropa" width="800" height="600" />
+              </div>
+              <div class="alive-feat-caption">
+                <strong>ALIVE</strong>
+                <span>Detergentes para la ropa</span>
+              </div>
+            </article>
+
+            <article class="alive-feat-card hero-tile tile-alive-card" data-open-group="GRP-ALV-TOA-FEM" role="button" tabindex="0">
+              <div class="alive-feat-img">
+                <img src="assets/img/catalogo-aprobado/07-ALV-TOA-toallas-femeninas-y-protectores/portada-estudio-4-presentaciones-alive-800.jpg" srcset="assets/img/catalogo-aprobado/07-ALV-TOA-toallas-femeninas-y-protectores/portada-estudio-4-presentaciones-alive-800.jpg 1x, assets/img/catalogo-aprobado/07-ALV-TOA-toallas-femeninas-y-protectores/portada-estudio-4-presentaciones-alive-hq.jpg 2x" alt="Alive Toallas sanitarias" width="800" height="600" />
+              </div>
+              <div class="alive-feat-caption">
+                <strong>ALIVE</strong>
+                <span>Toallas sanitarias</span>
+              </div>
+            </article>
+
+            <article class="alive-feat-card hero-tile tile-alive-card" data-open-group="GRP-ALV-SHA-350" role="button" tabindex="0">
+              <div class="alive-feat-img">
+                <img src="assets/img/catalogo-aprobado/12-ALV-SHA-shampoo-y-acondicionador-alive/portada-estudio-shampoo-350ml-7-colores-800.jpg" srcset="assets/img/catalogo-aprobado/12-ALV-SHA-shampoo-y-acondicionador-alive/portada-estudio-shampoo-350ml-7-colores-800.jpg 1x, assets/img/catalogo-aprobado/12-ALV-SHA-shampoo-y-acondicionador-alive/portada-estudio-shampoo-350ml-7-colores-hq.jpg 2x" alt="Alive Champú y Cuidado Capilar" width="800" height="600" />
+              </div>
+              <div class="alive-feat-caption">
+                <strong>ALIVE</strong>
+                <span>Champú y línea Gold</span>
+              </div>
+            </article>
+
+            <article class="alive-feat-card hero-tile tile-alive-card" data-open-group="GRP-BF-PAN" role="button" tabindex="0">
+              <div class="alive-feat-img">
+                <img src="assets/img/catalogo-aprobado/13-BF-PAN-panales-baby-finger/portada-estudio-5-tallas-baby-finger-800.jpg" srcset="assets/img/catalogo-aprobado/13-BF-PAN-panales-baby-finger/portada-estudio-5-tallas-baby-finger-800.jpg 1x, assets/img/catalogo-aprobado/13-BF-PAN-panales-baby-finger/portada-estudio-5-tallas-baby-finger-hq.jpg 2x" alt="Baby Finger Pañales para bebé" width="800" height="600" />
+              </div>
+              <div class="alive-feat-caption">
+                <strong>BABY FINGER</strong>
+                <span>Pañales y línea bebé</span>
+              </div>
+            </article>
+
+            <article class="alive-feat-card hero-tile tile-alive-card" data-open-group="GRP-SKL-BANOS-DIST" role="button" tabindex="0">
+              <div class="alive-feat-img">
+                <img src="assets/img/catalogo-aprobado/16-SKL-BANOS-1kg-x6/portada-estudio-16-banos-skala-800.jpg" srcset="assets/img/catalogo-aprobado/16-SKL-BANOS-1kg-x6/portada-estudio-16-banos-skala-800.jpg 1x, assets/img/catalogo-aprobado/16-SKL-BANOS-1kg-x6/portada-estudio-16-banos-skala-hq.jpg 2x" alt="Skala Brasil Tratamientos 1000g" width="800" height="600" />
+              </div>
+              <div class="alive-feat-caption">
+                <strong>SKALA</strong>
+                <span>Baños de crema 1 kg (16 var.)</span>
+              </div>
+            </article>
+
+            <article class="alive-feat-card hero-tile tile-alive-card" data-open-group="GRP-ALV-LOC" role="button" tabindex="0">
+              <div class="alive-feat-img">
+                <img src="assets/img/catalogo-aprobado/11-ALV-LOC-locion-y-fragancias-alive/portada-estudio-4-lociones-alive-800.jpg" srcset="assets/img/catalogo-aprobado/11-ALV-LOC-locion-y-fragancias-alive/portada-estudio-4-lociones-alive-800.jpg 1x, assets/img/catalogo-aprobado/11-ALV-LOC-locion-y-fragancias-alive/portada-estudio-4-lociones-alive-hq.jpg 2x" alt="Alive Lociones corporales" width="800" height="600" />
+              </div>
+              <div class="alive-feat-caption">
+                <strong>ALIVE</strong>
+                <span>Lociones corporales</span>
+              </div>
+            </article>
+          </div>
+          <button type="button" class="alive-feat-arrow next" id="featNextBtn" aria-label="Siguiente destacado">›</button>
+        </div>
+
+        <div class="alive-feat-dots" id="aliveFeatDots" aria-hidden="true">
+          <span class="feat-dot is-active"></span>
+          <span class="feat-dot"></span>
+          <span class="feat-dot"></span>
+        </div>
+
+        <div class="alive-welcome-actions">
+          <a class="btn btn-primary btn-alive-cta" href="#catalogo">Ir a tomar pedido ↓</a>
+          <button type="button" class="btn btn-ghost btn-alive-ghost" id="heroOrderBtn">Ver mi pedido</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mantiene compatibilidad de nodo .brand-mark oculto para tests estructurales -->
+    <span class="brand-mark" hidden></span>
+  </section>
+
+  <!-- Carta de Productos dividida por secciones (Todos · Detergentes y Hogar · Cuidado Personal · Papel y Multiusos · Bebé y Pañales) -->
+  <section id="catalogo" class="products products-ban">
+    <div class="container">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Carta de Productos por Secciones</p>
+          <h2>Elegí la sección y tocá el producto</h2>
+          <p class="section-note">Tocá cualquier tarjeta del catálogo para abrir la ventana con todas sus fragancias o presentaciones: <strong>tocá la imagen para sumar (+) o el signo (−) para restar</strong>.</p>
+        </div>
+        <div class="filters" id="filterCategorias" role="group" aria-label="Filtrar por categoría">
+          <button type="button" class="filter active" data-cat="todos">Todos <span class="tab-count" id="countAll"></span></button>
+          <button type="button" class="filter" data-cat="Detergentes">Detergentes y Hogar <span class="tab-count" id="countDet"></span></button>
+          <button type="button" class="filter" data-cat="Cuidado Personal">Cuidado Personal <span class="tab-count" id="countPer"></span></button>
+          <button type="button" class="filter" data-cat="Hogar y Papel">Papel y Multiusos <span class="tab-count" id="countHog"></span></button>
+          <button type="button" class="filter" data-cat="Bebé y Pañales">Bebé y Pañales <span class="tab-count" id="countBeb"></span></button>
+        </div>
+      </div>
+
+      <div class="catalogo-toolbar" role="region" aria-label="Buscador y vista del catálogo">
+        <input type="search" class="catalogo-buscador" id="searchInput" placeholder="🔍 Buscar producto, marca o fragancia (ej. Alive, A-Z, Lavanda, Alisoft, Baby Finger)…" aria-label="Buscar producto, marca o fragancia" autocomplete="off" />
+        <select class="catalogo-select-marca" id="lineFilter" aria-label="Filtrar por marca">
+          <option value="todas">Todas las marcas</option>
+        </select>
+        <div class="selector-vista-cat" role="group" aria-label="Cambiar vista del catálogo">
+          <button type="button" class="vista-cat-btn activo" data-vista-modo="cuadricula" title="Vista por secciones" aria-label="Vista cuadrícula">⊞ Por Secciones</button>
+          <button type="button" class="vista-cat-btn" data-vista-modo="matriz" title="Lista rápida mayorista" aria-label="Lista rápida">☰ Compacto</button>
+        </div>
+      </div>
+
+      <!-- Contenedor de Secciones del Catálogo (#catalogGrid) -->
+      <div class="catalogo-secciones" id="catalogGrid" aria-live="polite"></div>
+      <p class="catalog-empty" id="catalogEmpty" hidden>No encontramos productos con ese filtro. Probá con otra palabra o seleccioná «Todos».</p>
+    </div>
+  </section>
+
+  <!-- Guía de Divisiones Comerciales -->
+  <section id="lineas" class="curvatura">
+    <div class="container">
+      <p class="eyebrow">Nuestras Divisiones Comerciales</p>
+      <h2>¿Qué línea buscás para tu negocio?</h2>
+      <div class="curve-grid">
+        <div class="curve" data-QuickCat="Detergentes" role="button" tabindex="0">
+          <span class="curve-dot">🫧</span>
+          <h3>Detergentes y Hogar</h3>
+          <p class="curve-type">Alive · Aliclean · A-Z</p>
+        </div>
+        <div class="curve" data-QuickCat="Cuidado Personal" role="button" tabindex="0">
+          <span class="curve-dot">✨</span>
+          <h3>Cuidado Personal</h3>
+          <p class="curve-type">Alive Capilar · Anita · Alident · Skala</p>
+        </div>
+        <div class="curve" data-QuickCat="Hogar y Papel" role="button" tabindex="0">
+          <span class="curve-dot">🌿</span>
+          <h3>Papel y Multiusos</h3>
+          <p class="curve-type">Alisoft 215–600 Hojas · Toallín · Dorco</p>
+        </div>
+        <div class="curve" data-QuickCat="Bebé y Pañales" role="button" tabindex="0">
+          <span class="curve-dot">👶</span>
+          <h3>Bebé y Pañales</h3>
+          <p class="curve-type">Baby Finger · Toallitas · Línea Bebé</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quiénes somos -->
+  <section id="nosotros" class="about">
+    <div class="container">
+      <p class="eyebrow">Quiénes somos · Solidez, Confianza y Crecimiento</p>
+      <h2>Un solo precio por grupo.<br />Todas las fragancias a tu elección.</h2>
+      <p class="lede">
+        Somos distribuidores oficiales de las líneas <strong>Alive Cosmetic, Alisoft, Baby Finger, A-Z y Skala Brasil</strong>.
+        Abastecemos supermercados, farmacias, perfumerías, abastos y mayoristas con despacho directo en ruta.
+      </p>
+      <div class="about-grid">
+        <div class="about-card">
+          <h3>Combiná tus fragancias</h3>
+          <p>Tocá cualquier producto (como Detergente Alive, A-Z, Suavizante o Lociones) y tocá sobre las imágenes de cada aroma para sumar o restar.</p>
+        </div>
+        <div class="about-card">
+          <h3>Por Caja o por Unidad</h3>
+          <p>Podés pedir por bulto cerrado o por unidades sueltas (con sugerencia automática desde 6 unidades por referencia).</p>
+        </div>
+        <div class="about-card">
+          <h3>Precio Mayorista automático</h3>
+          <p>Al sumar 15 o más cajas mixtas en tu pedido, el catálogo activa automáticamente la tarifa al mayor.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cómo comprar -->
+  <section id="como-comprar" class="como-comprar">
+    <div class="container">
+      <p class="eyebrow">Cómo comprar</p>
+      <h2>Armá tu pedido en 3 pasos simples</h2>
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">01</span>
+          <h3>Elegí el grupo y sus fragancias</h3>
+          <p>Tocá cualquier producto del catálogo para ver todas sus fragancias o tallas disponibles al mismo precio.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">02</span>
+          <h3>Pedí por Caja o por Unidad</h3>
+          <p>Indicá cuántas cajas cerradas o unidades sueltas (desde 6 unidades por aroma) necesitás para tu negocio.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">03</span>
+          <h3>Enviá por WhatsApp a tu asesor</h3>
+          <p>Revisá tu descuento según forma de pago y enviá el pedido directo al vendedor de tu ruta.</p>
+        </div>
+      </div>
+      <p class="price-note">
+        <strong>Precios al mayor automáticos desde 15 cajas mixtas.</strong> También obtenés descuentos adicionales según tu modalidad de pago (Efectivo $, USDT o Pronto Pago).
+      </p>
+      <button type="button" class="btn btn-primary" id="ctaOrderBtn">Revisar y enviar mi pedido</button>
+    </div>
+  </section>
+
+  <!-- Contacto -->
+  <section id="contacto" class="contacto">
+    <div class="container">
+      <p class="eyebrow">Contacto y Rutas</p>
+      <h2>Atención directa para tu negocio</h2>
+      <div class="contact-row">
+        <a class="contact-card" id="contactWhatsapp" href="https://wa.me/584247392349" target="_blank" rel="noopener">
+          <strong>WhatsApp Ventas</strong>
+          <span>Atención inmediata</span>
+        </a>
+        <div class="contact-card">
+          <strong>Rutas de Despacho</strong>
+          <span>El Vigía · Mérida · El Chivo · Mocotíes · Caja Seca · Táchira</span>
+        </div>
+        <div class="contact-card">
+          <strong>Marcas Oficiales</strong>
+          <span>Alive Cosmetic · Alisoft · Baby Finger · A-Z · Skala</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <p>Distribuciones Ontiveros · Catálogo Oficial 2026 · Solidez, Confianza y Crecimiento</p>
+      <p class="foot-note">Distribuidor autorizado de Alive Cosmetic, Alisoft, Baby Finger, A-Z y Skala Brasil.</p>
+      <p class="foot-note"><a href="panel.html" id="footAcceso" class="foot-link">Acceso empresa</a> · <button type="button" class="foot-link foot-tema" id="btnTema">Tema oscuro</button></p>
+    </div>
+  </footer>
+
+  <!-- Barra flotante de pedido (misma estructura y clases que catalogo-skala) -->
+  <div class="order-bar" id="cartBar">
+    <div class="order-bar-info">
+      <span class="order-count"><strong id="cartCount">0</strong> <span id="cartSummary">seleccionados</span></span>
+      <span class="order-hint" id="cartSub"></span>
+      <div class="progreso-mayor-web" id="orderProgress" aria-hidden="true"><div class="progreso-mayor-web-fill" id="orderProgressFill"></div></div>
+    </div>
+    <button type="button" class="order-clear" id="clearCartBtn" title="Borrar todo">Borrar todo</button>
+    <button type="button" class="btn btn-primary" id="openOrderModalBtn">Armar pedido por WhatsApp</button>
+  </div>
+
+  <!-- ============================================================
+       MODAL 1: SELECTOR DE FRAGANCIAS / VARIANTES POR GRUPO
+       ============================================================ -->
+  <div class="modal" id="fragModal" hidden>
+    <div class="modal-box modal-fragancias" role="dialog" aria-modal="true" aria-labelledby="fragModalTitle" tabindex="-1">
+      <button type="button" class="modal-x" data-close-frag aria-label="Cerrar">✕</button>
+      <div class="frag-modal-head">
+        <img id="fragModalImg" src="" alt="" class="frag-head-thumb" width="64" height="64" hidden />
+        <div class="frag-head-text">
+          <p class="eyebrow" id="fragModalMarca" hidden>ALIVE COSMETIC</p>
+          <h3 id="fragModalTitle">Detergente Alive 1kg</h3>
+          <p class="modal-sub" id="fragModalSub" hidden></p>
+        </div>
+      </div>
+
+      <div class="frag-toolbar" hidden>
+        <div class="frag-precios-chips" id="fragPreciosInfo"></div>
+        <div class="frag-modo-switch" id="fragModoSwitch">
+          <div class="modo-toggle-group" role="group" aria-label="Modo de compra">
+            <button type="button" class="modo-btn is-active" id="btnModoCaja" data-modo="caja">
+              📦 Por Caja / Bulto
+            </button>
+            <button type="button" class="modo-btn" id="btnModoUnidad" data-modo="unidad">
+              🧴 Por Unidad <small>(mín. 6 und)</small>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p class="frag-hint-banner" id="fragHintBanner" hidden>
+        ✨ Todas las fragancias de este grupo manejan el <strong>mismo precio</strong>. Elegí las cantidades de cada aroma.
+      </p>
+
+      <div class="frag-grid" id="fragGrid"></div>
+
+      <div class="frag-modal-foot">
+        <div class="frag-resumen-actual" id="fragResumenGrupo">0 seleccionados en este grupo</div>
+        <div class="frag-foot-actions">
+          <button type="button" class="btn btn-ghost" id="btnLimpiarGrupo">Limpiar</button>
+          <button type="button" class="btn btn-ghost" id="btnIrPedidoDesdeFrag" hidden>Ver pedido</button>
+          <button type="button" class="btn btn-primary" data-close-frag id="btnListoFrag">✓ Listo</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL 2: CONFIGURACIÓN DEL VENDEDOR (UNIDADES / CAJAS)
+       ============================================================ -->
+  <div class="modal" id="configUnidadModal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="configModalTitle" tabindex="-1">
+      <button type="button" class="modal-x" data-close-config aria-label="Cerrar">✕</button>
+      <h3 id="configModalTitle">Configurar Venta por Unidad o Caja</h3>
+      <p class="modal-sub">Marcá qué grupos permiten venta por unidad (con mínimo sugerido de 6 unidades) y cuáles se venden solo por caja cerrada.</p>
+      <div class="config-actions-top">
+        <button type="button" class="btn btn-ghost" id="btnHabilitarTodasUnidades">Habilitar unidad en todos</button>
+        <button type="button" class="btn btn-ghost" id="btnSoloCajasTodos">Solo cajas en todos</button>
+      </div>
+      <div class="config-list" id="configUnidadList"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-primary" data-close-config>Guardar y cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL 3: TU PEDIDO (MISMA ESTRUCTURA DE CATALOGO-SKALA)
+       ============================================================ -->
+  <div class="modal" id="orderModal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="orderModalTitle" tabindex="-1">
+      <button type="button" class="modal-x" id="btnClose" data-close-modal aria-label="Cerrar">✕</button>
+      <h3 id="orderModalTitle">Tu pedido</h3>
+      <p class="modal-sub" id="cartNivel">Revisá, sumá o quitá productos y fragancias.</p>
+      <form id="orderForm" novalidate>
+        <ul class="carrito" id="cartList"></ul>
+        <p class="cart-total" id="cartTotal"></p>
+
+        <section class="pagos-web" id="fsPagoWeb" aria-labelledby="pagosWebTit">
+          <div class="pagos-cab">
+            <h4 id="pagosWebTit">Forma de pago</h4>
+            <button type="button" class="btn-desplegar" id="btnPagos" aria-expanded="false" aria-controls="pagosWeb">Ver opciones</button>
+          </div>
+          <div id="pagoElegido"></div>
+          <div id="pagosWeb" class="pagos-lista" hidden></div>
+        </section>
+
+        <section class="vendedor-web cliente-web" id="fsCliente" aria-labelledby="cliTit">
+          <div class="pagos-cab">
+            <h4 id="cliTit">Tus datos de entrega <span class="opc">(opcional)</span></h4>
+            <button type="button" class="btn-desplegar" id="btnDatosCli" aria-expanded="false" aria-controls="cliCampos">Completar</button>
+          </div>
+          <div id="cliCampos" class="cli-panel" hidden>
+            <div class="cli-buscar">
+              <input type="search" id="fCliBuscar" inputmode="tel" autocomplete="off" placeholder="🔍 ¿Ya compraste antes? Ingresá tu teléfono o RIF" aria-label="Buscar cliente por teléfono o RIF" />
+              <button type="button" class="btn btn-ghost" id="btnCliNuevo">+ Nuevo</button>
+            </div>
+            <div id="fCliResultados" class="cli-res" hidden></div>
+            <div id="cliFormCampos" class="cli-form">
+              <div class="form-grid">
+                <label class="field"><span>Nombre del negocio *</span>
+                  <input id="fNegocio" type="text" placeholder="Ej. Supermercado El Sol" autocomplete="organization" />
+                </label>
+                <label class="field"><span>Persona de contacto *</span>
+                  <input id="fNombre" type="text" placeholder="Ej. María Pérez" autocomplete="name" />
+                </label>
+                <label class="field"><span>Teléfono *</span>
+                  <input id="fTelefono" type="tel" inputmode="tel" placeholder="0414-0000000" autocomplete="tel" />
+                </label>
+                <label class="field"><span>RIF o Cédula</span>
+                  <input id="fRif" type="text" placeholder="J-12345678-9" autocomplete="off" />
+                </label>
+                <label class="field"><span>Ciudad / Ruta</span>
+                  <input id="fCiudad" type="text" placeholder="El Vigía / Mérida / El Chivo" />
+                </label>
+                <label class="field"><span>Notas</span>
+                  <input id="fNotas" type="text" placeholder="Observaciones de entrega" />
+                </label>
+                <div class="field field-full dir-con-ubic">
+                  <label for="fDireccion"><span>Dirección de entrega</span></label>
+                  <div class="dir-fila">
+                    <textarea id="fDireccion" class="dir-texto" rows="1" placeholder="Calle, local o punto de referencia"></textarea>
+                    <button type="button" class="btn-ubic" id="btnUbic" aria-label="Tomar mi ubicación actual" title="Tomar mi ubicación actual">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><path d="M12 7v6M9 10h6"/></svg>
+                    </button>
+                  </div>
+                  <span class="ubic-estado" id="ubicEstado"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <p class="form-warn" id="formWarn" hidden></p>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="addMoreBtn" data-close-modal>+ Agregar más productos</button>
+          <button type="submit" class="btn btn-primary btn-enviar" id="sendWhatsappBtn">Enviar pedido por WhatsApp</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL 4: ¡LISTO! CON CONFETI Y VENDEDORES
+       ============================================================ -->
+  <div class="modal" id="listoModal" hidden>
+    <div class="modal-box modal-listo es-listo" role="dialog" aria-modal="true" aria-labelledby="listoTit" tabindex="-1">
+      <div class="confeti" id="confetti" aria-hidden="true"></div>
+      <div class="listo-anim" id="listoAnim" aria-hidden="true">
+        <svg class="check" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28"/><path d="M20 33l8 8 16-16"/></svg>
+      </div>
+      <h3 id="listoTit">¡Listo!</h3>
+      <p class="modal-sub" id="listoSub">Tu pedido quedó armado con todas sus fragancias.</p>
+      <p class="listo-preg" id="listoPreg">Elegí con qué asesor enviarlo por WhatsApp:</p>
+      <div id="listoVend"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-cerrar-listo>Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL 5: ¿QUIÉN ARMA EL PEDIDO? (CLIENTE / DETALLES / VENDEDOR)
+       ============================================================ -->
+  <div class="modal" id="modoModal" hidden>
+    <div class="modal-box modal-mini" role="dialog" aria-modal="true" aria-labelledby="modoTitulo" tabindex="-1">
+      <h3 id="modoTitulo">¿Quién arma el pedido?</h3>
+      <div class="modo-opciones">
+        <button type="button" class="modo-btn" id="btnModoCliente">
+          <strong>Cliente</strong><span>Enviar mi pedido directo a mi vendedor por WhatsApp</span>
+        </button>
+        <button type="button" class="modo-btn" id="btnModoDetalles">
+          <strong>Detalles del pedido</strong><span>Revisar productos, forma de pago y mis datos</span>
+        </button>
+        <button type="button" class="modo-btn" id="btnModoVendedor">
+          <strong>Vendedor</strong><span>Abrir el panel del equipo con estos productos</span>
+        </button>
+      </div>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost" data-cerrar>Cancelar</button></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL 6: IMAGEN AMPLIADA (ZOOM)
+       ============================================================ -->
+  <div class="modal zoom-modal" id="zoomModal" hidden>
+    <div class="zoom-box" role="dialog" aria-modal="true" aria-labelledby="zoomCaption">
+      <button type="button" class="zoom-cerrar" id="zoomClose" data-close-zoom aria-label="Cerrar imagen">✕</button>
+      <img id="zoomImg" alt="" />
+      <p class="zoom-pie" id="zoomCaption"></p>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="js/producto.js"></script>
+  <script src="js/datos-distribuidora.js"></script>
+  <script src="js/crm-core.js"></script>
+  <script src="js/crm-api.js"></script>
+  <script src="js/main-distribuidora.js"></script>
+  <script src="js/crm.js"></script>
+</body>
+</html>

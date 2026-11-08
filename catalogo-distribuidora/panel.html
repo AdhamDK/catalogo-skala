@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f6f9fc" />
+  <meta name="format-detection" content="telephone=no" />
+  <script src="js/tema.js"></script>
+  <meta name="robots" content="noindex" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Ontiveros Equipo" />
+  <title>Distribuciones Ontiveros · Equipo</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="assets/img/logo/logo-96.png" type="image/png" />
+  <link rel="apple-touch-icon" href="assets/img/logo/logo-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/panel.css" />
+</head>
+<body class="app">
+
+  <header class="app-bar">
+    <button type="button" class="app-atras" id="btnAtras" aria-label="Volver" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+    </button>
+    <a class="app-logo" id="lnkCatalogo" href="index.html" aria-label="Ir a la página de productos (la que ven los clientes)" title="Ver catálogo">
+      <img src="assets/img/logo/icono-do-transparente.png?v=3" alt="Distribuciones Ontiveros" width="54" height="29" />
+    </a>
+    <h1 class="app-titulo" id="appTitulo">Dist. Ontiveros</h1>
+    <span class="app-quien" id="appQuien"></span>
+    <a class="app-mas" id="btnMas" href="#/mas" aria-label="Más opciones" title="Más" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </a>
+    <div class="barra-carga" id="barraCarga" hidden aria-hidden="true"></div>
+  </header>
+
+  <div class="pend-subir app-pend" id="pendSubir" hidden>
+    <span id="pendSubirTxt"></span>
+    <button type="button" class="btn btn-ghost" id="btnSubirPend">Subir ahora</button>
+  </div>
+
+  <div class="modo-local app-pend" id="modoLocal" hidden role="status"></div>
+  <div class="aviso-app app-pend" id="avisoApp" hidden></div>
+
+  <main class="app-main" id="vista" tabindex="-1" aria-live="polite"></main>
+
+  <nav class="app-nav" id="appNav" aria-label="Secciones" hidden></nav>
+
+  <!-- Hoja para confirmar / elegir (despachador, motivo, etc.) -->
+  <div class="modal" id="hoja" hidden>
+    <form class="modal-box modal-mini" id="hojaForm" role="dialog" aria-modal="true" aria-labelledby="hojaTitulo" tabindex="-1" novalidate>
+      <h3 id="hojaTitulo"></h3>
+      <div id="hojaCuerpo"></div>
+      <p class="form-warn" id="hojaError" hidden></p>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary" id="hojaOk">Aceptar</button>
+        <button type="button" class="btn btn-ghost" data-cerrar>Cancelar</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <noscript><p style="padding:24px">Este panel necesita JavaScript.</p></noscript>
+
+  <script src="js/producto.js"></script>
+  <script src="js/datos-distribuidora.js"></script>
+  <script src="js/crm-core.js"></script>
+  <script src="js/crm-api.js"></script>
+  <script src="js/panel.js"></script>
+</body>
+</html>

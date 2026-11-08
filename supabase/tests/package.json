@@ -1,0 +1,12 @@
+{
+  "name": "skala-supabase-tests",
+  "private": true,
+  "description": "Pruebas del motor PostgreSQL (supabase/schema.sql) y del cliente apiSupabase (crm-api.js) sobre PGlite (Postgres en WASM, sin servidor).",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15"
+  }
+}

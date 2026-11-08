@@ -668,6 +668,67 @@ function coordsDeTexto(texto) {
   return null;
 }
 
+/* ---------- Canal de atención: SOLO 2 opciones en todo el sistema (pedidos, cobros, altas y rutas GPS) ---------- */
+const CANALES_ATENCION = [
+  { id: "en_persona", nombre: "📍 En persona (Visitado)" },
+  { id: "online_telefono", nombre: "📱 Online / Por teléfono" },
+];
+const RADIO_CERCANIA_M = 120; // cliente "en mi ubicación"
+const canalValido = (c) => c === "en_persona" || c === "online_telefono";
+const nombreCanal = (c) => (CANALES_ATENCION.find((x) => x.id === c) || { nombre: "" }).nombre;
+
+/* Coordenada usable: número finito, en rango y NO el 0,0 (GPS vacío) */
+function gpsValido(lat, lng) {
+  if (lat === "" || lng === "" || lat === null || lng === null || lat === undefined || lng === undefined) return false;
+  const a = Number(lat), b = Number(lng);
+  if (!isFinite(a) || !isFinite(b)) return false;
+  if (Math.abs(a) > 90 || Math.abs(b) > 180) return false;
+  return !(a === 0 && b === 0);
+}
+
+/* Distancia en metros entre dos puntos (Haversine) */
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R = 6371000, rad = (x) => (Number(x) * Math.PI) / 180;
+  const dLat = rad(lat2 - lat1), dLng = rad(lng2 - lng1);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/* Clientes de la cartera a <= radio metros del vendedor. Primero los NO visitados hoy, luego el más cerca.
+   fix = { lat, lng } · visitadosHoy = lista/Set de ids · devuelve [{ cliente, dist }] (máx. `max`) */
+function clientesCercanos(clientes, fix, opciones = {}) {
+  const radio = Number(opciones.radio) > 0 ? Number(opciones.radio) : RADIO_CERCANIA_M;
+  const max = Number(opciones.max) > 0 ? Number(opciones.max) : 3;
+  if (!fix || !gpsValido(fix.lat, fix.lng)) return [];
+  const vistos = new Set(Array.from(opciones.visitadosHoy || []).map(String));
+  return (clientes || [])
+    .filter((c) => c && gpsValido(c.latitud, c.longitud))
+    .map((c) => ({ cliente: c, dist: haversineM(fix.lat, fix.lng, Number(c.latitud), Number(c.longitud)), visto: vistos.has(String(c.id)) }))
+    .filter((x) => x.dist <= radio)
+    .sort((a, b) => (a.visto - b.visto) || (a.dist - b.dist))
+    .slice(0, max)
+    .map(({ cliente, dist }) => ({ cliente, dist }));
+}
+
+/* Canal que se pre-selecciona al enviar el pedido / cobro:
+   - el cliente vino de la sugerencia GPS (o está a <= 120 m) → en persona
+   - no hay NINGÚN cliente a <= 120 m (casa / oficina) → online / teléfono
+   - hay clientes cerca pero no es este → sin preselección (que el vendedor elija) */
+function canalSugerido(cli, fix, cartera) {
+  if (cli && canalValido(cli._canal_atencion)) return cli._canal_atencion;
+  if (!fix || !gpsValido(fix.lat, fix.lng)) return "";
+  if (cli && gpsValido(cli.latitud, cli.longitud) && haversineM(fix.lat, fix.lng, cli.latitud, cli.longitud) <= RADIO_CERCANIA_M) return "en_persona";
+  return clientesCercanos(cartera, fix, { max: 1 }).length ? "" : "online_telefono";
+}
+
+/* Auto-aprendizaje del GPS del cliente: SOLO si se atendió en persona, el cliente no tenía
+   coordenadas y hay una lectura válida. Online / teléfono JAMÁS toca las coordenadas. */
+function gpsAprendido(canal, cliente, fix) {
+  if (canal !== "en_persona" || !fix || !gpsValido(fix.lat, fix.lng)) return null;
+  if (cliente && gpsValido(cliente.latitud, cliente.longitud)) return null;
+  return { latitud: Math.round(Number(fix.lat) * 1e6) / 1e6, longitud: Math.round(Number(fix.lng) * 1e6) / 1e6 };
+}
+
 function expiracionToken(token) {
   const p = String(token || "").split(".");
   return p.length === 3 ? Number(p[1]) || 0 : 0;
@@ -681,12 +742,345 @@ function nuevoRef() {
   });
 }
 
+/* -------------------- Resumen de Inicio del Vendedor (4 Recuadros + 4 Analytics en $) -------------------- */
+function resumenInicioVendedor({ pedidos = [], porCobrar = [], visitasHoy = [], comisionesCfg = {}, uid = "", hoy = new Date(), tasaBcv = 0 } = {}) {
+  const tasa = Number(tasaBcv) > 0 ? Number(tasaBcv) : 0;
+  const h = hoy instanceof Date && !isNaN(hoy) ? hoy : new Date(hoy);
+  const diaHoy = isoDia(h);
+  const hDia = soloFecha(h);
+
+  const esDeVend = (x) => !uid || !x || !x.vendedor_id || String(x.vendedor_id) === String(uid);
+  const tipoDe = (p) => (p && (p.tipo_pago_real || p.tipo_pago || tipoPagoDe(p.pago))) || "pronto";
+  const esBcv = (p) => { const t = tipoDe(p); return t === "credito" || t === "pronto"; };
+  const esEfectivo = (p) => { const t = tipoDe(p); return t === "efectivo_credito" || t === "efectivo_pronto"; };
+  const montoPedido = (p) => {
+    if (!p) return 0;
+    const raw = p.total_final !== "" && p.total_final != null ? p.total_final : p.total;
+    if (raw !== "" && raw != null && Number.isFinite(Number(raw)) && Number(raw) > 0) return r2(Number(raw));
+    if (Array.isArray(p.items) && p.items.length) return totalPorPago(p.items, tipoDe(p));
+    return r2(Number(raw) || 0);
+  };
+  const saldoPedido = (p) => {
+    if (!p) return 0;
+    if (p.saldo !== "" && p.saldo != null && Number.isFinite(Number(p.saldo))) return r2(Math.max(0, Number(p.saldo)));
+    return r2(Math.max(0, montoPedido(p) - (Number(p.pagado_usd) || 0)));
+  };
+  const clienteKey = (p) => String((p && (p.cliente_id || p.negocio || p.cliente)) || "").trim();
+  const fechaObjDe = (p) => {
+    if (!p) return null;
+    if (p.created_at) {
+      const d = new Date(p.created_at);
+      if (!isNaN(d)) return d;
+    }
+    const m = String(p.fecha || p.created_at || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
+    return null;
+  };
+  const esDeHoy = (p) => {
+    if (!p) return false;
+    if (p.fecha && String(p.fecha).trim().slice(0, 10) === diaHoy) return true;
+    if (p.created_at) {
+      const d = new Date(p.created_at);
+      if (!isNaN(d) && isoDia(d) === diaHoy) return true;
+      if (String(p.created_at).trim().slice(0, 10) === diaHoy) return true;
+    }
+    return false;
+  };
+
+  const pedsVend = (pedidos || []).filter((p) => p && !p.borrado && esDeVend(p));
+  const pedsValidos = pedsVend.filter((p) => p.estado !== "cancelado");
+
+  // 1) Recuadro 1 — ventasHoy (Ventas Hoy en $)
+  const pedsHoy = pedsValidos.filter(esDeHoy);
+  let hoyBcvUsd = 0, hoyEfectivoUsd = 0;
+  pedsHoy.forEach((p) => {
+    const m = montoPedido(p);
+    if (esEfectivo(p)) hoyEfectivoUsd = r2(hoyEfectivoUsd + m);
+    else hoyBcvUsd = r2(hoyBcvUsd + m);
+  });
+  const ventasHoy = {
+    bcvUsd: hoyBcvUsd,
+    bcvBs: r2(hoyBcvUsd * tasa),
+    efectivoUsd: hoyEfectivoUsd,
+    totalUsd: r2(hoyBcvUsd + hoyEfectivoUsd),
+  };
+
+  // 2) Recuadro 2 — pedidosHoy (Pedidos Hoy)
+  const pedidosHoy = {
+    cantidad: pedsHoy.length,
+    clientesUnicos: new Set(pedsHoy.map(clienteKey).filter(Boolean)).size,
+    enProceso: pedsValidos.filter((p) => p.estado === "pendiente").length,
+    enDespacho: pedsValidos.filter((p) => p.estado === "confirmado" || p.estado === "en_ruta").length,
+  };
+
+  // Base de cuentas por cobrar (usa porCobrar o filtra pedidos activos con saldo > 0)
+  const mapaCobrar = {};
+  const fuenteCobrar = Array.isArray(porCobrar) && porCobrar.length
+    ? porCobrar
+    : pedsValidos.filter((p) => Number(p.dias_credito) > 0 || p.estado === "entregado");
+  fuenteCobrar.forEach((p) => {
+    if (!p || p.borrado || !esDeVend(p)) return;
+    if (p.estado === "cancelado" || p.cobro || !(saldoPedido(p) > 0)) return;
+    mapaCobrar[p.id || Math.random()] = p;
+  });
+  const activosCobrar = Object.values(mapaCobrar);
+
+  const esPedidoVencido = (p) => {
+    const ec = estadoCredito(p, h);
+    if (ec && (ec.nivel === "vencido" || ec.nivel === "muy_vencido")) return true;
+    if (Number(p.dias_credito) === 0 && p.estado === "entregado" && !prontoVigente(p.entregado_at, h)) return true;
+    return false;
+  };
+
+  const listaVencidos = [];
+  const listaPorVencer = [];
+  activosCobrar.forEach((p) => {
+    if (esPedidoVencido(p)) listaVencidos.push(p);
+    else listaPorVencer.push(p);
+  });
+
+  // 3) Recuadro 3 — cobrarVencido (Pendiente por cobrar · VENCIDO)
+  let vencBcvUsd = 0, vencEfUsd = 0;
+  listaVencidos.forEach((p) => {
+    const s = saldoPedido(p);
+    if (esEfectivo(p)) vencEfUsd = r2(vencEfUsd + s);
+    else vencBcvUsd = r2(vencBcvUsd + s);
+  });
+
+  const infoVencido = (p) => {
+    const ec = estadoCredito(p, h);
+    let diasAtraso = 1, textoEstado = "Vencido";
+    if (ec && (ec.nivel === "vencido" || ec.nivel === "muy_vencido")) {
+      diasAtraso = Number(ec.dias) || 1;
+      textoEstado = ec.texto;
+    } else if (p.entregado_at) {
+      const dEnt = new Date(p.entregado_at);
+      if (!isNaN(dEnt)) {
+        diasAtraso = Math.max(1, Math.round((hDia - soloFecha(dEnt)) / DIA));
+        textoEstado = `Vencido hace ${diasAtraso} día${diasAtraso === 1 ? "" : "s"}`;
+      }
+    }
+    const tel = String((p.cliente_datos && p.cliente_datos.telefono) || p.telefono || "").trim();
+    return {
+      id: String(p.id || ""),
+      cliente_id: String(p.cliente_id || ""),
+      negocio: String(p.negocio || p.cliente || "—"),
+      telefono: tel,
+      whatsapp: telefonoWhatsapp(tel),
+      diasAtraso,
+      textoEstado,
+      saldoUsd: saldoPedido(p),
+      modalidad: esEfectivo(p) ? "Efectivo" : "BCV",
+    };
+  };
+  const topVencidos = listaVencidos
+    .map(infoVencido)
+    .sort((a, b) => b.diasAtraso - a.diasAtraso || b.saldoUsd - a.saldoUsd)
+    .slice(0, 3);
+
+  const cobrarVencido = {
+    clientesUnicos: new Set(listaVencidos.map(clienteKey).filter(Boolean)).size,
+    pedidosCount: listaVencidos.length,
+    totalUsd: r2(vencBcvUsd + vencEfUsd),
+    bcvUsd: vencBcvUsd,
+    bcvBs: r2(vencBcvUsd * tasa),
+    efectivoUsd: vencEfUsd,
+    topVencidos,
+  };
+
+  // 4) Recuadro 4 — cobrarPorVencer (Pendiente por cobrar · AÚN NO VENCE)
+  let pvBcvUsd = 0, pvEfUsd = 0, proximosCount = 0;
+  listaPorVencer.forEach((p) => {
+    const s = saldoPedido(p);
+    if (esEfectivo(p)) pvEfUsd = r2(pvEfUsd + s);
+    else pvBcvUsd = r2(pvBcvUsd + s);
+    const ec = estadoCredito(p, h);
+    if (ec && ec.nivel === "proximo") proximosCount++;
+  });
+  const cobrarPorVencer = {
+    clientesUnicos: new Set(listaPorVencer.map(clienteKey).filter(Boolean)).size,
+    pedidosCount: listaPorVencer.length,
+    proximosCount,
+    totalUsd: r2(pvBcvUsd + pvEfUsd),
+    bcvUsd: pvBcvUsd,
+    bcvBs: r2(pvBcvUsd * tasa),
+    efectivoUsd: pvEfUsd,
+  };
+
+  // Analytics 1 — cobrosYComision (💵 Mi Comisión y Cobros del Día)
+  const mapaTodosPeds = {};
+  pedsValidos.concat(activosCobrar).forEach((p) => { if (p && p.id) mapaTodosPeds[p.id] = p; });
+  const listaTodosPeds = Object.values(mapaTodosPeds).length ? Object.values(mapaTodosPeds) : pedsValidos;
+
+  let cobHoyEfUsd = 0, cobHoyBs = 0, cobHoyEqUsd = 0, cobHoyPend = 0, cobHoyCant = 0;
+  listaTodosPeds.forEach((p) => {
+    const pagos = Array.isArray(p.pagos) && p.pagos.length
+      ? p.pagos
+      : (p.cobro && Number(p.monto) > 0
+        ? [{
+            fecha_pago: String(p.cobrado_at || p.conciliado_at || "").slice(0, 10),
+            moneda: p.moneda === "Bs" ? "Bs" : "USD",
+            monto: Number(p.monto) || 0,
+            monto_usd: Number(p.total_final || p.total) || (p.moneda === "Bs" ? 0 : Number(p.monto) || 0),
+            tasa: Number(p.tasa) || 0,
+            estado: p.cobro === "conciliado" ? "conciliado" : "pendiente",
+          }]
+        : []);
+    pagos.forEach((pg) => {
+      if (!pg || pg.estado === "rechazado") return;
+      const fp = String(pg.fecha_pago || pg.created_at || "").slice(0, 10);
+      if (fp !== diaHoy) return;
+      cobHoyCant++;
+      if (pg.estado !== "conciliado") cobHoyPend++;
+      if (pg.moneda === "Bs") {
+        const mBs = Number(pg.monto) || 0;
+        cobHoyBs = r2(cobHoyBs + mBs);
+        const tPg = Number(pg.tasa) || tasa || 0;
+        const eq = Number(pg.monto_usd) || (tPg > 0 ? r2(mBs / tPg) : 0);
+        cobHoyEqUsd = r2(cobHoyEqUsd + eq);
+      } else {
+        const mUsd = Number(pg.monto_usd) || Number(pg.monto) || 0;
+        cobHoyEfUsd = r2(cobHoyEfUsd + mUsd);
+        cobHoyEqUsd = r2(cobHoyEqUsd + mUsd);
+      }
+    });
+  });
+
+  const comItems = extraerComisiones(listaTodosPeds, comisionesCfg).filter((it) => !it.pagada && (!uid || !it.vendedor_id || String(it.vendedor_id) === String(uid)));
+  const comEfUsd = r2(comItems.filter((x) => x.moneda !== "Bs").reduce((a, x) => a + (Number(x.comision_usd) || 0), 0));
+  const comBcvUsd = r2(comItems.filter((x) => x.moneda === "Bs").reduce((a, x) => a + (Number(x.comision_usd) || 0), 0));
+  const comBcvBs = r2(comItems.filter((x) => x.moneda === "Bs").reduce((a, x) => a + (Number(x.comision_bs_origen) || 0), 0));
+
+  const cobrosYComision = {
+    cobrosHoy: {
+      cantidad: cobHoyCant,
+      efectivoUsd: cobHoyEfUsd,
+      bs: cobHoyBs,
+      equivalenteUsd: cobHoyEqUsd,
+      pendientesConciliar: cobHoyPend,
+    },
+    comisiones: {
+      pendientesCount: comItems.length,
+      efectivoUsd: comEfUsd,
+      bcvUsd: comBcvUsd,
+      bcvBs: comBcvBs,
+      totalUsd: r2(comEfUsd + comBcvUsd),
+    },
+  };
+
+  // Analytics 3 — ritmo (📈 Ritmo Comercial 7 días / 30 días — Basado en Total de Ventas en $)
+  const enRangoDias = (p, maxDias) => {
+    if (esDeHoy(p)) return true;
+    const d = fechaObjDe(p);
+    if (!d) return false;
+    const dif = Math.round((hDia - soloFecha(d)) / DIA);
+    return dif >= 0 && dif <= maxDias;
+  };
+  const calcularRitmo = (dias) => {
+    const pedsPer = pedsValidos.filter((p) => enRangoDias(p, dias));
+    let bcvUsd = 0, efectivoUsd = 0;
+    pedsPer.forEach((p) => {
+      const m = montoPedido(p);
+      if (esEfectivo(p)) efectivoUsd = r2(efectivoUsd + m);
+      else bcvUsd = r2(bcvUsd + m);
+    });
+    const totalUsd = r2(bcvUsd + efectivoUsd);
+    const pctBcv = totalUsd > 0 ? Math.round((bcvUsd / totalUsd) * 100) : 0;
+    const pctEfectivo = totalUsd > 0 ? 100 - pctBcv : 0;
+    const nPeds = pedsPer.length;
+    return {
+      dias,
+      totalUsd,
+      bcvUsd,
+      efectivoUsd,
+      pctBcv,
+      pctEfectivo,
+      pedidos: nPeds,
+      ticketPromedioUsd: nPeds > 0 ? r2(totalUsd / nPeds) : 0,
+    };
+  };
+  const r7 = calcularRitmo(7);
+  const r30 = calcularRitmo(30);
+  const ritmo = { d7: r7, d30: r30, 7: r7, 30: r30 };
+
+  // Analytics 4 — topProductos y coberturaHoy
+  const setPersona = new Set();
+  const setOnline = new Set();
+  pedsHoy.forEach((p) => {
+    const k = clienteKey(p) || String(p.id || "");
+    if (!k) return;
+    const c = p.canal_pedido || p.canal || (p.cliente_datos && p.cliente_datos._canal_atencion) || "";
+    if (c === "en_persona") setPersona.add(k);
+    else if (c === "online_telefono") setOnline.add(k);
+  });
+  (visitasHoy || []).forEach((v) => {
+    if (!v) return;
+    if (typeof v === "string" || typeof v === "number") {
+      setPersona.add(String(v));
+      return;
+    }
+    if (v.anulada) return;
+    if (uid && v.vendedor_id && String(v.vendedor_id) !== String(uid)) return;
+    if (v.fecha && String(v.fecha).slice(0, 10) !== diaHoy) return;
+    const k = String(v.cliente_id || v.negocio || v.id || "").trim();
+    if (!k) return;
+    if (v.canal === "online_telefono") setOnline.add(k);
+    else setPersona.add(k);
+  });
+  const coberturaHoy = {
+    en_persona: setPersona.size,
+    online_telefono: setOnline.size,
+    enPersona: setPersona.size,
+    onlineTelefono: setOnline.size,
+    totalClientes: new Set([...setPersona, ...setOnline]).size,
+  };
+
+  const mapaProd = {};
+  pedsValidos.filter((p) => enRangoDias(p, 30)).forEach((p) => {
+    const tipo = tipoDe(p);
+    const totPed = montoPedido(p);
+    const totCajas = Number(p.total_cajas) || (p.items || []).reduce((a, i) => a + (Number(i.cajas) || 0), 0) || 0;
+    (p.items || []).forEach((it) => {
+      const cajas = Number(it.cajas) || 0;
+      if (!(cajas > 0) || !it.code) return;
+      const k = String(it.code);
+      const entry = mapaProd[k] || (mapaProd[k] = { code: k, producto: String(it.producto || k), totalUsd: 0, cajas: 0, pedidosSet: new Set() });
+      const uPrecio = precioUnitario(it, tipo);
+      const subUsd = Number(it.subtotal_usd) > 0
+        ? Number(it.subtotal_usd)
+        : uPrecio > 0
+          ? r2(cajas * uPrecio)
+          : (totPed > 0 && totCajas > 0 ? r2(totPed * (cajas / totCajas)) : 0);
+      entry.totalUsd = r2(entry.totalUsd + subUsd);
+      entry.cajas += cajas;
+      entry.pedidosSet.add(String(p.id || Math.random()));
+    });
+  });
+  const topProductos = Object.values(mapaProd)
+    .map((x) => ({ code: x.code, producto: x.producto, totalUsd: r2(x.totalUsd), cajas: x.cajas, pedidos: x.pedidosSet.size }))
+    .sort((a, b) => b.totalUsd - a.totalUsd || b.cajas - a.cajas || a.code.localeCompare(b.code))
+    .slice(0, 3);
+
+  return {
+    ventasHoy,
+    pedidosHoy,
+    cobrarVencido,
+    cobrarPorVencer,
+    cobrosYComision,
+    topVencidos,
+    ritmo,
+    topProductos,
+    coberturaHoy,
+  };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { itemsDePedido, telefonoWhatsapp, linkMapa, fechaLegible, mensajeGrupo, validarCliente, expiracionToken, nuevoRef,
     nombreEstado, puedeTomarPedidos, accionesPedido, pestanasPanel, cajasPorEntregar, cajasPendientes, esParcial, coordsDeTexto, estadoCredito, totalCarga,
     monedaDePago, formatoMonto, resumenConciliados,
-    CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, descuentoMaximo, sinPrecio, dinero, evaluarCobro, cambiosDePrecio, extraerComisiones,
+    CAJAS_MAYOR, PAGOS, pagoPorId, tipoPagoDe, nivelPrecio, conPrecios, precioUnitario, totalPorPago, totalesPorPago, descuentoMaximo, sinPrecio, dinero, evaluarCobro, cambiosDePrecio, extraerComisiones, resumenInicioVendedor,
     limitePronto, prontoVigente, textoStock, topeStock, puedeBorrar, refWeb, mensajeWeb,
     vistasPedidos, resolverVista, porHacer, urgenciaCobro, pedidosDeVista, buscarPedidos, grupoDia, agruparPorDia, contadoresVistas,
-    HORAS_SYNC, debeSincronizar, proximaSync, filtrarPedidosLocal, buscarClientesLocal, respuestaLocal, estadoApp };
+    HORAS_SYNC, debeSincronizar, proximaSync, filtrarPedidosLocal, buscarClientesLocal, respuestaLocal, estadoApp,
+    CANALES_ATENCION, RADIO_CERCANIA_M, canalValido, nombreCanal, gpsValido, haversineM, clientesCercanos, canalSugerido, gpsAprendido };
 }

@@ -403,8 +403,8 @@ test("varios roles: botones y permisos suman los de cada rol", () => {
 /* ---------- Pedidos en 4 pestañas ---------- */
 test("pestañas de Pedidos: 4, con sub-filtros; enlaces viejos siguen funcionando", () => {
   assert.deepEqual(core.vistasPedidos("vendedor").map((v) => v.id), ["hacer", "curso", "cobros", "historial"]);
-  assert.deepEqual(core.vistasPedidos("vendedor")[2].ver.map((v) => v.id), ["cobrar", "conciliados"]);
-  assert.deepEqual(core.vistasPedidos("admin")[2].ver.map((v) => v.id), ["cobrar", "conciliar", "conciliados"]);
+  assert.deepEqual(core.vistasPedidos("vendedor")[2].ver.map((v) => v.id), ["cobrar", "conciliados", "comisiones"]);
+  assert.deepEqual(core.vistasPedidos("admin")[2].ver.map((v) => v.id), ["cobrar", "conciliar", "conciliados", "comisiones"]);
   const r = (rol, t, v) => { const x = core.resolverVista(rol, t, v); return [x.vista.id, x.sub && x.sub.id]; };
   assert.deepEqual(r("admin", "conciliar"), ["cobros", "conciliar"]);
   assert.deepEqual(r("admin", "cobros", "conciliados"), ["cobros", "conciliados"]);
@@ -467,4 +467,217 @@ test("entrega parcial: total de carga y pendientes cuentan solo lo que falta ent
   const t = core.totalCarga([p]);
   assert.deepEqual([t.cajas, t.productos.map((x) => [x.code, x.cajas, x.total_unidades])], [1, [["BC-01", 1, 6]]]);
   assert.equal(core.esParcial({ items: [{ cajas: 2, entregadas: 0 }] }), false);
+});
+
+/* ---------- Canal de atención y GPS de visitas ---------- */
+test("canales: solo 2 opciones en todo el sistema", () => {
+  assert.deepEqual(core.CANALES_ATENCION.map((c) => c.id), ["en_persona", "online_telefono"]);
+  assert.equal(core.nombreCanal("en_persona"), "📍 En persona (Visitado)");
+  assert.equal(core.nombreCanal("online_telefono"), "📱 Online / Por teléfono");
+  assert.equal(core.canalValido("whatsapp"), false);
+  assert.equal(core.canalValido(""), false);
+});
+
+test("gpsValido rechaza 0,0, vacíos y fuera de rango; haversine en metros", () => {
+  assert.equal(core.gpsValido(0, 0), false);
+  assert.equal(core.gpsValido("", -71), false);
+  assert.equal(core.gpsValido(95, 10), false);
+  assert.equal(core.gpsValido("8.6", "-71.6"), true);
+  const d = core.haversineM(8.6, -71.6, 8.601, -71.6); // ~111 m
+  assert.ok(d > 105 && d < 117, String(d));
+});
+
+test("clientesCercanos: radio 120 m, primero los no visitados hoy, máximo 3", () => {
+  const fix = { lat: 8.6, lng: -71.6 };
+  const cartera = [
+    { id: "A", latitud: 8.6001, longitud: -71.6 },   // ~11 m (visitado hoy)
+    { id: "B", latitud: 8.6005, longitud: -71.6 },   // ~56 m
+    { id: "C", latitud: 8.6009, longitud: -71.6 },   // ~100 m
+    { id: "D", latitud: 8.6002, longitud: -71.6 },   // ~22 m
+    { id: "E", latitud: 8.602, longitud: -71.6 },    // ~222 m (fuera)
+    { id: "F", latitud: 0, longitud: 0 },            // sin GPS
+  ];
+  const r = core.clientesCercanos(cartera, fix, { visitadosHoy: ["A"] });
+  assert.deepEqual(r.map((x) => x.cliente.id), ["D", "B", "C"]);
+  assert.ok(r.every((x) => x.dist <= 120));
+  assert.deepEqual(core.clientesCercanos(cartera, fix, { max: 5 }).map((x) => x.cliente.id), ["A", "D", "B", "C"]);
+  assert.deepEqual(core.clientesCercanos(cartera, { lat: 0, lng: 0 }), []);
+  assert.deepEqual(core.clientesCercanos(cartera, null), []);
+});
+
+test("canalSugerido: sugerencia GPS → en persona; sin clientes a 120 m → online; si hay otros cerca, que elija", () => {
+  const fix = { lat: 8.6, lng: -71.6 };
+  const cartera = [{ id: "A", latitud: 8.6001, longitud: -71.6 }];
+  assert.equal(core.canalSugerido({ id: "X", _canal_atencion: "en_persona" }, null, []), "en_persona");
+  assert.equal(core.canalSugerido({ id: "A", latitud: 8.6001, longitud: -71.6 }, fix, cartera), "en_persona");
+  assert.equal(core.canalSugerido({ id: "Z" }, { lat: 10.5, lng: -66.9 }, cartera), "online_telefono"); // en la casa / oficina
+  assert.equal(core.canalSugerido({ id: "Z" }, fix, cartera), ""); // hay un cliente al lado, pero no es este
+  assert.equal(core.canalSugerido({ id: "Z" }, null, cartera), "");
+});
+
+test("gpsAprendido: solo en persona, cliente sin GPS y lectura válida", () => {
+  const fix = { lat: 8.62012345, lng: -71.65098765 };
+  assert.deepEqual(core.gpsAprendido("en_persona", { latitud: "", longitud: "" }, fix), { latitud: 8.620123, longitud: -71.650988 });
+  assert.equal(core.gpsAprendido("en_persona", { latitud: 8.5, longitud: -71.5 }, fix), null);   // ya tenía
+  assert.equal(core.gpsAprendido("online_telefono", { latitud: "", longitud: "" }, fix), null); // jamás online
+  assert.equal(core.gpsAprendido("en_persona", { latitud: "" }, { lat: 0, lng: 0 }), null);
+});
+
+/* ---------- Resumen Inicio Vendedor (4 Recuadros + 4 Analytics en $) ---------- */
+test("resumenInicioVendedor: calcula los 4 recuadros principales (BCV vs Efectivo) y los 4 bloques de analytics en $", () => {
+  const hoy = new Date("2026-10-28T15:00:00Z");
+  const pedidos = [
+    // Hoy — BCV crédito ($150) · pendiente · en persona
+    {
+      id: "P-HOY-1", estado: "pendiente", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C1", negocio: "Peluquería Bella",
+      created_at: "2026-10-28T10:00:00Z", fecha: "2026-10-28 06:00",
+      tipo_pago: "credito", dias_credito: 15, total: 150, total_cajas: 10,
+      canal_pedido: "en_persona",
+      items: [{ code: "BC-01", producto: "Babosa", cajas: 10, precio: 15 }],
+    },
+    // Hoy — Efectivo pronto ($80) · confirmado (en despacho) · online
+    {
+      id: "P-HOY-2", estado: "confirmado", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C2", negocio: "Barbería Max",
+      created_at: "2026-10-28T12:00:00Z", fecha: "2026-10-28 08:00",
+      tipo_pago: "efectivo_pronto", dias_credito: 0, total: 80, total_cajas: 5,
+      canal_pedido: "online_telefono",
+      items: [{ code: "KT-01", producto: "Kit 12 em 1", cajas: 5, precio: 16 }],
+    },
+    // Hace 5 días (entra en 7d y 30d) — BCV pronto ($200) · entregado con cobro hoy conciliado en Bs
+    {
+      id: "P-5D", estado: "entregado", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C3", negocio: "Salón Luz",
+      created_at: "2026-10-23T10:00:00Z", fecha: "2026-10-23 10:00",
+      entregado_at: "2026-10-24T10:00:00Z",
+      tipo_pago: "pronto", dias_credito: 0, total: 200, total_cajas: 10, cobro: "conciliado",
+      pagos: [{ id: "PG-1", pedido_id: "P-5D", fecha_pago: "2026-10-28", moneda: "Bs", monto: 10000, tasa: 50, monto_usd: 200, estado: "conciliado" }],
+      items: [{ code: "BC-01", producto: "Babosa", cajas: 10, precio: 20 }],
+    },
+    // Hace 20 días (entra solo en 30d) — Efectivo crédito ($120) · entregado y VENCIDO (15 días crédito, entregado el 2026-10-08 → venció el 2026-10-23, hace 5 días)
+    {
+      id: "P-VENC-EF", estado: "entregado", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C4", negocio: "Abasto Sol", cliente_datos: { telefono: "0414-1234567" },
+      created_at: "2026-10-08T10:00:00Z", fecha: "2026-10-08 10:00",
+      entregado_at: "2026-10-08T10:00:00Z",
+      tipo_pago: "efectivo_credito", dias_credito: 15, total: 120, pagado_usd: 20, saldo: 100, total_cajas: 6, cobro: "",
+      pagos: [{ id: "PG-2", pedido_id: "P-VENC-EF", fecha_pago: "2026-10-28", moneda: "USD", monto: 20, monto_usd: 20, estado: "conciliado" }],
+      items: [{ code: "BC-06", producto: "Mais Cachos", cajas: 6, precio: 20 }],
+    },
+    // Hace 25 días — BCV crédito ($300) · entregado y MUY VENCIDO (7 días crédito, entregado el 2026-10-01 → venció el 2026-10-08, hace 20 días)
+    {
+      id: "P-VENC-BCV", estado: "entregado", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C5", negocio: "Supermercado Sur", cliente_datos: { telefono: "0412-9876543" },
+      created_at: "2026-10-01T10:00:00Z", fecha: "2026-10-01 10:00",
+      entregado_at: "2026-10-01T10:00:00Z",
+      tipo_pago: "credito", dias_credito: 7, total: 300, total_cajas: 15, cobro: "",
+      items: [{ code: "KT-01", producto: "Kit 12 em 1", cajas: 15, precio: 20 }],
+    },
+    // Hace 13 días — BCV crédito ($90) · entregado y POR VENCER PRÓXIMO (15 días crédito, entregado el 2026-10-15 → vence el 2026-10-30, en 2 días)
+    {
+      id: "P-PROX-BCV", estado: "entregado", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C6", negocio: "Perfumería Luna",
+      created_at: "2026-10-15T10:00:00Z", fecha: "2026-10-15 10:00",
+      entregado_at: "2026-10-15T10:00:00Z",
+      tipo_pago: "credito", dias_credito: 15, total: 90, total_cajas: 5, cobro: "",
+      items: [{ code: "BC-01", producto: "Babosa", cajas: 5, precio: 18 }],
+    },
+    // Pedido de otro vendedor (debe ignorarse cuando uid = "U3")
+    {
+      id: "P-OTRO", estado: "pendiente", vendedor_id: "U9", vendedor: "Otro",
+      cliente_id: "C9", negocio: "Tienda Ajena",
+      created_at: "2026-10-28T11:00:00Z", fecha: "2026-10-28 11:00",
+      tipo_pago: "credito", dias_credito: 15, total: 999, total_cajas: 50,
+    },
+  ];
+
+  const r = core.resumenInicioVendedor({
+    pedidos,
+    porCobrar: pedidos.filter((p) => !p.cobro && (p.dias_credito > 0 || p.estado === "entregado")),
+    visitasHoy: [{ cliente_id: "C7", canal: "en_persona", fecha: "2026-10-28", vendedor_id: "U3" }],
+    comisionesCfg: { porcentaje_default: 3 },
+    uid: "U3",
+    hoy,
+    tasaBcv: 50,
+  });
+
+  // Recuadro 1: Ventas Hoy ($150 BCV + $80 Efectivo = $230)
+  assert.deepEqual(r.ventasHoy, {
+    bcvUsd: 150,
+    bcvBs: 7500,
+    efectivoUsd: 80,
+    totalUsd: 230,
+  });
+
+  // Recuadro 2: Pedidos Hoy
+  assert.deepEqual(r.pedidosHoy, {
+    cantidad: 2,
+    clientesUnicos: 2,
+    enProceso: 1,
+    enDespacho: 1,
+  });
+
+  // Recuadro 3: Pendiente por cobrar · Vencido ($300 BCV + $100 Efectivo = $400)
+  assert.equal(r.cobrarVencido.clientesUnicos, 2);
+  assert.equal(r.cobrarVencido.pedidosCount, 2);
+  assert.equal(r.cobrarVencido.totalUsd, 400);
+  assert.equal(r.cobrarVencido.bcvUsd, 300);
+  assert.equal(r.cobrarVencido.bcvBs, 15000);
+  assert.equal(r.cobrarVencido.efectivoUsd, 100);
+  assert.equal(r.topVencidos.length, 2);
+  assert.equal(r.topVencidos[0].id, "P-VENC-BCV");
+  assert.equal(r.topVencidos[0].whatsapp, "584129876543");
+  assert.equal(r.topVencidos[1].id, "P-VENC-EF");
+  assert.equal(r.topVencidos[1].modalidad, "Efectivo");
+
+  // Recuadro 4: Pendiente por cobrar · Por vencer (P-HOY-1 en tránsito $150 BCV + P-PROX-BCV próximo $90 BCV = $240 BCV)
+  assert.equal(r.cobrarPorVencer.clientesUnicos, 2);
+  assert.equal(r.cobrarPorVencer.pedidosCount, 2);
+  assert.equal(r.cobrarPorVencer.proximosCount, 1);
+  assert.equal(r.cobrarPorVencer.totalUsd, 240);
+  assert.equal(r.cobrarPorVencer.bcvUsd, 240);
+  assert.equal(r.cobrarPorVencer.bcvBs, 12000);
+  assert.equal(r.cobrarPorVencer.efectivoUsd, 0);
+
+  // Analytics 1: Cobros de hoy y Comisiones (3% de $200 BCV = $6 / Bs 300; 3% de $20 Efectivo = $0.60)
+  assert.deepEqual(r.cobrosYComision.cobrosHoy, {
+    cantidad: 2,
+    efectivoUsd: 20,
+    bs: 10000,
+    equivalenteUsd: 220,
+    pendientesConciliar: 0,
+  });
+  assert.deepEqual(r.cobrosYComision.comisiones, {
+    pendientesCount: 2,
+    efectivoUsd: 0.6,
+    bcvUsd: 6,
+    bcvBs: 300,
+    totalUsd: 6.6,
+  });
+
+  // Analytics 3: Ritmo comercial en $ (7 días: P-HOY-1 $150 + P-HOY-2 $80 + P-5D $200 = $430, 3 pedidos)
+  assert.equal(r.ritmo.d7.totalUsd, 430);
+  assert.equal(r.ritmo.d7.bcvUsd, 350);
+  assert.equal(r.ritmo.d7.efectivoUsd, 80);
+  assert.equal(r.ritmo.d7.pedidos, 3);
+  assert.equal(r.ritmo.d7.ticketPromedioUsd, 143.33);
+  assert.equal(r.ritmo.d7.pctBcv + r.ritmo.d7.pctEfectivo, 100);
+
+  // 30 días: $430 + P-VENC-EF $120 + P-VENC-BCV $300 + P-PROX-BCV $90 = $940 (6 pedidos)
+  assert.equal(r.ritmo.d30.totalUsd, 940);
+  assert.equal(r.ritmo.d30.bcvUsd, 740);
+  assert.equal(r.ritmo.d30.efectivoUsd, 200);
+  assert.equal(r.ritmo.d30.pedidos, 6);
+
+  // Analytics 4: Cobertura hoy (C1 + C7 en persona = 2; C2 online = 1) y Top 3 productos por $ vendido
+  assert.equal(r.coberturaHoy.en_persona, 2);
+  assert.equal(r.coberturaHoy.online_telefono, 1);
+  assert.equal(r.topProductos.length, 3);
+  assert.equal(r.topProductos[0].code, "BC-01"); // $150 + $200 + $90 = $440
+  assert.equal(r.topProductos[0].totalUsd, 440);
+  assert.equal(r.topProductos[1].code, "KT-01"); // $80 + $300 = $380
+  assert.equal(r.topProductos[1].totalUsd, 380);
+  assert.equal(r.topProductos[2].code, "BC-06"); // $120
+  assert.equal(r.topProductos[2].totalUsd, 120);
 });

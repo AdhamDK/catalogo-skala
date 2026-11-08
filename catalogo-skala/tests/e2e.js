@@ -64,13 +64,20 @@ async function probar(browser, cfg) {
   assert.deepEqual(errores, [], "errores de JS: " + errores.join(" | "));
   ok("sin errores de JS");
 
+  // --- Portada Hero estilo Skala Brasil ---
+  assert.equal(await page.locator("#inicio.hero-skala .hero-slide").count(), 3);
+  assert.equal(await page.locator("#inicio.hero-skala .pote-1kg-protagonista").count(), 1);
+  assert.equal(await page.locator("#inicio.hero-skala .hero-kits-scatter .kit-cut").count(), 5);
+  assert.equal(await page.locator("#inicio.hero-skala .skala-seal").count(), 4);
+  ok("portada estilo Skala Brasil (3 slides con productos recortados sin fondo blanco + 4 sellos)");
+
   // --- Contenido ---
-  assert.equal(await page.locator("#gridBanos .card").count(), 11);
+  assert.equal(await page.locator("#gridBanos .card").count(), 16);
   assert.equal(await page.locator("#gridKits .card").count(), 8);
   assert.equal(await page.locator(".card video").count(), 0);
   const bodies = await page.locator(".card .card-body").evaluateAll((els) => els.filter((e) => e.offsetHeight > 0).length);
-  assert.equal(bodies, 19);
-  ok("11 baños + 8 kits con contenido visible");
+  assert.equal(bodies, 24);
+  ok("16 baños + 8 kits con contenido visible");
 
   const iconos = (code) =>
     page.locator(`.card:has(.qty-input[data-code="${code}"]) .hair-icon`).evaluateAll((els) => els.map((e) => e.getAttribute("aria-label").split(" ")[0]));
@@ -80,20 +87,22 @@ async function probar(browser, cfg) {
   assert.deepEqual(await iconos("BC-08"), ["Crespo"]);
   assert.deepEqual(await iconos("BC-09"), ["Liso", "Ondulado"]);
   assert.deepEqual(await iconos("KT-06"), ["Cacheado", "Crespo"]);
-  assert.match(await page.locator('.card:has([data-code="BC-01"]) .card-hair').textContent(), /1A–4C/);
-  ok("iconos de curvatura + código");
+  assert.equal(await page.locator('.card[data-card="BC-01"] .card-top .card-name').innerText(), "Babosa");
+  assert.equal(await page.locator('.card[data-card="BC-01"] .card-top-right .card-line').innerText(), "HIDRATACIÓN");
+  assert.equal(await page.locator(".card .card-benefit, .card .card-group, .card .hair-txt, .card .card-code").count(), 0);
+  ok("cabecera superior (nombre izq + línea e iconos der) sin textos innecesarios");
 
-  const units = await page.locator("#gridBanos .card-units").allInnerTexts();
-  assert.ok(units.every((t) => t === "Caja x 6 unidades"), units.join(","));
-  const kitUnits = await page.locator("#gridKits .card-units").allInnerTexts();
-  assert.ok(kitUnits.every((t) => t === "Caja x 6 dúos"), kitUnits.join(","));
-  ok("baños: caja x 6 unidades · kits: caja x 6 dúos");
+  const units = await page.locator("#gridBanos [data-precio]").allInnerTexts();
+  assert.ok(units.every((t) => /caja x 6und 1000gr/i.test(t)), units.join(","));
+  const kitUnits = await page.locator("#gridKits [data-precio]").allInnerTexts();
+  assert.ok(kitUnits.every((t) => /caja x 6 dúos/i.test(t)), kitUnits.join(","));
+  ok("baños: caja x 6und 1000gr · kits: caja x 6 dúos");
 
   // --- Imágenes responsive ---
   const img = await page.locator('.card:has([data-code="BC-01"]) img').evaluate((i) => ({ src: i.currentSrc, w: i.naturalWidth, alt: i.alt }));
-  assert.match(img.src, /\/web\/BC-01-(400|800)\.webp$/, img.src);
+  assert.match(img.src, /estudio-pro-BC-01-(400|800|hq)\.jpg$/, img.src);
   assert.ok(img.w > 0 && img.alt === "Babosa");
-  ok(`imagen WebP responsive (${img.src.split("/").pop()})`);
+  ok(`imagen Estudio-Pro responsive (${img.src.split("/").pop()})`);
 
   // --- Layout móvil ---
   const lay = await page.evaluate(() => ({
@@ -140,9 +149,11 @@ async function probar(browser, cfg) {
 
   // --- Precios del CRM y "Agotado" ---
   await page.waitForFunction(() => /10,00 \$/.test(document.querySelector('.card[data-card="BC-01"] [data-precio]')?.textContent || ""));
-  assert.match(await page.innerText('.card[data-card="BC-01"] [data-precio]'), /10,00 \$\s*\/ caja/);
+  assert.match(await page.innerText('.card[data-card="BC-01"] [data-precio]'), /10,00 \$\s*\/\s*caja x 6und 1000gr/);
+  assert.doesNotMatch(await page.innerText('.card[data-card="BC-01"] [data-precio]'), /al mayor/i);
   assert.equal(await page.innerText('.card[data-card="BC-08"] [data-badge]'), "Sin stock");
   assert.ok(await page.locator('.card[data-card="BC-08"].agotado').count()); // en gris
+  assert.equal(await page.locator("#gridBanos .card").last().getAttribute("data-card"), "BC-08"); // sin stock al final
   assert.equal(await page.locator('.card[data-card="BC-08"] .qty-btn[data-act="plus"]').isDisabled(), true);
   if (cfg.viewport.width <= 560) {
     // al menos 4 productos a la vista en un teléfono
@@ -156,18 +167,23 @@ async function probar(browser, cfg) {
     ok(`${vistos} productos a la vista en la pantalla`);
   }
 
-  // --- Imagen centrada y completa; botón para ampliar (no suma al pedido) ---
+  // --- Imagen centrada y completa; botón para ampliar muestra toda la ficha extra (no suma al pedido) ---
   const enCaja = await page.evaluate(() => [...document.querySelectorAll(".card-img")].filter((c) => c.offsetHeight).every((c) => {
     const i = c.querySelector("img").getBoundingClientRect(), b = c.getBoundingClientRect();
     return i.top >= b.top - 1 && i.bottom <= b.bottom + 1 && Math.abs((i.left + i.right) / 2 - (b.left + b.right) / 2) < 1;
   }));
   assert.ok(enCaja, "imagen fuera del recuadro o no centrada");
-  await tocar('.card[data-card="BC-02"] .card-zoom');
+  await tocar('.card[data-card="BC-01"] .card-zoom');
   await page.waitForSelector("#zoomModal:not([hidden])");
-  assert.equal(await page.innerText("#zoomTitulo"), "Banana e Macuri");
+  assert.equal(await page.innerText("#zoomTitulo"), "Babosa");
+  assert.equal(await page.innerText("#zoomCode"), "Ref. BC-01");
+  assert.match(await page.innerText("#zoomBenefit"), /Hidratación profunda con aloe vera/);
+  assert.match(await page.innerText("#zoomDetalles"), /Baño de crema de 1 kg \(1000gr\)/);
+  assert.match(await page.innerText("#zoomDetalles"), /1A–4C/);
+  assert.match(await page.innerText("#zoomDetalles"), /Al mayor \(15\+ cajas\):\s*8,00 \$/);
   await page.waitForFunction(() => document.getElementById("zoomImg").naturalWidth > 0);
-  assert.match(await page.getAttribute("#zoomImg", "src"), /BC-02-800\.webp$/);
-  assert.equal(await page.locator('.card[data-card="BC-02"].elegido').count(), 0);
+  assert.match(await page.getAttribute("#zoomImg", "src"), /estudio-pro-BC-01-hq\.jpg$/);
+  assert.equal(await page.locator('.card[data-card="BC-01"].elegido').count(), 0);
   if (process.env.SCREENSHOTS) await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `${cfg.nombre}-zoom.png`) });
   assert.ok(await page.locator("#zoomModal.abierto").count()); // aparece con animación
   await page.keyboard.press("Escape");
@@ -177,7 +193,7 @@ async function probar(browser, cfg) {
   await tocar('.card[data-card="BC-02"] .card-zoom');
   await page.locator("#zoomCerrar").click();
   await page.waitForSelector("#zoomModal", { state: "hidden" });
-  ok("imágenes centradas y completas; botón Ampliar abre y cierra");
+  ok("imágenes centradas y completas; botón Ampliar abre ficha completa y cierra");
 
   // --- Pedido: tocar la tarjeta suma una caja ---
   await tocar('.card[data-card="BC-01"] .card-name');
@@ -204,7 +220,7 @@ async function probar(browser, cfg) {
   assert.equal(await page.locator("#cartList .cart-item").count(), 2);
   // foto chica de cada producto al lado
   await page.waitForFunction(() => [...document.querySelectorAll("#cartList .cart-foto img")].every((i) => i.complete && i.naturalWidth > 0));
-  assert.match(await page.locator("#cartList .cart-foto img").first().evaluate((i) => i.currentSrc), /BC-01-400\.webp$/);
+  assert.match(await page.locator("#cartList .cart-foto img").first().evaluate((i) => i.currentSrc), /estudio-pro-BC-01-(400|800)\.jpg$/);
   assert.match(await page.innerText("#cartTotal"), /3 cajas · 40,00 \$/);
   // renglón: nombre, "Caja x 6 und" y precio (×cajas = monto) al lado del +
   assert.equal(await page.innerText('#cartList [data-item="BC-01"] .cart-info span'), "Caja x 6 und");

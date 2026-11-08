@@ -38,28 +38,33 @@ function totalCajas() { return Object.values(pedido).reduce((a, b) => a + (b || 
 /* Imágenes responsive: WebP livianos (400/800 px) con PNG original de respaldo. */
 const IMG_SIZES = "(min-width: 901px) 270px, (min-width: 561px) 30vw, 46vw";
 
-function cardHTML(p, group, i = 99) {
-  const prioridad = i < 4 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
+function textoEmpaqueTarjeta(p) {
+  const u = (p && p.unidades) || 6;
+  const esKit = (p && p.unidad === "dúos") || /^KT-/i.test((p && p.code) || "");
+  return esKit ? `caja x ${u} dúos` : `caja x ${u}und 1000gr`;
+}
+
+function cardHTML(p, group, i = 99, priorizar = false) {
+  const prioridad = priorizar && i < 4 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
   const q = pedido[p.code] || 0;
   return `
-  <article class="card${q ? " elegido" : ""}" data-card="${p.code}" title="Tocá para sumar una caja">
+  <article class="card${q ? " elegido" : ""}" data-card="${p.code}" data-idx="${i}" title="Tocá para sumar una caja">
+    <div class="card-top">
+      <h3 class="card-name">${p.name}</h3>
+      <div class="card-top-right">
+        <span class="card-line">${p.line}</span>
+        <span class="hair-icons">${iconosCabelloHTML(p.hair)}</span>
+      </div>
+    </div>
     <div class="card-img">
       <span class="card-badge" data-badge hidden></span>
       <b class="card-n" aria-hidden="true">${q || ""}</b>
-      <button type="button" class="card-zoom" data-zoom="${p.code}" aria-label="Ampliar imagen de ${p.name}" title="Ampliar imagen">
+      <button type="button" class="card-zoom" data-zoom="${p.code}" aria-label="Ampliar imagen de ${p.name}" title="Ver imagen e información">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6"/></svg>
       </button>
       ${fotoHTML(p.code, { ancho: 400, alto: 317, alt: escHTML(p.name), grande: true, sizes: IMG_SIZES, carga: prioridad })}
     </div>
     <div class="card-body">
-      <span class="card-line">${p.line}</span>
-      <h3 class="card-name">${p.name}</h3>
-      <p class="card-benefit">${p.benefit}</p>
-      <div class="card-meta">
-        <span class="card-group">${group}</span>
-        <span class="card-hair"><span class="hair-txt">${p.hair}</span> <span class="hair-icons">${iconosCabelloHTML(p.hair)}</span></span>
-        <span class="card-units">${textoUnidades(p)}</span>
-      </div>
       <p class="card-precio" data-precio></p>
       <div class="card-order">
         <div class="qty">
@@ -68,9 +73,7 @@ function cardHTML(p, group, i = 99) {
                  inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" aria-label="Cajas de ${p.name}" />
           <button type="button" class="qty-btn" data-act="plus" data-code="${p.code}" aria-label="Sumar una caja de ${p.name}">+</button>
         </div>
-        <span class="qty-label">cajas</span>
       </div>
-      <span class="card-code">Ref. ${p.code}</span>
     </div>
   </article>`;
 }
@@ -78,22 +81,25 @@ function cardHTML(p, group, i = 99) {
 function render(elId, items, group) {
   const el = document.getElementById(elId);
   if (!el) return;
-  el.innerHTML = items.map((p, i) => cardHTML(p, group, elId === "gridBanos" ? i : 99)).join("");
+  el.innerHTML = items.map((p, i) => cardHTML(p, group, i, elId === "gridBanos")).join("");
   pintarCards();
 }
 
-/* Precio por caja (menor; y al mayor desde 15 cajas), "Agotado" y lo elegido */
+/* Precio por caja + empaque centrado, "Agotado" y lo elegido */
 function pintarCards() {
+  const map = allProductsMap();
   document.querySelectorAll(".card[data-card]").forEach((card) => {
     const code = card.dataset.card;
+    const p = map[code] || {};
     const pr = PRECIOS[code];
     const q = pedido[code] || 0;
+    const empaque = textoEmpaqueTarjeta(p);
     card.classList.toggle("elegido", q > 0);
     card.querySelector(".card-n").textContent = q ? String(q) : "";
     const el = card.querySelector("[data-precio]");
     el.innerHTML = pr && pr.menor
-      ? `<strong>${dinero(pr.menor)}</strong> / caja${pr.mayor && pr.mayor < pr.menor ? ` <span>· al mayor ${dinero(pr.mayor)}</span>` : ""}`
-      : "";
+      ? `<strong>${dinero(pr.menor)}</strong> / ${empaque}`
+      : empaque.charAt(0).toUpperCase() + empaque.slice(1);
     const badge = card.querySelector("[data-badge]");
     const agotado = !!(pr && pr.agotado);
     badge.hidden = !agotado;
@@ -102,6 +108,21 @@ function pintarCards() {
     card.classList.toggle("agotado", agotado);
     card.querySelectorAll('[data-act="plus"], .qty-input').forEach((b) => { b.disabled = agotado; });
     card.setAttribute("aria-disabled", String(agotado));
+  });
+  /* Los productos sin stock van siempre al final de su lista (primero a color, al final en gris) */
+  ["gridBanos", "gridKits"].forEach((id) => {
+    const grid = document.getElementById(id);
+    if (!grid) return;
+    const actuales = [...grid.querySelectorAll(".card[data-card]")];
+    const ordenadas = [...actuales].sort((a, b) => {
+      const agA = a.classList.contains("agotado") ? 1 : 0;
+      const agB = b.classList.contains("agotado") ? 1 : 0;
+      if (agA !== agB) return agA - agB;
+      return (Number(a.dataset.idx) || 0) - (Number(b.dataset.idx) || 0);
+    });
+    if (ordenadas.some((c, i) => c !== actuales[i])) {
+      ordenadas.forEach((c) => grid.appendChild(c));
+    }
   });
 }
 
@@ -150,6 +171,14 @@ function updateBar() {
     hintEl.textContent = `${monto ? dinero(monto) + " · " : ""}¡Meta alcanzada! (${META_CAJAS}+ cajas)`;
     hintEl.className = "order-hint ok";
   }
+  const prog = document.getElementById("orderProgress");
+  const fill = document.getElementById("orderProgressFill");
+  if (prog && fill) {
+    const metaMayor = typeof CAJAS_MAYOR === "number" ? CAJAS_MAYOR : 15;
+    const pct = total <= 0 ? 0 : Math.min(100, Math.round((total / metaMayor) * 100));
+    fill.style.width = `${pct}%`;
+    prog.classList.toggle("completo", total >= metaMayor);
+  }
 }
 
 /* Items del pedido con precio según el nivel (al mayor desde 15 cajas) */
@@ -173,15 +202,32 @@ function marcarCambio() {
 }
 
 const $id = (id) => document.getElementById(id);
+const RUTAS_WEB = ["Chivo", "Vigía", "Mérida", "Mocotíes", "Caja Seca", "Táchira"];
+function inferirRutaCliente(c) {
+  if (!c) return "";
+  if (c.ruta && RUTAS_WEB.includes(c.ruta)) return c.ruta;
+  const txt = `${c.ruta || ""} ${c.ciudad || ""} ${c.direccion || ""} ${c.negocio || ""} ${c.nombre || ""}`
+    .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/tachira|san\s*cristobal|la\s*fria|coloncito|pinal|rubio|tariba/.test(txt)) return "Táchira";
+  if (/caja\s*seca|panamericana|nueva\s*bolivia|arenales|zancudo|bobures|arapuey/.test(txt)) return "Caja Seca";
+  if (/mocoties|santa\s*cruz\s*de\s*mora|tovar|bailadores|zea/.test(txt)) return "Mocotíes";
+  if (/chivo|pueblo\s*nuevo|rurale|cuatro\s*esquinas/.test(txt)) return "Chivo";
+  if (/merida|llano|milla|lora|independencia|pinto\s*salina|ejido/.test(txt)) return "Mérida";
+  if (/vigia|cano\s*seco/.test(txt)) return "Vigía";
+  return "";
+}
 function collectCliente() {
+  const dir = ($id("fDireccion").value || "").trim();
+  const neg = ($id("fNegocio").value || "").trim();
   return {
     rif_cedula: ($id("fRif").value || "").trim(),
-    negocio: ($id("fNegocio").value || "").trim(),
+    negocio: neg,
     contacto: ($id("fContacto").value || "").trim(),
-    direccion: ($id("fDireccion").value || "").trim(),
+    direccion: dir,
     telefono: ($id("fTelefono").value || "").trim(),
     tipo_pago: (document.querySelector('input[name="pagoWeb"]:checked') || {}).value || "credito",
     cliente_id: cliente.cliente_id || "",
+    ruta: cliente.ruta || inferirRutaCliente({ direccion: dir, negocio: neg }) || "",
     latitud: cliente.latitud ?? "",
     longitud: cliente.longitud ?? "",
   };
@@ -193,11 +239,13 @@ function pintarCliente() {
   const listo = clienteListo();
   const enForm = !$id("cliForm").hidden;
   const tieneUbic = cliente.latitud !== "" && cliente.latitud != null && cliente.longitud !== "" && cliente.longitud != null;
+  const rutaCli = inferirRutaCliente(cliente);
+  const vAsig = listo ? vendedorAsignado() : null;
   $id("cliElegido").innerHTML = listo && !enForm
     ? `<div class="cli-elegido">
         <span class="avatar">${escHTML(inicial(cliente.negocio || cliente.contacto))}</span>
         <span class="cli-datos"><strong>${escHTML(cliente.negocio || cliente.contacto)}</strong>
-          <span>${escHTML([cliente.telefono, cliente.direccion].filter(Boolean).join(" · "))}${tieneUbic ? " · 📍 ubicación" : ""}</span></span>
+          <span>${escHTML([cliente.telefono, cliente.direccion].filter(Boolean).join(" · "))}${rutaCli ? ` · 📍 Ruta ${escHTML(rutaCli)}` : ""}${tieneUbic ? " · 📍 ubicación" : ""}${vAsig ? ` · 👤 Vendedor: ${escHTML(vAsig.nombre)}` : ""}</span></span>
         <button type="button" class="link-cli" data-cli="editar">Editar</button>
         <button type="button" class="link-cli" data-cli="cambiar">Cambiar</button>
         <button type="button" class="cart-quitar" data-cli="quitar" aria-label="Quitar cliente" title="Quitar">${iconoPapelera}</button>
@@ -231,8 +279,17 @@ async function buscarCliente(q) {
       return;
     }
     const c = r.cliente;
-    Object.assign(cliente, { cliente_id: c.id, negocio: c.negocio, contacto: c.contacto, direccion: c.direccion, rif_cedula: c.rif_cedula,
-      telefono: c.telefono || (dig.length >= 7 && !/[a-z]/i.test(q) ? q.trim() : cliente.telefono || ""), latitud: "", longitud: "" });
+    Object.assign(cliente, {
+      cliente_id: c.id,
+      negocio: c.negocio,
+      contacto: c.contacto,
+      direccion: c.direccion,
+      rif_cedula: c.rif_cedula,
+      ruta: c.ruta || inferirRutaCliente(c) || "",
+      telefono: c.telefono || (dig.length >= 7 && !/[a-z]/i.test(q) ? q.trim() : cliente.telefono || ""),
+      latitud: "",
+      longitud: "",
+    });
     saveCliente();
     fillCliente();
     // por RIF no se muestra el teléfono: se pide
@@ -266,15 +323,28 @@ function fillCliente() {
   $id("fTelefono").value = cliente.telefono || "";
 }
 
-/* Vendedores (después de enviar, el cliente elige a cuál mandarle el pedido por WhatsApp) */
+/* Vendedores (después de enviar, el cliente elige a cuál mandarle el pedido por WhatsApp, filtrado por catálogo Skala) */
 let vendedores = leer(K_VENDEDORES, []) || [];
 const inicial = (n) => String(n || "?").trim().charAt(0).toUpperCase();
+function vendedoresDeEsteCatalogo() {
+  const filtrados = (vendedores || []).filter((v) => {
+    const cat = String(v.catalogo || "ambos").toLowerCase();
+    return cat === "skala" || cat === "ambos";
+  });
+  return filtrados.length ? filtrados : (vendedores || []);
+}
 function cargarVendedores() {
   if (typeof SkalaAPI === "undefined") return;
-  SkalaAPI.api("vendedores").then((r) => {
-    vendedores = r.vendedores || [];
+  SkalaAPI.api("vendedores", { catalogo: "skala" }).then((r) => {
+    const recibidos = Array.isArray(r.vendedores) ? r.vendedores : [];
+    const filtrados = recibidos.filter((v) => {
+      const cat = String(v.catalogo || "ambos").toLowerCase();
+      return cat === "skala" || cat === "ambos";
+    });
+    vendedores = filtrados.length ? filtrados : recibidos;
     guardar(K_VENDEDORES, vendedores);
     if (!$id("listoModal").hidden) pintarListaWa();
+    if ($id("cliElegido") && clienteListo()) pintarCliente();
   }).catch(() => {});
 }
 
@@ -348,8 +418,9 @@ function renderCarrito() {
 
 function datosPedidoWeb() {
   const c = collectCliente();
-  const v = vendedores.find((x) => x.id === c.vendedor_id);
-  return { ref: refActual(), cliente: c, vendedor: v ? v.nombre : "", vendedor_id: c.vendedor_id, items: itemsConPrecio(), tipo_pago: c.tipo_pago };
+  const v = vendedorAsignado();
+  const vendId = v ? v.id : "";
+  return { ref: refActual(), cliente: c, vendedor: v ? v.nombre : "", vendedor_id: vendId, items: itemsConPrecio(), tipo_pago: c.tipo_pago };
 }
 
 function refreshMessage() { return []; } // (el mensaje se arma al elegir vendedor)
@@ -364,8 +435,13 @@ async function enviarPedido() {
     // con datos: el pedido llega a Skala (y a la app de los vendedores)
     btn.disabled = true; btn.classList.add("ocupado"); btn.textContent = "Enviando…";
     try {
-      await SkalaAPI.api("pedidoWeb", { ref: d.ref, cliente: d.cliente, tipo_pago: d.tipo_pago,
-        items: d.items.map((it) => ({ code: it.code, producto: it.producto, cajas: it.cajas, unidades_caja: it.unidades_caja, unidad: it.unidad })) });
+      await SkalaAPI.api("pedidoWeb", {
+        ref: d.ref,
+        cliente: d.cliente,
+        vendedor_id: d.vendedor_id || "",
+        tipo_pago: d.tipo_pago,
+        items: d.items.map((it) => ({ code: it.code, producto: it.producto, cajas: it.cajas, unidades_caja: it.unidades_caja, unidad: it.unidad })),
+      });
       guardar(K_REF_WEB, { ref: d.ref, enviado: true });
       mostrarEnvio("listo", d);
     } catch (e) {
@@ -379,12 +455,32 @@ async function enviarPedido() {
   // sin datos: se coordina con el vendedor por WhatsApp
   mostrarEnvio("whatsapp", d);
 }
+function formatearRutasVendedor(rutas) {
+  return Array.isArray(rutas) && rutas.length ? rutas.join(" · ") : "Todas las rutas";
+}
 function pintarListaWa() {
-  const lista = vendedores.map((v) => ({ id: v.id, nombre: v.nombre, wa: v.whatsapp || "" }));
+  const baseLista = vendedoresDeEsteCatalogo();
+  const asig = vendedorAsignado();
+  const rutaCli = inferirRutaCliente(cliente);
+  const tieneAsigDirecto = !!(asig && (
+    rutaCli
+    || new URLSearchParams(location.search).get("vendedor")
+    || baseLista.filter((x) => x.whatsapp).length === 1
+  ));
+  const ordenados = tieneAsigDirecto
+    ? [asig, ...baseLista.filter((v) => String(v.id) !== String(asig.id))]
+    : baseLista;
+  const lista = ordenados.map((v) => ({
+    id: v.id,
+    nombre: v.nombre,
+    wa: v.whatsapp || "",
+    rutas: Array.isArray(v.rutas) ? v.rutas : [],
+    asignado: tieneAsigDirecto && String(v.id) === String(asig.id),
+  }));
   lista.push({ id: "", nombre: "No tengo vendedor · escribir a Skala", wa: WHATSAPP_NUMBER, oficina: true });
-  $id("listoVend").innerHTML = lista.map((v, i) => `<li><button type="button" class="vend-wa${envio && envio.enviados.has(i) ? " enviado" : ""}" data-wa="${i}" aria-label="Enviar por WhatsApp a ${escHTML(v.nombre)}">
+  $id("listoVend").innerHTML = lista.map((v, i) => `<li><button type="button" class="vend-wa${v.asignado ? " es-asignado" : ""}${envio && envio.enviados.has(i) ? " enviado" : ""}" data-wa="${i}" aria-label="Enviar por WhatsApp a ${escHTML(v.nombre)}">
       <span class="avatar${v.oficina ? " oficina" : ""}">${v.oficina ? "S" : escHTML(inicial(v.nombre))}</span>
-      <strong>${escHTML(v.nombre)}</strong>
+      <span class="vend-wa-info"><strong>${escHTML(v.nombre)}</strong>${!v.oficina ? `<small class="vend-wa-rutas">📍 Rutas que atiende: ${escHTML(formatearRutasVendedor(v.rutas))}</small>` : ""}${v.asignado ? `<small class="vend-wa-tag">Tu vendedor asignado · Catálogo Skala${rutaCli ? ` · Ruta ${escHTML(rutaCli)}` : ""}</small>` : ""}</span>
       <span class="flecha" aria-hidden="true">${envio && envio.enviados.has(i) ? "✓" : '<svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>'}</span>
     </button></li>`).join("");
   pintarListaWa.lista = lista;
@@ -394,13 +490,19 @@ function mostrarEnvio(modo, datos, sinConexion) {
   const m = $id("listoModal");
   $id("orderModal").hidden = true;
   m.classList.toggle("es-listo", modo === "listo");
-  m.classList.toggle("es-wa", modo === "whatsapp");
+  m.classList.toggle("es-wa", modo === "whatsapp" || modo === "seleccionar");
   if (modo === "listo") {
     $id("listoAnim").innerHTML = '<svg viewBox="0 0 52 52" class="check"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-15"/></svg>';
     $id("listoTit").textContent = "¡Listo!";
     $id("listoSub").textContent = "Tu pedido llegó a Skala. Te contactamos pronto.";
     $id("listoPreg").textContent = "¿Deseas también enviarlo por WhatsApp a tu vendedor?";
     lanzarConfeti();
+  } else if (modo === "seleccionar") {
+    $id("listoAnim").innerHTML = '<svg viewBox="0 0 52 52" class="wa"><circle cx="26" cy="26" r="24"/><path d="M17 36l1.6-5A10 10 0 1 1 22 34.4z"/><path d="M22.5 21.5c.5 2.5 2.5 5 5.5 6.2l1.5-1.5 2.2 1.1-.6 1.9c-4.5.3-9.5-4.4-9.7-8.9l1.9-.6 1 2.3z"/></svg>';
+    $id("listoTit").textContent = "Selecciona tu vendedor";
+    $id("listoSub").innerHTML = "Elegí el vendedor que atiende tu <strong>ruta o zona</strong> para enviarle tu pedido por WhatsApp.";
+    $id("listoPreg").textContent = "Vendedores disponibles y rutas que atienden:";
+    $id("confeti").innerHTML = "";
   } else {
     $id("listoAnim").innerHTML = '<svg viewBox="0 0 52 52" class="wa"><circle cx="26" cy="26" r="24"/><path d="M17 36l1.6-5A10 10 0 1 1 22 34.4z"/><path d="M22.5 21.5c.5 2.5 2.5 5 5.5 6.2l1.5-1.5 2.2 1.1-.6 1.9c-4.5.3-9.5-4.4-9.7-8.9l1.9-.6 1 2.3z"/></svg>';
     $id("listoTit").textContent = "Enviar al vendedor por WhatsApp";
@@ -429,7 +531,7 @@ function enviarWhatsappA(i) {
   const v = (pintarListaWa.lista || [])[i];
   if (!v || !envio) return;
   const base = mensajeWeb({ ...envio.datos, vendedor: v.oficina ? "" : v.nombre });
-  const msg = envio.modo === "whatsapp" ? base + "\n\n*Código de pedido para vendedor:*\n" + linkVendedor(envio.datos) : base;
+  const msg = (envio.modo === "whatsapp" || envio.modo === "seleccionar") ? base + "\n\n*Código de pedido para vendedor:*\n" + linkVendedor(envio.datos) : base;
   const numero = v.wa || WHATSAPP_NUMBER;
   window.open(`https://wa.me/${numero}?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
   // si el pedido ya llegó a Skala, queda asignado a ese vendedor
@@ -437,12 +539,36 @@ function enviarWhatsappA(i) {
   envio.enviados.add(i);
   pintarListaWa();
 }
-/* "Cliente": manda el pedido directo al WhatsApp del vendedor asignado (sin abrir "Tu pedido") */
+/* "Cliente": manda el pedido directo al WhatsApp del vendedor asignado según el catálogo y la ruta del cliente (clientes compartidos por ruta/zona) */
 function vendedorAsignado() {
-  const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const listaCat = vendedoresDeEsteCatalogo();
+  const paramVend = norm(new URLSearchParams(location.search).get("vendedor") || "");
+  if (paramVend) {
+    const porUrl = listaCat.find((v) => v.whatsapp && (norm(v.id) === paramVend || norm(v.usuario) === paramVend || norm(v.nombre).includes(paramVend)))
+      || (vendedores || []).find((v) => v.whatsapp && (norm(v.id) === paramVend || norm(v.usuario) === paramVend || norm(v.nombre).includes(paramVend)));
+    if (porUrl) return porUrl;
+  }
+  const conWa = listaCat.filter((v) => v.whatsapp);
+  const soloSkala = conWa.filter((v) => String(v.catalogo || "").toLowerCase() === "skala");
+  const rutaCli = inferirRutaCliente(cliente)
+    || ($id("fDireccion") ? inferirRutaCliente({ direccion: $id("fDireccion").value, negocio: $id("fNegocio") && $id("fNegocio").value }) : "");
+  if (rutaCli) {
+    const porRutaExplicitaSkala = soloSkala.find((v) => Array.isArray(v.rutas) && v.rutas.includes(rutaCli));
+    if (porRutaExplicitaSkala) return porRutaExplicitaSkala;
+    const porRutaCubiertaSkala = soloSkala.find((v) => !Array.isArray(v.rutas) || !v.rutas.length || v.rutas.includes(rutaCli));
+    if (porRutaCubiertaSkala) return porRutaCubiertaSkala;
+    const porRutaExplicita = conWa.find((v) => Array.isArray(v.rutas) && v.rutas.includes(rutaCli));
+    if (porRutaExplicita) return porRutaExplicita;
+    const porRutaCubierta = conWa.find((v) => !Array.isArray(v.rutas) || !v.rutas.length || v.rutas.includes(rutaCli));
+    if (porRutaCubierta) return porRutaCubierta;
+  }
+  if (soloSkala.length === 1) return soloSkala[0];
+  if (conWa.length === 1) return conWa[0];
   const buscado = norm(VENDEDOR_ASIGNADO);
-  return vendedores.find((v) => cliente.vendedor_id && v.id === cliente.vendedor_id && v.whatsapp)
-    || vendedores.find((v) => v.whatsapp && norm(v.nombre).split(/\s+/).includes(buscado))
+  return soloSkala[0]
+    || conWa.find((v) => norm(v.nombre).split(/\s+/).includes(buscado))
+    || conWa[0]
     || null;
 }
 /* Enlace para que el vendedor monte el pedido en el panel con los productos ya cargados.
@@ -474,6 +600,15 @@ function enviarDirectoVendedor() {
   if (!d.items.length) return;
   const elegido = (document.querySelector('input[name="pagoWeb"]:checked') || {}).value;
   d.tipo_pago = elegido || cliente.tipo_pago || "credito";
+  const conWa = vendedoresDeEsteCatalogo().filter((x) => x.whatsapp);
+  const rutaCli = inferirRutaCliente(cliente) || inferirRutaCliente(d.cliente);
+  const paramVend = new URLSearchParams(location.search).get("vendedor");
+  // Si el cliente es nuevo (sin ruta conocida y sin ?vendedor=) y hay más de 1 vendedor en el catálogo:
+  // muestra "Selecciona tu vendedor" con la lista de vendedores, nombre y rutas que atienden
+  if (!rutaCli && !paramVend && conWa.length > 1) {
+    mostrarEnvio("seleccionar", d);
+    return;
+  }
   const v = vendedorAsignado();
   const msg = mensajeWeb({ ...d, vendedor: v ? v.nombre : "" }) + "\n\n*Código de pedido para vendedor:*\n" + linkVendedor(d);
   const numero = (v && v.whatsapp) || WHATSAPP_NUMBER;
@@ -518,18 +653,49 @@ function closeModal() {
   if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
 }
 
-/* -------------------- Ampliar imagen -------------------- */
+/* -------------------- Ampliar imagen e información detallada -------------------- */
 let zoomFoco = null;
 function abrirZoom(code) {
   const p = allProductsMap()[code];
   if (!p) return;
+  const pr = PRECIOS[code];
+  const esKit = p.unidad === "dúos" || /^KT-/i.test(p.code);
   const m = $id("zoomModal");
   const img = $id("zoomImg");
-  img.onerror = () => { img.onerror = null; img.src = p.nuevo ? fotoVacia(p.name) : `assets/img/${code}.png`; };
+  img.onerror = () => { img.onerror = null; img.src = p.img800 || p.img400 || fotoVacia(p.name); };
   img.src = fotoGrande(code);
   img.alt = p.name;
   $id("zoomTitulo").textContent = p.name;
   $id("zoomSub").textContent = `${code} · ${textoUnidades(p)} · ${p.hair}`;
+  if ($id("zoomLine")) $id("zoomLine").textContent = p.line || "";
+  if ($id("zoomCode")) $id("zoomCode").textContent = `Ref. ${p.code}`;
+  if ($id("zoomBenefit")) {
+    $id("zoomBenefit").textContent = p.benefit || "";
+    $id("zoomBenefit").hidden = !p.benefit;
+  }
+  const det = $id("zoomDetalles");
+  if (det) {
+    const tipoProd = esKit ? "Kit Shampoo + Acondicionador" : "Baño de crema de 1 kg (1000gr)";
+    const curvs = tiposDeCabello(p.hair).map((c) => c.nombre).join(", ");
+    const extraInfo = esKit
+      ? "Dúo Shampoo 325 ml + Acondicionador 325 ml · 100% Vegano · Sin Parabenos · Origen Brasil"
+      : "2 en 1: Crema de Tratamiento + Crema para Peinar · 100% Vegano · Sin Parabenos · Origen Brasil";
+    const u = Number(p.unidades) || 6;
+    const precioHTML = pr && pr.menor
+      ? `<div class="zoom-precios">
+          <span><strong>${dinero(pr.menor)}</strong> / ${textoEmpaqueTarjeta(p)} <small>(${dinero(pr.menor / u)} c/${esKit ? "dúo" : "und"})</small></span>
+          ${pr.mayor && pr.mayor < pr.menor ? `<span class="zoom-mayor">Al mayor (15+ cajas): <strong>${dinero(pr.mayor)}</strong> / caja <small>(${dinero(pr.mayor / u)} c/${esKit ? "dúo" : "und"})</small></span>` : ""}
+        </div>`
+      : "";
+    det.innerHTML = `
+      <div class="zoom-chips">
+        <span class="zoom-chip">${escHTML(tipoProd)}</span>
+        <span class="zoom-chip zoom-chip-units">${escHTML(textoUnidades(p))}</span>
+        <span class="zoom-chip zoom-chip-hair"><strong>${escHTML(p.hair)}</strong> <span class="hair-icons">${iconosCabelloHTML(p.hair)}</span>${curvs ? ` <small>(${escHTML(curvs)})</small>` : ""}</span>
+      </div>
+      <p class="zoom-extra">${escHTML(extraInfo)}</p>
+      ${precioHTML}`;
+  }
   zoomFoco = document.activeElement;
   // la foto crece desde la tarjeta tocada
   const desde = document.querySelector(`.card[data-card="${code}"] .card-img`);
@@ -590,12 +756,35 @@ function cargarPrecios() {
   }).catch(() => {});
 }
 
-/* Dibuja las dos grillas respetando el filtro elegido */
+/* Dibuja las dos grillas respetando el filtro elegido, búsqueda y modo de vista */
+function coincideBusqueda(p, q) {
+  if (!q) return true;
+  const txt = `${p.code || ""} ${p.name || ""} ${p.line || ""} ${p.benefit || ""} ${p.actives || ""}`
+    .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return txt.includes(q);
+}
+function aplicarVistaCatalogo(modo) {
+  const m = modo === "matriz" ? "matriz" : "cuadricula";
+  try { localStorage.setItem("skala_vista_cat", m); } catch (e) {}
+  ["gridBanos", "gridKits"].forEach((id) => {
+    const g = document.getElementById(id);
+    if (g) g.classList.toggle("modo-matriz", m === "matriz");
+  });
+  document.querySelectorAll(".selector-vista-cat [data-vista-modo]").forEach((b) => {
+    b.classList.toggle("activo", b.dataset.vistaModo === m);
+  });
+}
 function renderTodo() {
-  const act = document.querySelector("#filterBanos .filter.active");
-  const f = act ? act.dataset.filter : "all";
-  render("gridBanos", f === "all" ? BANOS : BANOS.filter((p) => p.line === f), "Baño de crema 1kg");
-  render("gridKits", KITS, "Kit shampoo + acondicionador");
+  const actB = document.querySelector("#filterBanos .filter.active");
+  const fb = actB ? actB.dataset.filter : "all";
+  const actK = document.querySelector("#filterKits .filter.active");
+  const fk = actK ? actK.dataset.filter : "all";
+  const busc = document.getElementById("buscarCatalogo");
+  const q = busc && busc.value ? busc.value.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+  const banos = (fb === "all" ? BANOS : BANOS.filter((p) => p.line === fb)).filter((p) => coincideBusqueda(p, q));
+  const kits = (fk === "all" ? KITS : KITS.filter((p) => p.line === fk)).filter((p) => coincideBusqueda(p, q));
+  render("gridBanos", banos, "Baño de crema 1kg");
+  render("gridKits", kits, "Kit shampoo + acondicionador");
   applyQty();
 }
 
@@ -603,20 +792,175 @@ function renderTodo() {
 document.addEventListener("DOMContentLoaded", () => {
   render("gridBanos", BANOS, "Baño de crema 1kg");
   render("gridKits", KITS, "Kit shampoo + acondicionador");
+  let modoInicial = "cuadricula";
+  try { if (localStorage.getItem("skala_vista_cat") === "matriz") modoInicial = "matriz"; } catch (e) {}
+  aplicarVistaCatalogo(modoInicial);
   cargarPrecios();
+  cargarVendedores();
 
-  /* Filtros de baños de crema */
-  const filters = document.querySelectorAll("#filterBanos .filter");
-  filters.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      filters.forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      const f = btn.dataset.filter;
-      const items = f === "all" ? BANOS : BANOS.filter((p) => p.line === f);
-      render("gridBanos", items, "Baño de crema 1kg");
-      applyQty();
+  /* Filtros de baños de crema y kits */
+  ["#filterBanos", "#filterKits"].forEach((sel) => {
+    const botones = document.querySelectorAll(`${sel} .filter`);
+    botones.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        botones.forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        renderTodo();
+      });
     });
   });
+
+  const buscInput = document.getElementById("buscarCatalogo");
+  if (buscInput) {
+    buscInput.addEventListener("input", () => renderTodo());
+  }
+
+  document.querySelectorAll(".selector-vista-cat [data-vista-modo]").forEach((btn) => {
+    btn.addEventListener("click", () => aplicarVistaCatalogo(btn.dataset.vistaModo));
+  });
+
+  /* Carrusel de portada Hero estilo Skala Brasil (deslizamiento continuo con pista flex + animaciones) */
+  const heroSliderEl = document.getElementById("heroSlider");
+  const heroTrackEl = document.getElementById("heroTrack");
+  const heroSlides = [...document.querySelectorAll(".hero-slide[data-hero-slide]")];
+  const heroDots = [...document.querySelectorAll(".hero-dot[data-hero-goto]")];
+  if (heroSlides.length > 1 && heroSliderEl && heroTrackEl) {
+    let heroIdx = 0;
+    let heroTimer = null;
+    const irHero = (idx) => {
+      heroIdx = ((idx % heroSlides.length) + heroSlides.length) % heroSlides.length;
+      heroTrackEl.style.transform = `translate3d(-${heroIdx * 100}%, 0, 0)`;
+      heroSlides.forEach((s, i) => {
+        const on = i === heroIdx;
+        s.classList.toggle("activo", on);
+        s.setAttribute("aria-hidden", on ? "false" : "true");
+      });
+      heroDots.forEach((d, i) => d.classList.toggle("activo", i === heroIdx));
+    };
+    const reiniciarHeroTimer = () => {
+      clearInterval(heroTimer);
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        heroTimer = setInterval(() => irHero(heroIdx + 1), 7500);
+      }
+    };
+    // Activar apertura en abanico inicial al cargar la portada 1
+    heroSliderEl.classList.add("hero-fan-init");
+    requestAnimationFrame(() => {
+      setTimeout(() => heroSliderEl.classList.remove("hero-fan-init"), 140);
+    });
+    heroDots.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        irHero(Number(btn.dataset.heroGoto) || 0);
+        reiniciarHeroTimer();
+      });
+    });
+    document.getElementById("heroPrevBtn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      irHero(heroIdx - 1);
+      reiniciarHeroTimer();
+    });
+    document.getElementById("heroNextBtn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      irHero(heroIdx + 1);
+      reiniciarHeroTimer();
+    });
+
+    // Prevenir arrastre nativo de imágenes o enlaces dentro del slider
+    heroSliderEl.addEventListener("dragstart", (e) => e.preventDefault());
+
+    const aplicarFeedbackArrastre = (dx) => {
+      if (dx === 0) {
+        heroTrackEl.style.transform = `translate3d(-${heroIdx * 100}%, 0, 0)`;
+      } else {
+        // Resistencia suave en los extremos (primer y último slide)
+        const enExtremo = (heroIdx === 0 && dx > 0) || (heroIdx === heroSlides.length - 1 && dx < 0);
+        const offsetPx = enExtremo ? dx * 0.32 : dx;
+        heroTrackEl.style.transform = `translate3d(calc(-${heroIdx * 100}% + ${offsetPx}px), 0, 0)`;
+      }
+    };
+
+    // Soporte táctil (Swipe izquierda / derecha en móvil y tablet)
+    let touchStartX = 0;
+    let touchDeltaX = 0;
+    heroSliderEl.addEventListener("touchstart", (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      touchStartX = e.touches[0].clientX;
+      touchDeltaX = 0;
+      heroSliderEl.classList.add("is-dragging");
+      clearInterval(heroTimer);
+    }, { passive: true });
+
+    heroSliderEl.addEventListener("touchmove", (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      touchDeltaX = e.touches[0].clientX - touchStartX;
+      if (Math.abs(touchDeltaX) > 4) aplicarFeedbackArrastre(touchDeltaX);
+    }, { passive: true });
+
+    heroSliderEl.addEventListener("touchend", () => {
+      heroSliderEl.classList.remove("is-dragging");
+      const umbral = Math.min(70, (heroSliderEl.clientWidth || 360) * 0.14);
+      if (Math.abs(touchDeltaX) >= umbral) {
+        irHero(touchDeltaX < 0 ? heroIdx + 1 : heroIdx - 1);
+      } else {
+        irHero(heroIdx);
+      }
+      touchDeltaX = 0;
+      reiniciarHeroTimer();
+    }, { passive: true });
+
+    // Soporte arrastre con ratón (Mouse Drag izquierda / derecha en escritorio)
+    let mouseDown = false;
+    let mouseStartX = 0;
+    let mouseDeltaX = 0;
+    let draggedRecently = false;
+
+    heroSliderEl.addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || e.target.closest(".hero-slider-arrow, .hero-dot")) return;
+      mouseDown = true;
+      mouseStartX = e.clientX;
+      mouseDeltaX = 0;
+      draggedRecently = false;
+      heroSliderEl.classList.add("is-dragging");
+      clearInterval(heroTimer);
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (!mouseDown) return;
+      mouseDeltaX = e.clientX - mouseStartX;
+      if (Math.abs(mouseDeltaX) > 5) {
+        draggedRecently = true;
+        aplicarFeedbackArrastre(mouseDeltaX);
+      }
+    });
+
+    const finalizarArrastreMouse = () => {
+      if (!mouseDown) return;
+      mouseDown = false;
+      heroSliderEl.classList.remove("is-dragging");
+      const umbral = Math.min(80, (heroSliderEl.clientWidth || 600) * 0.12);
+      if (Math.abs(mouseDeltaX) >= umbral) {
+        irHero(mouseDeltaX < 0 ? heroIdx + 1 : heroIdx - 1);
+      } else {
+        irHero(heroIdx);
+      }
+      mouseDeltaX = 0;
+      reiniciarHeroTimer();
+      if (draggedRecently) {
+        setTimeout(() => { draggedRecently = false; }, 140);
+      }
+    };
+
+    window.addEventListener("mouseup", finalizarArrastreMouse);
+    heroSliderEl.addEventListener("mouseleave", finalizarArrastreMouse);
+    heroSliderEl.addEventListener("click", (e) => {
+      if (draggedRecently) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+
+    reiniciarHeroTimer();
+  }
 
   document.addEventListener("click", (e) => {
     /* Botones − / + (tarjetas y "Tu pedido") */

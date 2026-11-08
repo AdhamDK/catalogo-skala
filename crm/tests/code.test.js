@@ -35,9 +35,9 @@ const pedir = (g, token, extra = {}) =>
 const idDe = (g, usuario) => g.tabla("Usuarios").find((u) => u.usuario === usuario).id;
 
 /* ---------- Hojas, usuarios, login ---------- */
-test("crea 9 hojas; Clientes empieza con las columnas de GPS_CLIENTES; Precios y Config precargadas", () => {
+test("crea las hojas (incl. Pagos, Tasas y Visitas); Clientes empieza con las columnas de GPS_CLIENTES; Precios y Config precargadas", () => {
   const g = preparar();
-  assert.deepEqual(Object.keys(g.hojas).sort(), ["Clientes", "Config", "Historial", "Inventario", "PedidoItems", "Pedidos", "PedidosWeb", "Precios", "Usuarios"]);
+  assert.deepEqual(Object.keys(g.hojas).sort(), ["Clientes", "Config", "Historial", "Inventario", "Pagos", "PedidoItems", "Pedidos", "PedidosWeb", "Precios", "Tasas", "Usuarios", "Visitas"]);
   assert.deepEqual(g.tabla("Config").map((x) => x.clave), ["version_apk", "url_apk", "minima_apk", "version_pantallas", "url_pantallas", "notas"]);
   assert.equal(g.tabla("Precios").length, 19);
   assert.deepEqual(g.tabla("Precios")[0], { code: "BC-01", producto: "Babosa", menor: "", mayor: "", pronto: "", efectivo_credito: "", efectivo_pronto: "", updated_at: "", updated_por: "",
@@ -797,7 +797,7 @@ test("cobro con otro método de pago: recalcula el total final con el descuento"
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.pedido.tipo_pago_real, "efectivo_pronto"); assert.equal(r.pedido.total_final, 24);
   assert.equal(r.pedido.total, 40); // lo acordado queda
-  assert.match(g.tabla("Historial").at(-1).detalle, /Pagó como Efectivo pronto pago \(total 24 \$\) · 24 USD/);
+  assert.match(g.tabla("Historial").at(-1).detalle, /Pagó como Efectivo pronto pago \(total 24 \$\) · (?:Canceló completo: )?24 USD/);
   // Rechazo limpia; conciliar directo sin método usa el acordado
   g.post({ action: "cobro", token: ta, pedido_id: p.id, accion: "rechazar", motivo: "no" });
   assert.equal(g.tabla("Pedidos")[0].total_final, "");
@@ -1155,4 +1155,203 @@ test("marcar entregado con otra fecha (se olvidó registrarlo): no futura ni ant
   const r2 = g.post({ action: "estado", token: tl, pedido_id: p2.id, estado: "entregado", fecha_entrega: "2026-10-27" });
   assert.equal(r2.ok, true, JSON.stringify(r2));
   assert.equal(r2.pedido.entregado_at, "2026-10-27T15:00:00.000Z");
+});
+
+/* ---------- Canal de atención (en_persona · online_telefono), visitas y GPS aprendido ---------- */
+const SIN_GPS = { contacto: "Luis Rivas", negocio: "Bodega Sin GPS", telefono: "0414-5550001", direccion: "Calle 3, El Vigía" };
+const FIX = { gps_lat: 8.6201234, gps_lng: -71.6509876, gps_dist_m: 8 };
+
+test("pedido EN PERSONA: guarda canal y GPS, crea visita presencial y aprende el GPS del cliente sin coordenadas", () => {
+  const g = preparar();
+  const r = pedir(g, login(g), { cliente: SIN_GPS, canal_pedido: "en_persona", ...FIX });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const ped = g.tabla("Pedidos")[0];
+  assert.equal(ped.canal_pedido, "en_persona");
+  assert.equal(ped.gps_lat, 8.620123);
+  assert.equal(ped.gps_dist_m, 8);
+  const cli = g.tabla("Clientes").find((c) => c.nombre === "Bodega Sin GPS");
+  assert.equal(cli.latitud, 8.620123);   // aprendió la ubicación en el acto
+  assert.equal(cli.longitud, -71.650988);
+  assert.equal(r.cliente.latitud, 8.620123);
+  const v = g.tabla("Visitas");
+  assert.equal(v.length, 1);
+  assert.equal(v[0].canal, "en_persona");
+  assert.equal(v[0].tipo, "pedido");
+  assert.equal(v[0].pedido_id, r.pedido.id);
+  assert.equal(v[0].cliente_id, cli.id);
+  assert.equal(v[0].en_sitio, true);
+  assert.equal(v[0].gps_aprendido, true);
+});
+
+test("pedido EN PERSONA a cliente que YA tenía GPS: no se pisan sus coordenadas", () => {
+  const g = preparar();
+  pedir(g, login(g), { canal_pedido: "en_persona", ...FIX }); // CLIENTE trae 8.612346, -71.654322
+  const cli = g.tabla("Clientes")[0];
+  assert.equal(cli.latitud, 8.612346);
+  assert.equal(g.tabla("Visitas")[0].gps_aprendido, false);
+});
+
+test("pedido ONLINE / TELÉFONO: jamás guarda la ubicación del vendedor en el cliente", () => {
+  const g = preparar();
+  // aunque el teléfono mande las coordenadas del vendedor dentro del cliente, se descartan
+  const r = pedir(g, login(g), { cliente: { ...SIN_GPS, latitud: FIX.gps_lat, longitud: FIX.gps_lng }, canal_pedido: "online_telefono", ...FIX });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const cli = g.tabla("Clientes").find((c) => c.nombre === "Bodega Sin GPS");
+  assert.equal(cli.latitud, "");
+  assert.equal(cli.longitud, "");
+  assert.equal(g.tabla("Pedidos")[0].canal_pedido, "online_telefono");
+  const v = g.tabla("Visitas");
+  assert.equal(v.length, 1);
+  assert.equal(v[0].canal, "online_telefono");
+  assert.equal(v[0].en_sitio, false);
+  assert.equal(v[0].gps_aprendido, false);
+  assert.equal(v[0].latitud, "");
+});
+
+test("canal inválido o ausente (versiones viejas / cola sin señal): pedido OK, sin visita", () => {
+  const g = preparar();
+  assert.equal(pedir(g, login(g), { canal_pedido: "whatsapp", ...FIX }).ok, true);
+  assert.equal(pedir(g, login(g)).ok, true);
+  assert.equal(g.tabla("Visitas").length, 0);
+  assert.deepEqual(g.tabla("Pedidos").map((p) => p.canal_pedido), ["", ""]);
+});
+
+test("cobro EN PERSONA vs ONLINE: canal_cobro en Pagos, visita de cobro y GPS solo en persona", () => {
+  const g = preparar();
+  const tv = login(g), ta = login(g, "ana", "Ana*2222"), tl = login(g, "luis", "Luis5555");
+  const entregar = (cliente) => {
+    const id = pedir(g, tv, { cliente }).pedido.id;
+    g.post({ action: "estado", token: ta, pedido_id: id, estado: "confirmado", despachador_id: idDe(g, "luis") });
+    g.post({ action: "estado", token: tl, pedido_id: id, estado: "entregado" });
+    return id;
+  };
+  const a = entregar(SIN_GPS);
+  const b = entregar({ ...SIN_GPS, negocio: "Kiosco Remoto", telefono: "0414-5550002" });
+  const ra = g.post({ action: "cobro", token: tv, pedido_id: a, accion: "cancelar", monto: 30, moneda: "USD", canal_cobro: "en_persona", ...FIX });
+  assert.equal(ra.ok, true, JSON.stringify(ra));
+  const rb = g.post({ action: "cobro", token: tv, pedido_id: b, accion: "cancelar", monto: 30, moneda: "USD", canal_cobro: "online_telefono", ...FIX });
+  assert.equal(rb.ok, true, JSON.stringify(rb));
+  const pagos = g.tabla("Pagos");
+  assert.deepEqual(pagos.map((x) => x.canal_cobro), ["en_persona", "online_telefono"]);
+  const visitas = g.tabla("Visitas").filter((v) => v.tipo === "cobro");
+  assert.deepEqual(visitas.map((v) => v.canal), ["en_persona", "online_telefono"]);
+  assert.equal(visitas[0].pago_id, pagos[0].id);
+  assert.equal(visitas[0].gps_aprendido, true);
+  const cA = g.tabla("Clientes").find((c) => c.nombre === "Bodega Sin GPS");
+  const cB = g.tabla("Clientes").find((c) => c.nombre === "Kiosco Remoto");
+  assert.equal(cA.latitud, 8.620123);   // en persona: aprendió
+  assert.equal(cB.latitud, "");         // online: intacto
+  assert.equal(ra.pedido.pagos.at(-1).canal_cobro, "en_persona");
+});
+
+test("registrarVisita: alta en persona aprende GPS; canal obligatorio (solo 2 opciones)", () => {
+  const g = preparar();
+  const tv = login(g);
+  const c = g.post({ action: "guardarCliente", token: tv, cliente: SIN_GPS }).cliente;
+  assert.equal(g.post({ action: "registrarVisita", token: tv, cliente_id: c.id, canal: "visita" }).code, "canal");
+  assert.equal(g.post({ action: "registrarVisita", token: tv, cliente_id: "nope", canal: "en_persona" }).code, "not_found");
+  const r = g.post({ action: "registrarVisita", token: tv, cliente_id: c.id, canal: "en_persona", tipo: "alta_cliente", latitud: 8.61, longitud: -71.65 });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.gps_aprendido, true);
+  assert.equal(r.visita.tipo, "alta_cliente");
+  assert.equal(g.tabla("Clientes")[0].latitud, 8.61);
+  const lista = g.post({ action: "visitas", token: tv, dias: 1 });
+  assert.equal(lista.visitas.length, 1);
+  assert.equal(g.post({ action: "visitas", token: login(g, "kevin", "Kevin9876"), dias: 1 }).visitas.length, 0); // cada vendedor ve las suyas
+  const res = g.post({ action: "resumen", token: tv, dias: 7 });
+  assert.deepEqual(res.visitas_por_canal, { en_persona: 1, online_telefono: 0 });
+  const sync = g.post({ action: "sincronizar", token: tv });
+  assert.equal(sync.visitas.length, 1);
+});
+
+test("cambiarClientePedido: revierte visita y GPS aprendido en el cliente equivocado y los pasa al correcto", () => {
+  const g = preparar();
+  const tv = login(g);
+  const correcto = g.post({ action: "guardarCliente", token: tv, cliente: { ...SIN_GPS, negocio: "Cliente Correcto", telefono: "0414-5550009" } }).cliente;
+  const r = pedir(g, tv, { cliente: SIN_GPS, canal_pedido: "en_persona", ...FIX }); // se equivocó: eligió "Bodega Sin GPS"
+  const equivocado = g.tabla("Clientes").find((c) => c.nombre === "Bodega Sin GPS");
+  assert.equal(equivocado.latitud, 8.620123);
+  // permisos y validaciones
+  assert.equal(g.post({ action: "cambiarClientePedido", token: login(g, "kevin", "Kevin9876"), pedido_id: r.pedido.id, cliente_id: correcto.id }).code, "not_found");
+  assert.equal(g.post({ action: "cambiarClientePedido", token: tv, pedido_id: r.pedido.id, cliente_id: equivocado.id }).code, "mismo");
+  const c = g.post({ action: "cambiarClientePedido", token: tv, pedido_id: r.pedido.id, cliente_id: correcto.id });
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(c.pedido.cliente_id, correcto.id);
+  assert.equal(c.pedido.negocio, "Cliente Correcto");
+  assert.equal(c.visitas_anuladas, 1);
+  assert.equal(c.gps_revertido, true);
+  assert.equal(c.gps_aprendido, true);
+  const tabla = g.tabla("Clientes");
+  assert.equal(tabla.find((x) => x.id === equivocado.id).latitud, "");     // GPS aprendido por error: revertido
+  assert.equal(tabla.find((x) => x.id === correcto.id).latitud, 8.620123); // el correcto lo aprende
+  const vis = g.tabla("Visitas");
+  assert.equal(vis.length, 2);
+  assert.equal(vis[0].anulada, true);
+  assert.equal(vis[0].anulada_motivo, "cliente_equivocado");
+  assert.equal(vis[1].cliente_id, correcto.id);
+  assert.equal(vis[1].anulada, false);
+  assert.equal(g.post({ action: "visitas", token: tv }).visitas.length, 1); // las anuladas no cuentan
+  assert.equal(g.tabla("Historial").at(-1).accion, "cliente_cambiado");
+  // pedido ya aprobado: no se cambia
+  g.post({ action: "estado", token: login(g, "ana", "Ana*2222"), pedido_id: r.pedido.id, estado: "confirmado", despachador_id: idDe(g, "luis") });
+  assert.equal(g.post({ action: "cambiarClientePedido", token: tv, pedido_id: r.pedido.id, cliente_id: equivocado.id }).code, "estado");
+});
+
+test("cambiarClientePedido ONLINE: no toca coordenadas de ninguno", () => {
+  const g = preparar();
+  const tv = login(g);
+  const correcto = g.post({ action: "guardarCliente", token: tv, cliente: { ...SIN_GPS, negocio: "Otro", telefono: "0414-5550010" } }).cliente;
+  const r = pedir(g, tv, { cliente: SIN_GPS, canal_pedido: "online_telefono", ...FIX });
+  const c = g.post({ action: "cambiarClientePedido", token: tv, pedido_id: r.pedido.id, cliente_id: correcto.id });
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(c.gps_revertido, false);
+  assert.equal(c.gps_aprendido, false);
+  assert.ok(g.tabla("Clientes").every((x) => x.latitud === ""));
+  assert.equal(g.tabla("Visitas").at(-1).canal, "online_telefono");
+});
+
+test("clientes compartidos por ruta/zona y catálogo+rutas asignados por vendedor", () => {
+  const g = preparar();
+  const tj = login(g, "jose", "Skala#2026");
+  const oscarId = idDe(g, "oscar");
+  const kevinId = idDe(g, "kevin");
+  // Asignar Óscar al catálogo Skala (rutas Mérida y Vigía) y Kevin al catálogo Distribuidora (ruta Mérida)
+  const rOscar = g.post({ action: "guardarUsuario", token: tj, id: oscarId, usuario: "oscar", nombre: "Óscar", roles: ["vendedor"], activo: true, telefono: "0414-1110001", catalogo: "skala", rutas: ["Mérida", "Vigía"] });
+  assert.equal(rOscar.ok, true);
+  assert.equal(rOscar.usuario.catalogo, "skala");
+  assert.deepEqual(rOscar.usuario.rutas, ["Vigía", "Mérida"]);
+  const rKevin = g.post({ action: "guardarUsuario", token: tj, id: kevinId, usuario: "kevin", nombre: "Kevin", roles: ["vendedor"], activo: true, telefono: "0414-1110002", catalogo: "distribuidora", rutas: ["Mérida"] });
+  assert.equal(rKevin.ok, true);
+  assert.equal(rKevin.usuario.catalogo, "distribuidora");
+  assert.deepEqual(rKevin.usuario.rutas, ["Mérida"]);
+
+  // Filtrado de vendedores por catálogo y ruta
+  const vendSkala = g.post({ action: "vendedores", catalogo: "skala", ruta: "Mérida" }).vendedores;
+  assert.ok(vendSkala.some((v) => v.id === oscarId));
+  assert.ok(!vendSkala.some((v) => v.id === kevinId));
+
+  const vendDist = g.post({ action: "vendedores", catalogo: "distribuidora", ruta: "Mérida" }).vendedores;
+  assert.ok(vendDist.some((v) => v.id === kevinId));
+  assert.ok(!vendDist.some((v) => v.id === oscarId));
+
+  // Cliente en base unificada con ruta asignada ("Mérida"), compartido entre vendedores
+  const cli = g.post({ action: "guardarCliente", token: tj, cliente: { nombre: "María", negocio: "Perfumería Sol", telefono: "0414-8889900", direccion: "Av. 4 Bolívar, Mérida", ruta: "Mérida" } }).cliente;
+  assert.equal(cli.ruta, "Mérida");
+  const b = g.post({ action: "buscarClienteWeb", q: "0414-8889900" });
+  assert.equal(b.ok, true);
+  assert.equal(b.cliente.ruta, "Mérida");
+
+  // Ambos vendedores ven el mismo cliente en la base unificada y pueden filtrarlo por ruta
+  const tOscar = login(g);
+  const clisMerida = g.post({ action: "clientes", token: tOscar, ruta: "Mérida" }).clientes;
+  assert.ok(clisMerida.some((c) => c.id === cli.id && c.ruta === "Mérida"));
+
+  // El propio vendedor puede marcar y actualizar las rutas que atiende (guardarMisRutas)
+  const errSinRuta = g.post({ action: "guardarMisRutas", token: tOscar, rutas: [] });
+  assert.equal(errSinRuta.ok, false);
+  assert.equal(errSinRuta.code, "rutas");
+  const okMisRutas = g.post({ action: "guardarMisRutas", token: tOscar, rutas: ["Chivo", "Táchira"] });
+  assert.equal(okMisRutas.ok, true);
+  assert.deepEqual(okMisRutas.rutas, ["Chivo", "Táchira"]);
+  assert.deepEqual(g.post({ action: "vendedores" }).vendedores.find((v) => v.id === oscarId).rutas, ["Chivo", "Táchira"]);
 });

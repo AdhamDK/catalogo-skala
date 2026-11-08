@@ -30,7 +30,7 @@
   <!-- Barra superior -->
   <header class="topbar">
     <a class="brand" href="#inicio">
-      <span class="brand-mark"><img src="assets/img/web/logo-96.png" alt="Skala Venezuela" width="38" height="38"></span>
+      <span class="brand-mark"><img src="assets/img/web/icono-do-transparente.png?v=4" alt="Distribuciones Ontiveros — Skala Venezuela" width="92" height="50"></span>
       <span class="brand-text">Skala <em>Venezuela</em></span>
     </a>
     <button type="button" class="btn-cuenta" id="btnCuenta">Ingresar</button>
@@ -38,35 +38,152 @@
       <a href="#inicio">Inicio</a>
       <a href="#banos">Baños de crema</a>
       <a href="#kits">Kits</a>
+      <a href="#curvaturas">Curvaturas</a>
       <a href="#como-comprar">Cómo comprar</a>
       <a href="#contacto">Contacto</a>
     </nav>
   </header>
 
-  <!-- Portada / Hero -->
-  <section id="inicio" class="hero">
-    <div class="hero-content">
-      <p class="eyebrow">Catálogo 2026 · Directo de Brasil</p>
-      <h1>Beleza brasileira<br />para tu cabello</h1>
-      <p class="lede">
-        Baños de crema de 1&nbsp;kg y kits de shampoo + acondicionador de la marca
-        <strong>#1 de Brasil</strong>. Cuidado profesional para cada curvatura.
-      </p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="#banos">Ver productos</a>
-        <a class="btn btn-ghost" href="#como-comprar">Cómo comprar</a>
+  <!-- Portada / Hero estilo oficial Skala Brasil (skalabrasil.com/es/) -->
+  <section id="inicio" class="hero hero-skala">
+    <div class="hero-slider" id="heroSlider">
+      <div class="hero-track" id="heroTrack">
+      <!-- Slide 1: Espíritu Brasileño / Potes icónicos -->
+      <article class="hero-slide hero-slide-brasil activo" data-hero-slide="0">
+        <svg class="hero-leaf hero-leaf-tl" viewBox="0 0 200 200" aria-hidden="true"><path d="M10,190 C20,90 90,20 190,10 C170,110 110,170 10,190 Z"/><path d="M10,190 Q90,90 190,10" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="4"/></svg>
+        <svg class="hero-leaf hero-leaf-br" viewBox="0 0 200 200" aria-hidden="true"><path d="M190,10 C180,110 110,180 10,190 C30,90 90,30 190,10 Z"/></svg>
+        <div class="hero-inner">
+          <div class="hero-content">
+            <span class="hero-badge-vegan">🌿 100% VEGANO · 0% ORIGEN ANIMAL · #1 DE BRASIL</span>
+            <h1>El Espíritu Brasileño<br /><span>en cada hebra</span></h1>
+            <p class="lede">
+              Baños de crema <strong>2 en 1 de 1000g</strong> y kits de <strong>shampoo + acondicionador</strong> enriquecidos con activos de la biodiversidad de Brasil para cada curvatura.
+            </p>
+            <div class="hero-actions">
+              <a class="btn btn-primary hero-cta-main" href="#banos">Ver productos</a>
+              <a class="btn btn-ghost hero-cta-sec" href="#como-comprar">Cómo comprar</a>
+            </div>
+            <ul class="hero-chips">
+              <li>🌿 100% Vegano</li>
+              <li>🐰 Cruelty Free</li>
+              <li>🇧🇷 Directo de Brasil</li>
+              <li>✨ Fórmula Liberada</li>
+            </ul>
+          </div>
+          <div class="hero-showcase" aria-hidden="true">
+            <div class="hero-glow"></div>
+            <div class="hero-sello-brasil">
+              <strong>#1</strong>
+              <span>EN BRASIL</span>
+              <small>1000g</small>
+            </div>
+            <div class="hero-potes">
+              <img class="pote pote-mini-izq" src="assets/img/hero-cutouts/BC-09.png?v=2" alt="" width="180" height="200" loading="eager" />
+              <img class="pote pote-mini-der" src="assets/img/hero-cutouts/BC-05.png?v=2" alt="" width="180" height="200" loading="eager" />
+              <img class="pote pote-izq" src="assets/img/hero-cutouts/BC-02.png?v=2" alt="" width="240" height="265" loading="eager" />
+              <img class="pote pote-der" src="assets/img/hero-cutouts/BC-06.png?v=2" alt="" width="240" height="265" loading="eager" />
+              <img class="pote pote-centro" src="assets/img/hero-cutouts/BC-01.png?v=2" alt="" width="280" height="310" loading="eager" fetchpriority="high" />
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Slide 2: Colección 16 Baños de Crema 1000g (Destaca 1KG gigante + potes recortados) -->
+      <article class="hero-slide hero-slide-banos" data-hero-slide="1">
+        <svg class="hero-leaf hero-leaf-tl" viewBox="0 0 200 200" aria-hidden="true"><path d="M10,190 C20,90 90,20 190,10 C170,110 110,170 10,190 Z"/></svg>
+        <div class="hero-inner">
+          <div class="hero-content">
+            <span class="hero-badge-vegan">✨ 2 EN 1 · TRATAMIENTO + CREMA PARA PEINAR</span>
+            <h1>16 Baños de Crema<br /><span>Formato Gigante 1Kg</span></h1>
+            <p class="lede">
+              Potes gigantes de <strong>1000g (1 kg)</strong> para Hidratación, Nutrición, Reconstrucción, Definición y Línea Kids. Presentación en <strong>caja × 6 unidades</strong>.
+            </p>
+            <div class="hero-actions">
+              <a class="btn btn-primary hero-cta-main" href="#banos">Explorar los 16 baños</a>
+              <a class="btn btn-ghost hero-cta-sec" href="#curvaturas">Ver guía de curvatura</a>
+            </div>
+          </div>
+          <div class="hero-showcase" aria-hidden="true">
+            <div class="hero-glow"></div>
+            <div class="hero-sello-brasil hero-sello-1kg">
+              <strong>1 KG</strong>
+              <span>1000 GRAMOS</span>
+              <small>2 EN 1</small>
+            </div>
+            <div class="hero-potes hero-potes-1kg">
+              <img class="pote pote-1kg-fondo-izq" src="assets/img/hero-cutouts/BC-12.png?v=2" alt="" width="190" height="210" loading="eager" />
+              <img class="pote pote-1kg-fondo-der" src="assets/img/hero-cutouts/BC-05.png?v=2" alt="" width="190" height="210" loading="eager" />
+              <img class="pote pote-1kg-lat-izq" src="assets/img/hero-cutouts/BC-14.png?v=2" alt="" width="230" height="255" loading="eager" />
+              <img class="pote pote-1kg-lat-der" src="assets/img/hero-cutouts/BC-07.png?v=2" alt="" width="230" height="255" loading="eager" />
+              <img class="pote pote-1kg-protagonista" src="assets/img/hero-cutouts/BC-10.png?v=2" alt="" width="320" height="355" loading="eager" />
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Slide 3: Colección 8 Kits Shampoo + Acondicionador (Separados y dinámicos sin fondo blanco) -->
+      <article class="hero-slide hero-slide-kits" data-hero-slide="2">
+        <svg class="hero-leaf hero-leaf-br" viewBox="0 0 200 200" aria-hidden="true"><path d="M190,10 C180,110 110,180 10,190 C30,90 90,30 190,10 Z"/></svg>
+        <div class="hero-inner">
+          <div class="hero-content">
+            <span class="hero-badge-vegan">💧 DÚO SHAMPOO 325 ML + ACONDICIONADOR 325 ML</span>
+            <h1>Línea Skala Expert<br /><span>Kits de Cuidado Diario</span></h1>
+            <p class="lede">
+              Limpieza suave sin sal y acondicionamiento profundo con activos botánicos brasileños. <strong>Caja × 6 dúos</strong>.
+            </p>
+            <div class="hero-actions">
+              <a class="btn btn-primary hero-cta-main" href="#kits">Ver los 8 kits</a>
+              <a class="btn btn-ghost hero-cta-sec" href="#banos">Ver baños de crema</a>
+            </div>
+          </div>
+          <div class="hero-showcase" aria-hidden="true">
+            <div class="hero-glow"></div>
+            <div class="hero-kits-scatter">
+              <img class="kit-cut kit-scatter-1" src="assets/img/hero-cutouts/KT-02.png?v=2" alt="" width="170" height="225" loading="eager" />
+              <img class="kit-cut kit-scatter-2" src="assets/img/hero-cutouts/KT-07.png?v=2" alt="" width="175" height="230" loading="eager" />
+              <img class="kit-cut kit-scatter-3" src="assets/img/hero-cutouts/KT-03.png?v=2" alt="" width="205" height="270" loading="eager" />
+              <img class="kit-cut kit-scatter-4" src="assets/img/hero-cutouts/KT-05.png?v=2" alt="" width="205" height="270" loading="eager" />
+              <img class="kit-cut kit-scatter-5" src="assets/img/hero-cutouts/KT-08.png?v=2" alt="" width="235" height="310" loading="eager" />
+            </div>
+          </div>
+        </div>
+      </article>
       </div>
-      <ul class="hero-chips">
-        <li>100% vegano</li>
-        <li>Distribuidor autorizado</li>
-        <li>Venta mayorista</li>
-      </ul>
+
+      <!-- Controles laterales y puntos del carrusel Hero -->
+      <button type="button" class="hero-slider-arrow prev" id="heroPrevBtn" aria-label="Portada anterior">‹</button>
+      <button type="button" class="hero-slider-arrow next" id="heroNextBtn" aria-label="Siguiente portada">›</button>
+      <div class="hero-controls" aria-label="Cambiar portada">
+        <button type="button" class="hero-dot activo" data-hero-goto="0" aria-label="Portada 1: Espíritu Brasileño"><span></span></button>
+        <button type="button" class="hero-dot" data-hero-goto="1" aria-label="Portada 2: 16 Baños de Crema 1000g"><span></span></button>
+        <button type="button" class="hero-dot" data-hero-goto="2" aria-label="Portada 3: Kits Shampoo + Acondicionador"><span></span></button>
+      </div>
+
+      <svg class="hero-wave" viewBox="0 0 1440 70" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0,28 C320,78 640,-12 960,34 C1200,68 1340,24 1440,12 L1440,70 L0,70 Z" />
+      </svg>
     </div>
-    <div class="hero-art" aria-hidden="true">
-      <!-- Aquí podés poner una foto hero o el logo. Mientras, usamos un placeholder. -->
-      <div class="hero-tile tile-green"><span>1 kg</span></div>
-      <div class="hero-tile tile-pink"><span>Kits</span></div>
-      <div class="hero-tile tile-orange"><span>+80 países</span></div>
+
+    <!-- Franja de sellos de identidad Skala Brasil -->
+    <div class="skala-strip">
+      <div class="container skala-strip-grid">
+        <div class="skala-seal">
+          <span class="skala-seal-icon">🌿</span>
+          <div><strong>100% Vegano</strong><span>0% origen animal</span></div>
+        </div>
+        <div class="skala-seal">
+          <span class="skala-seal-icon">🐰</span>
+          <div><strong>Cruelty Free</strong><span>Sin pruebas en animales</span></div>
+        </div>
+        <div class="skala-seal">
+          <span class="skala-seal-icon">🇧🇷</span>
+          <div><strong>#1 de Brasil</strong><span>En más de 80 países</span></div>
+        </div>
+        <div class="skala-seal">
+          <span class="skala-seal-icon">✨</span>
+          <div><strong>Fórmula Liberada</strong><span>0% parabenos y siliconas</span></div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -76,9 +193,7 @@
       <p class="eyebrow">Quiénes somos</p>
       <h2>Importamos directo de Brasil.<br />Cuidamos cada detalle.</h2>
       <p class="lede">
-        Somos distribuidores Oficiales de la línea <strong>Skala Brasil</strong>. Trabajamos con
-        el canal medio-alto: Peluquerias Exclusivas, salones y revendedores que exigen calidad, constancia y
-        producto original.
+        Somos Importadores de la línea <strong>Skala Brasil</strong>. Trabajamos con el canal medio-alto: Peluquerias Exclusivas, Distribuidores, Abastos e Hipermercados que exigen calidad, constancia y producto original.
       </p>
       <div class="about-grid">
         <div class="about-card">
@@ -98,7 +213,7 @@
   </section>
 
   <!-- Guía de curvatura -->
-  <section class="curvatura">
+  <section id="curvaturas" class="curvatura">
     <div class="container">
       <p class="eyebrow">Guía de curvatura</p>
       <h2>¿Qué producto es para cada cabello?</h2>
@@ -145,6 +260,13 @@
           <button class="filter" data-filter="Kids">Kids</button>
         </div>
       </div>
+      <div class="catalogo-toolbar" role="region" aria-label="Buscador y vista del catálogo">
+        <input type="search" class="catalogo-buscador" id="buscarCatalogo" placeholder="🔍 Buscar producto, código o beneficio…" aria-label="Buscar producto, código o beneficio" autocomplete="off" />
+        <div class="selector-vista-cat" role="group" aria-label="Cambiar vista del catálogo">
+          <button type="button" class="vista-cat-btn activo" data-vista-modo="cuadricula" title="Vista cuadrícula" aria-label="Vista cuadrícula">⊞ Cuadrícula</button>
+          <button type="button" class="vista-cat-btn" data-vista-modo="matriz" title="Lista rápida mayorista" aria-label="Lista rápida">☰ Lista rápida</button>
+        </div>
+      </div>
       <div class="grid" id="gridBanos"></div>
     </div>
   </section>
@@ -158,6 +280,14 @@
           <h2>Kits · Shampoo + Acondicionador</h2>
           <p class="section-note">Cada caja trae <strong>6 dúos</strong> (shampoo + acondicionador).</p>
         </div>
+        <div class="filters" id="filterKits" role="group" aria-label="Filtrar kits">
+          <button class="filter active" data-filter="all">Todos</button>
+          <button class="filter" data-filter="Hidratación">Hidratación</button>
+          <button class="filter" data-filter="Nutrición">Nutrición</button>
+          <button class="filter" data-filter="Reconstrucción">Reconstrucción</button>
+          <button class="filter" data-filter="Definición">Definición</button>
+          <button class="filter" data-filter="Completo">Completo</button>
+        </div>
       </div>
       <div class="grid grid-kits" id="gridKits"></div>
     </div>
@@ -166,28 +296,28 @@
   <!-- Cómo comprar -->
   <section id="como-comprar" class="como-comprar">
     <div class="container">
-      <p class="eyebrow">Cómo comprar</p>
-      <h2>Venta mayorista, sin letra chica</h2>
+      <p class="eyebrow">Cómo comprar · Desde 15 cajas</p>
+      <h2>Venta Mayorista</h2>
       <div class="steps">
-        <div class="step">
+        <div class="step step-1">
           <span class="step-num">01</span>
-          <h3>Elegí tu caja</h3>
-          <p>Armá tu pedido mixto entre baños de crema y kits. Mínimo 40–50 cajas por cliente.</p>
+          <h3>Elige tus cajas</h3>
+          <p>Elige detalladamente cada caja, cada modelo, arma tu pedido mixto entre baños de crema y kits. <strong>Mínimo 15 cajas surtidas.</strong></p>
         </div>
-        <div class="step">
+        <div class="step step-2">
           <span class="step-num">02</span>
-          <h3>Consultá precios</h3>
-          <p>Los precios varían según cantidad y forma de pago. <strong>Pedí tu cotización</strong> por WhatsApp.</p>
+          <h3>Consulta precios</h3>
+          <p>Normalmente damos ofertas y promociones para nuestros clientes, coordina con tu vendedor tu pedido y posibles ofertas.</p>
         </div>
-        <div class="step">
+        <div class="step step-3">
           <span class="step-num">03</span>
-          <h3>Recibí tu pedido</h3>
-          <p>Coordinamos entrega y formas de pago. Trabajamos con constancia para tu negocio.</p>
+          <h3>Recibe tu pedido</h3>
+          <p>Coordinamos la entrega y formas de pago. Trabajamos con constancia para tu negocio, excelente atención.</p>
         </div>
       </div>
       <p class="price-note">
-        <strong>Los precios se informan por cotización.</strong> Varían según La Ubicacion de cliente, cantidad y
-        método de pago. Contactanos y te armamos una propuesta a medida.
+        <strong>Los precios se informan por cotización.</strong> Varían según la ubicación del cliente, cantidad y
+        método de pago. Contáctanos y te armamos una propuesta a medida.
       </p>
       <a class="btn btn-primary" href="#contacto">Pedir cotización</a>
     </div>
@@ -228,6 +358,7 @@
     <div class="order-bar-info">
       <span class="order-count"><strong id="orderTotal">0</strong> cajas seleccionadas</span>
       <span class="order-hint" id="orderHint"></span>
+      <div class="progreso-mayor-web" id="orderProgress" aria-hidden="true"><div class="progreso-mayor-web-fill" id="orderProgressFill"></div></div>
     </div>
     <button type="button" class="order-clear" id="btnClear" title="Borrar todo">Borrar todo</button>
     <button type="button" class="btn btn-primary" id="btnArmarPedido">Armar pedido por WhatsApp</button>
@@ -336,12 +467,23 @@
     </div>
   </div>
 
-  <!-- Imagen ampliada -->
+  <!-- Imagen ampliada y ficha detallada -->
   <div class="modal zoom-modal" id="zoomModal" hidden>
     <div class="zoom-box" role="dialog" aria-modal="true" aria-labelledby="zoomTitulo">
       <button type="button" class="zoom-cerrar" id="zoomCerrar" aria-label="Cerrar imagen">✕</button>
-      <img id="zoomImg" alt="" />
-      <p class="zoom-pie"><strong id="zoomTitulo"></strong><span id="zoomSub"></span></p>
+      <div class="zoom-media">
+        <img id="zoomImg" alt="" />
+      </div>
+      <div class="zoom-info">
+        <div class="zoom-head">
+          <span class="zoom-line" id="zoomLine"></span>
+          <span class="zoom-code" id="zoomCode"></span>
+        </div>
+        <h3 class="zoom-titulo" id="zoomTitulo"></h3>
+        <p class="zoom-benefit" id="zoomBenefit"></p>
+        <div class="zoom-detalles" id="zoomDetalles"></div>
+        <p class="zoom-pie" id="zoomSub" hidden></p>
+      </div>
     </div>
   </div>
 

@@ -1,0 +1,17 @@
+{
+  "name": "Distribuciones Ontiveros · Equipo",
+  "short_name": "Dist. Ontiveros",
+  "description": "Pedidos, clientes, rutas y entregas del equipo de Distribuciones Ontiveros.",
+  "lang": "es",
+  "start_url": "panel.html#/inicio",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6faf7",
+  "theme_color": "#1e563f",
+  "icons": [
+    { "src": "assets/img/logo/logo-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/img/logo/logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/img/logo/logo-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -107,6 +107,7 @@
   /* Consulta la tasa oficial del BCV para una fecha (YYYY-MM-DD).
      Primero intenta el servidor CRM (que incluye tasas manuales de la hoja 'Tasas' y DolarApi)
      y respalda con consulta directa a ve.dolarapi.com + caché en el teléfono. */
+  const hoyIso = () => new Date().toISOString().slice(0, 10);
   async function obtenerTasaBcv(fecha) {
     const f = String(fecha || "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return { tasa: 0, fechaEfectiva: f, fuente: "" };
@@ -133,10 +134,10 @@
     } catch (_) {}
     // 2) Caché local reciente (< 6 horas) si ya contiene la fecha
     const cache = leerLS(K_TASAS_BCV, { ts: 0, mapa: {} });
-    const hoyIso = new Date().toISOString().slice(0, 10);
+    const diaHoyIso = hoyIso();
     if (cache && cache.mapa && Date.now() - (Number(cache.ts) || 0) < 6 * 3600000) {
       const enc = buscarEnMapa(cache.mapa);
-      if (enc && (enc.fechaEfectiva === f || f < hoyIso)) return { ...enc, fuente: "BCV" };
+      if (enc && (enc.fechaEfectiva === f || f < diaHoyIso)) return { ...enc, fuente: "BCV" };
     }
     // 3) Consultar histórico oficial de BCV en DolarApi directamente
     try {
@@ -188,10 +189,10 @@
   const RUTAS = {
     ingresar: { titulo: "Ingresar", publica: true, render: vIngresar },
     inicio: { titulo: "Inicio", roles: TODOS, nav: "inicio", render: vInicio },
-    nuevo: { titulo: "Nuevo pedido", roles: TOMAN, nav: "nuevo", render: vNuevoCliente },
-    "nuevo/productos": { titulo: "Nuevo pedido", roles: TOMAN, nav: "nuevo", atras: "#/nuevo", render: vNuevoProductos },
-    "nuevo/enviar": { titulo: "Nuevo pedido", roles: TOMAN, nav: "nuevo", atras: "#/nuevo/productos", render: vNuevoEnviar },
-    "nuevo/cliente": { titulo: "Nuevo pedido", roles: TOMAN, nav: "nuevo", render: () => ir("#/nuevo") }, // enlace viejo
+    nuevo: { titulo: "Catálogo · Nuevo pedido", roles: TOMAN, nav: "nuevo", render: vNuevoProductos },
+    "nuevo/productos": { titulo: "Catálogo · Nuevo pedido", roles: TOMAN, nav: "nuevo", render: vNuevoProductos },
+    "nuevo/cliente": { titulo: "Seleccionar cliente", roles: TOMAN, nav: "nuevo", atras: "#/nuevo", render: vNuevoCliente },
+    "nuevo/enviar": { titulo: "Enviar pedido", roles: TOMAN, nav: "nuevo", atras: "#/nuevo/cliente", render: vNuevoEnviar },
     "nuevo/listo": { titulo: "Pedido guardado", roles: TOMAN, nav: "nuevo", render: vNuevoListo },
     pedidos: { titulo: "Pedidos", roles: TOMAN, nav: "pedidos", render: vPedidos },
     entregas: { titulo: "Mis entregas", roles: ["despachador", "master", "admin"], nav: "entregas", render: vPedidos }, // Administración: "Despacho"
@@ -202,8 +203,9 @@
     clientes: { titulo: "Clientes", roles: TOMAN, nav: "clientes", render: vClientes },
     cliente: { titulo: "Cliente", roles: TOMAN, nav: "clientes", atras: "#/clientes", render: vCliente },
     resumen: { titulo: "Resumen", roles: TOMAN, nav: "mas", atras: "#/mas", render: vResumen },
-    inventario: { titulo: "Inventario y precios", roles: ["master", "admin"], nav: "mas", atras: "#/mas", render: vInventario },
+    inventario: { titulo: "Inventario", roles: ["master", "admin"], nav: "mas", atras: "#/mas", render: vInventario },
     "inventario/cargar": { titulo: "Cargar inventario", roles: ["master", "admin"], nav: "mas", atras: "#/inventario", render: vCargarInventario },
+    precios: { titulo: "Precios", roles: ["master", "admin"], nav: "mas", atras: "#/mas", render: vPrecios },
     usuarios: { titulo: "Usuarios", roles: ["master"], nav: "mas", atras: "#/mas", render: vUsuarios },
     usuario: { titulo: "Usuario", roles: ["master"], nav: "mas", atras: "#/usuarios", render: vUsuario },
     mas: { titulo: "Más", roles: TODOS, nav: "mas", render: vMas },
@@ -231,7 +233,7 @@
     if (def.roles && !def.roles.some((r) => roles().includes(r))) return ir("#/inicio");
     if (clave === "ingresar" && s) return ir("#/inicio");
 
-    document.title = `${def.titulo} · Skala Equipo`;
+    document.title = `${def.titulo} · Ontiveros Equipo`;
     $("appTitulo").textContent = def.titulo;
     $("btnAtras").hidden = !def.atras;
     $("btnAtras").dataset.destino = typeof def.atras === "string" ? def.atras : "";
@@ -350,14 +352,122 @@
   const preciosManuales = () => leerLS(K_PRECIOS_MANUAL, {}) || {};
   const guardarPreciosManuales = (m) => guardarLS(K_PRECIOS_MANUAL, m || {});
 
+  /* -------------------- Vista Catálogo (Cuadrícula vs. Lista rápida) y GPS Slots -------------------- */
+  const K_VISTA_CAT = "skala_vista_cat";
+  const K_CFG_GRUPOS = "skala_config_grupos_v1";
+  const leerConfigGrupos = () => leerLS(K_CFG_GRUPOS, {}) || {};
+  const guardarConfigGrupos = (cfg) => guardarLS(K_CFG_GRUPOS, cfg || {});
+  function vistaCatActual() {
+    try {
+      const raw = localStorage.getItem(K_VISTA_CAT);
+      if (raw === "matriz" || raw === '"matriz"') return "matriz";
+    } catch (e) {}
+    return "cuadricula";
+  }
+  function selectorVistaCatHTML() {
+    const m = vistaCatActual();
+    return `<div class="selector-vista-cat" role="group" aria-label="Cambiar vista de productos">
+      <button type="button" class="vista-cat-btn${m === "cuadricula" ? " activo" : ""}" data-vista-modo="cuadricula" title="Vista cuadrícula" aria-label="Vista cuadrícula">⊞ Cuadrícula</button>
+      <button type="button" class="vista-cat-btn${m === "matriz" ? " activo" : ""}" data-vista-modo="matriz" title="Lista rápida" aria-label="Lista rápida">☰ Lista rápida</button>
+    </div>`;
+  }
+  function enlazarSelectorVistaCat(raiz, listaEl) {
+    if (!raiz || !listaEl) return;
+    const aplicar = (modo) => {
+      const m = modo === "matriz" ? "matriz" : "cuadricula";
+      try { localStorage.setItem(K_VISTA_CAT, m); } catch (e) {}
+      listaEl.classList.toggle("modo-matriz", m === "matriz");
+      raiz.querySelectorAll(".selector-vista-cat [data-vista-modo]").forEach((b) => {
+        b.classList.toggle("activo", b.dataset.vistaModo === m);
+      });
+    };
+    aplicar(vistaCatActual());
+    raiz.querySelectorAll(".selector-vista-cat [data-vista-modo]").forEach((btn) => {
+      btn.addEventListener("click", () => aplicar(btn.dataset.vistaModo));
+    });
+  }
+  /* -------------------- Rutas diversificadas de Cartera y Mapa Preview -------------------- */
+  const RUTAS_CARTERA = ["Chivo", "Vigía", "Mérida", "Mocotíes", "Caja Seca", "Táchira"];
+  const K_RUTAS_CLI = "skala_rutas_clientes_v1";
+  const RUTAS_BASE_POR_ID = {
+    "772da44b-3153-4bde-ab19-b48715b00cdf": "Chivo",      // SUPERMERCADO EL JIRETH, C. A.
+    "465b0ad1-9738-4dc3-b958-40681ba5db89": "Chivo",      // CORPORACION MI ANGEL C.A
+    "2eb9404b-5622-4dc4-99f3-08684dc2c63c": "Chivo",      // VIVERES EL HEREDERO CONTRERAS, F.P.
+    "4f55f5fa-a0e6-47ef-89eb-311ec9ac62c6": "Chivo",      // Comercializadora Sur Del Lago Parra
+    "da43b6ca-fa36-4b37-9160-f4bcd0b39048": "Caja Seca",  // Cimercializadora Glaymar C.A (Panamericana)
+    "75c4e1ae-4c39-43c1-8302-a2554556ce7a": "Caja Seca",  // INVERSIONES S & S YSMARI SERRUDO QUINTERO
+    "d0216c35-935b-4d56-be36-f0ace7e1c9a4": "Caja Seca",  // Agencia de Festejos Guillermo
+    "6002e33d-09d4-40aa-bd29-02e32bdbe8e3": "Mocotíes",   // La Casa De La Mercaderia (Santa Cruz de Mora)
+    "96ef523e-d0c1-4961-8cfd-9829a7f2edb7": "Mocotíes",   // Automercado La Suerte Huimei Zheng (Santa Cruz de Mora)
+    "528e785f-b85c-4859-98f0-85464485865a": "Mocotíes",   // Automercado Lucky (Tovar)
+    "8cc62278-c92a-4bfa-8770-34d1b15d2903": "Táchira",    // Xuemei Zheng (Eje Frontera / Bailadores)
+    "4ca6e254-eb17-4d01-9b3c-77857a87dabf": "Táchira",    // Abastos Hong Kong II (Eje Frontera / Bailadores)
+  };
+  function slugRuta(r) {
+    return String(r || "vigia").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-");
+  }
+  function guardarRutaCliente(id, ruta) {
+    if (!id || !ruta) return;
+    const m = leerLS(K_RUTAS_CLI, {}) || {};
+    m[id] = ruta;
+    guardarLS(K_RUTAS_CLI, m);
+  }
+  function rutaDeCliente(c) {
+    if (!c) return "Vigía";
+    if (c.ruta && RUTAS_CARTERA.includes(c.ruta)) return c.ruta;
+    const guardadas = leerLS(K_RUTAS_CLI, {}) || {};
+    if (c.id && guardadas[c.id]) return guardadas[c.id];
+    const mTag = String(c.direccion || "").match(/\[Ruta:\s*([^\]]+)\]/i);
+    if (mTag && mTag[1]) return mTag[1].trim();
+    if (c.id && RUTAS_BASE_POR_ID[c.id]) return RUTAS_BASE_POR_ID[c.id];
+    const txt = `${c.nombre || ""} ${c.negocio || ""} ${c.direccion || ""}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (/tachira|san\s*cristobal|la\s*fria|coloncito|pinal|rubio|tariba/.test(txt)) return "Táchira";
+    if (/caja\s*seca|panamericana|nueva\s*bolivia|arenales|zancudo|bobures|arapuey/.test(txt)) return "Caja Seca";
+    if (/mocoties|santa\s*cruz\s*de\s*mora|tovar|bailadores|zea/.test(txt)) return "Mocotíes";
+    if (/chivo|pueblo\s*nuevo|rurale|cuatro\s*esquinas/.test(txt)) return "Chivo";
+    if (/vigia|cano\s*seco/.test(txt)) return "Vigía";
+    if (/merida|llano|milla|lora|independencia|pinto\s*salina|ejido/.test(txt)) return "Mérida";
+    return "Vigía";
+  }
+
+  function abrirAdelantoGps() {
+    return hoja({
+      titulo: "🗺️ Nuevas Funciones de Mapa y Rutas GPS",
+      cuerpo: `<div class="adelanto-gps-box">
+        <p class="modal-sub">Próxima integración nativa con el motor de inteligencia territorial de campo (inspirado en <strong>SPOTIO</strong>):</p>
+        <div class="periodos periodos-chicos" aria-label="Rutas de cobertura" style="margin-bottom:8px">
+          ${RUTAS_CARTERA.map((r, i) => `<span class="tab${i === 0 ? " active" : ""}">📍 ${esc(r)}</span>`).join("")}
+        </div>
+        <div class="lienzo-mapa-simulado" aria-hidden="true" style="margin-bottom:10px">
+          <span class="pin-sim p-rojo" style="top:26%;left:28%" title="Chivo / Sur del Lago">🔴</span>
+          <span class="pin-sim p-morado" style="top:46%;left:52%" title="El Vigía">🟣</span>
+          <span class="pin-sim p-verde" style="top:34%;left:76%" title="Mérida">🟢</span>
+          <span class="pin-sim p-naranja" style="top:68%;left:38%" title="Mocotíes / Táchira">🟠</span>
+        </div>
+        <ul class="leyenda-pines-skala" style="margin-bottom:10px">
+          <li><span>🔴 Crédito vencido</span></li>
+          <li><span>🟣 Pedido en ruta</span></li>
+          <li><span>🟢 Visitado hoy</span></li>
+          <li><span>🟠 Sin compras &gt;30 días</span></li>
+        </ul>
+        <ul class="resumen-items">
+          <li><span><strong>🗺️ Mapa Interactivo por Rutas</strong><br><span class="ped-det">Visualización en vivo de tus clientes por ruta: Chivo, Vigía, Mérida, Mocotíes, Caja Seca y Táchira.</span></span></li>
+          <li><span><strong>🚚 Ruteo Óptimo VROOM / 2-Opt</strong><br><span class="ped-det">Secuencia automática de paradas de camión (1 → N) para ahorrar tiempo y combustible.</span></span></li>
+          <li><span><strong>📍 Check-in GPS y Geocerca</strong><br><span class="ped-det">Registro automático de visita en sitio, radar de clientes cercanos y frecuencia de atención.</span></span></li>
+        </ul>
+      </div>`,
+      ok: "Entendido",
+    });
+  }
+
   /* ==================== PÁGINAS ==================== */
 
   /* ---------- Ingresar ---------- */
   function vIngresar(v) {
     v.innerHTML = `
       <form class="tarjeta login" id="fLogin" novalidate>
-        <img src="assets/img/web/logo-192.png" alt="Skala" width="72" height="72" class="login-logo" />
-        <h2>Equipo Skala</h2>
+        <img src="assets/img/web/icono-do-transparente.png?v=3" alt="Distribuciones Ontiveros" width="120" height="64" class="login-logo" />
+        <h2>Equipo Distribuciones Ontiveros</h2>
         <p class="modal-sub">Ingresá con tu usuario y clave.</p>
         <label class="field field-full"><span>Usuario</span>
           <input id="lUsuario" name="usuario" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" placeholder="ej. oscar" value="${esc(leerLS(K_ULTIMO_USUARIO, ""))}" />
@@ -402,36 +512,516 @@
   }
 
   /* ---------- Inicio ---------- */
+  const K_INICIO_MODO = "skala_inicio_modo";
+  const K_INICIO_ALCANCE = "skala_inicio_alcance";
+  let periodoRitmoInicio = 7;
+
   async function vInicio(v, _p, _q, vigente) {
     const u = yo();
     const r = rolPedidos();
+    const esMultiRol = gestion() && vende();
+    const leerModoInicio = () => {
+      if (!vende()) return "general";
+      try {
+        const m = sessionStorage.getItem(K_INICIO_MODO);
+        if (m === "general" || m === "vendedor") return m;
+      } catch (_) {}
+      return "vendedor";
+    };
+    const leerAlcanceInicio = () => {
+      if (!esMultiRol) return "mios";
+      try {
+        const a = sessionStorage.getItem(K_INICIO_ALCANCE);
+        if (a === "mios" || a === "todos") return a;
+      } catch (_) {}
+      return tiene("vendedor") ? "mios" : "todos";
+    };
+
     const hora = new Date().getHours();
     const saludo = hora < 12 ? "Buenos días" : hora < 19 ? "Buenas tardes" : "Buenas noches";
     const accesos = [];
     if (vende()) accesos.push(["#/nuevo", "Nuevo pedido", "nuevo"], ["#/pedidos", "Pedidos", "pedidos"], ["#/clientes", "Clientes", "clientes"]);
     if (gestion()) accesos.push(["#/entregas", "Despacho", "entregas"]);
     else if (tiene("despachador")) accesos.push(["#/entregas", "Mis entregas", "entregas"]);
+
+    const cacheTasa = leerLS(K_TASAS_BCV, { ts: 0, mapa: {} });
+    let tasaActiva = 0;
+    if (cacheTasa && cacheTasa.mapa) {
+      const fHoy = hoyIso();
+      if (Number(cacheTasa.mapa[fHoy]) > 0) tasaActiva = Number(cacheTasa.mapa[fHoy]);
+      else {
+        const prev = Object.keys(cacheTasa.mapa).filter((d) => d <= fHoy && Number(cacheTasa.mapa[d]) > 0).sort();
+        if (prev.length) tasaActiva = Number(cacheTasa.mapa[prev[prev.length - 1]]);
+      }
+    }
+
     v.innerHTML = `
-      <section class="saludo"><h2>${saludo}, ${esc(u.nombre.split(" ")[0])}</h2><p>${esc(u.rol_nombre)}</p></section>
-      <div class="stats" id="iStats"><div class="stat"><strong>…</strong><span>cargando</span></div></div>
+      <section class="saludo">
+        <div class="saludo-fila">
+          <div><h2>${saludo}, ${esc(u.nombre.split(" ")[0])}</h2><p>${esc(u.rol_nombre)}</p></div>
+          <span class="chip-bcv-inicio" id="chipTasaBcv">${tasaActiva > 0 ? `BCV: Bs ${formatoNumInput(tasaActiva, true)} / $` : "BCV del día"}</span>
+        </div>
+      </section>
+      ${esMultiRol ? `<div class="inicio-switch-bar" id="iSwitchRol">
+        <div class="iv-modo-tabs" id="iModoTabs" data-pos="0" role="group" aria-label="Modo de vista de inicio">
+          <span class="iv-seg-slider" aria-hidden="true"></span>
+          <button type="button" class="iv-switch-btn" data-inicio-modo="vendedor">
+            <span class="iv-dot-ind" aria-hidden="true"></span>
+            <span class="iv-btn-txt">Vista Vendedor</span>
+          </button>
+          <button type="button" class="iv-switch-btn" data-inicio-modo="general">
+            <span class="iv-dot-ind" aria-hidden="true"></span>
+            <span class="iv-btn-txt">Resumen general</span>
+          </button>
+        </div>
+        <div class="iv-alcance-tabs" id="iAlcanceWrap" data-pos="0" role="group" aria-label="Filtro de cartera en inicio">
+          <span class="iv-seg-slider es-alcance" aria-hidden="true"></span>
+          <button type="button" class="iv-alcance-btn" data-inicio-alcance="mios">
+            <span class="iv-btn-fila-top"><span class="iv-dot-ind" aria-hidden="true"></span><span>Mis ventas</span></span>
+            <span class="iv-btn-pill-meta" id="ivMetaMios">Cargando…</span>
+          </button>
+          <button type="button" class="iv-alcance-btn" data-inicio-alcance="todos">
+            <span class="iv-btn-fila-top"><span class="iv-dot-ind" aria-hidden="true"></span><span>Todos los vendedores</span></span>
+            <span class="iv-btn-pill-meta" id="ivMetaTodos">Cargando…</span>
+          </button>
+        </div>
+        <div class="iv-estado-banner" id="iEstadoVistaBanner" role="status" aria-live="polite"></div>
+      </div>` : ""}
       <div id="iDestacado"></div>
+      <div id="iVendedorWrap" ${vende() ? "" : "hidden"}>
+        <div class="iv-resumen-grid" id="iResumenVendedor"></div>
+        <div class="iv-analytics-grid" id="iAnalyticsVendedor"></div>
+      </div>
+      <div class="stats" id="iStats"><div class="stat"><strong>…</strong><span>cargando</span></div></div>
       <div class="accesos">${accesos.map(([h, t, k]) => `<a class="acceso" href="${h}">${icono(k)}<span>${t}</span></a>`).join("")}</div>
+      <section class="tarjeta tarjeta-prox-gps" id="cardProxRuta" data-gps-slot="inicio-ruta">
+        <div class="prox-gps-cab">
+          <div>
+            <span class="chip-prox">Próximamente</span>
+            <h3 class="prox-gps-tit">Rutero Inteligente y Mapa GPS</h3>
+          </div>
+          <button type="button" class="btn btn-ghost" id="btnVerAdelantoGps">Ver adelanto</button>
+        </div>
+        <p class="ped-det">Ruteo óptimo diario (VROOM / 2-Opt), mapa de clientes con semáforo de deuda y entregas en vivo.</p>
+      </section>
       <h3 class="sub-titulo" id="iListaTit"></h3>
-      <ul class="lista-ped" id="iLista"></ul>`;
-    const abiertos = await api("pedidos", { estados: ["pendiente", "confirmado", "en_ruta"], dias: 60 });
+      <ul class="lista-ped" id="iLista"></ul>
+      <div id="iCargaFondo"></div>`;
+
+    const btnAdelanto = $("btnVerAdelantoGps");
+    if (btnAdelanto) btnAdelanto.addEventListener("click", abrirAdelantoGps);
+
+    let datosListos = false;
+    let todosPedidos = [];
+    let listaPorCobrar = [];
+    let cfgComActual = leerLS(K_COMISION_CFG, { porcentaje_default: 3, por_vendedor: {}, vendedores: [] }) || { porcentaje_default: 3, por_vendedor: {}, vendedores: [] };
+
+    const dispararAnim = (el, cls) => {
+      if (!el) return;
+      el.classList.remove(cls);
+      void el.offsetWidth;
+      el.classList.add(cls);
+    };
+
+    const pintarVistaVendedor = (tipoAnim = "") => {
+      if (!vende() || !datosListos) return;
+      const modo = leerModoInicio();
+      const alcance = leerAlcanceInicio();
+      const wrapVendedor = $("iVendedorWrap");
+      const wrapAlcance = $("iAlcanceWrap");
+      const modoTabs = $("iModoTabs");
+      const switchBar = $("iSwitchRol");
+      const statsEl = $("iStats");
+
+      const vLoc = leerLS(K_VISITADOS_HOY, null);
+      const idsLoc = vLoc && vLoc.fecha === hoyCaracas() && Array.isArray(vLoc.ids) ? vLoc.ids : [];
+      const dLoc = SkalaAPI.datosLocales();
+      const visitasHoy = [
+        ...idsLoc.map((cid) => ({ cliente_id: cid, canal: "en_persona", vendedor_id: u.id })),
+        ...(((dLoc && dLoc.visitas) || []).filter((x) => x.fecha === hoyCaracas() && !x.anulada)),
+      ];
+      const pagadasLocal = leerLS(K_COMISION_PAGADAS, {}) || {};
+      const comCfg = { ...cfgComActual, pagadas_locales: pagadasLocal };
+
+      const uidMio = String(u.id || "");
+      const uidFiltro = !esMultiRol || alcance === "mios" ? uidMio : "";
+      const rv = resumenInicioVendedor({
+        pedidos: todosPedidos,
+        porCobrar: listaPorCobrar,
+        visitasHoy,
+        comisionesCfg: comCfg,
+        uid: uidFiltro,
+        hoy: new Date(),
+        tasaBcv: tasaActiva,
+      });
+
+      if (switchBar) {
+        if (modoTabs) modoTabs.dataset.pos = modo === "general" ? "1" : "0";
+        switchBar.querySelectorAll("[data-inicio-modo]").forEach((b) => {
+          const act = b.dataset.inicioModo === modo;
+          b.classList.toggle("active", act);
+          b.setAttribute("aria-pressed", String(act));
+        });
+        if (wrapAlcance) {
+          wrapAlcance.hidden = modo !== "vendedor";
+          wrapAlcance.dataset.pos = alcance === "todos" ? "1" : "0";
+          wrapAlcance.querySelectorAll("[data-inicio-alcance]").forEach((b) => {
+            const act = b.dataset.inicioAlcance === alcance;
+            b.classList.toggle("active", act);
+            b.setAttribute("aria-pressed", String(act));
+          });
+        }
+        // Actualizar contadores en vivo dentro de cada botón para que se vea qué contiene cada opción
+        const rvMios = alcance === "mios" ? rv : resumenInicioVendedor({
+          pedidos: todosPedidos, porCobrar: listaPorCobrar, visitasHoy, comisionesCfg: comCfg, uid: uidMio, hoy: new Date(), tasaBcv: tasaActiva,
+        });
+        const rvTodos = alcance === "todos" ? rv : resumenInicioVendedor({
+          pedidos: todosPedidos, porCobrar: listaPorCobrar, visitasHoy, comisionesCfg: comCfg, uid: "", hoy: new Date(), tasaBcv: tasaActiva,
+        });
+        const metaMios = $("ivMetaMios");
+        const metaTodos = $("ivMetaTodos");
+        if (metaMios) metaMios.textContent = `${rvMios.pedidosHoy.cantidad} hoy · ${formatoMonto(rvMios.ventasHoy.totalUsd, "$")}`;
+        if (metaTodos) metaTodos.textContent = `${rvTodos.pedidosHoy.cantidad} hoy · ${formatoMonto(rvTodos.ventasHoy.totalUsd, "$")}`;
+
+        const bannerEl = $("iEstadoVistaBanner");
+        if (bannerEl) {
+          if (modo === "general") {
+            bannerEl.className = "iv-estado-banner es-general";
+            bannerEl.innerHTML = `<span class="iv-banner-dot" aria-hidden="true"></span><span>Mostrando: <strong>Resumen general de Administración y Despacho</strong></span>`;
+          } else if (alcance === "mios") {
+            bannerEl.className = "iv-estado-banner es-mios";
+            bannerEl.innerHTML = `<span class="iv-banner-dot" aria-hidden="true"></span><span>Mostrando: <strong>Mis ventas (${esc(u.nombre.split(" ")[0])})</strong> · Hoy ${esc(formatoMonto(rv.ventasHoy.totalUsd, "$"))} (${rv.pedidosHoy.cantidad} ped.)</span>`;
+          } else {
+            bannerEl.className = "iv-estado-banner es-todos";
+            bannerEl.innerHTML = `<span class="iv-banner-dot" aria-hidden="true"></span><span>Mostrando: <strong>Todos los vendedores (Equipo completo)</strong> · Hoy ${esc(formatoMonto(rv.ventasHoy.totalUsd, "$"))} (${rv.pedidosHoy.cantidad} ped.)</span>`;
+          }
+          if (tipoAnim === "modo" || tipoAnim === "alcance") dispararAnim(bannerEl, "iv-banner-pulso");
+        }
+      }
+
+      if (wrapVendedor) wrapVendedor.hidden = modo !== "vendedor";
+      if (statsEl) {
+        if (esMultiRol) statsEl.hidden = modo === "vendedor";
+        else statsEl.classList.toggle("stats-secundario", modo === "vendedor");
+      }
+
+      const txtBs = (montoBs, montoUsd) => {
+        if (tasaActiva > 0) return formatoMonto(montoBs, "Bs");
+        return montoUsd > 0 ? "Bs (según BCV)" : "Bs 0,00";
+      };
+
+      const resEl = $("iResumenVendedor");
+      if (resEl) {
+        const vh = rv.ventasHoy;
+        const ph = rv.pedidosHoy;
+        const cv = rv.cobrarVencido;
+        const cpv = rv.cobrarPorVencer;
+        resEl.innerHTML = `
+          <article class="iv-card iv-card-ventas iv-card-ventas-pedidos" id="ivCardVentasHoy">
+            <div class="iv-vp-top">
+              <div class="iv-vp-ventas-col">
+                <span class="iv-card-kicker">Ventas hoy</span>
+                <strong class="iv-card-total">${esc(formatoMonto(vh.totalUsd, "$"))}</strong>
+              </div>
+              <a class="iv-vp-pedidos-box" id="ivCardPedidosHoy" href="#/pedidos">
+                <span class="iv-vp-ped-lbl">Pedidos hoy</span>
+                <div class="iv-vp-ped-fila">
+                  <strong class="iv-vp-ped-num">${ph.cantidad}</strong>
+                  <span class="iv-vp-ped-cli">${ph.clientesUnicos} cliente${ph.clientesUnicos === 1 ? " hoy" : "s hoy"}</span>
+                </div>
+              </a>
+            </div>
+            <div class="iv-desglose-grid">
+              <div class="iv-sub-box es-bcv">
+                <span class="iv-sub-lbl">Divisas BCV</span>
+                <strong class="iv-sub-val">${esc(formatoMonto(vh.bcvUsd, "$"))}</strong>
+                <span class="iv-sub-bs">${esc(txtBs(vh.bcvBs, vh.bcvUsd))}</span>
+              </div>
+              <div class="iv-sub-box es-efectivo">
+                <span class="iv-sub-lbl">Efectivo ($)</span>
+                <strong class="iv-sub-val">${esc(formatoMonto(vh.efectivoUsd, "$"))}</strong>
+                <span class="iv-sub-bs">Dólares efectivo</span>
+              </div>
+            </div>
+            <a class="iv-vp-footer" href="#/pedidos">
+              <div class="iv-chips-fila">
+                <span class="iv-mini-chip">${ph.enProceso} en proceso</span>
+                <span class="iv-mini-chip">${ph.enDespacho} en despacho</span>
+              </div>
+              <span class="iv-vp-ir">Ver pedidos</span>
+            </a>
+          </article>
+
+          <a class="iv-card card-vencido${cv.pedidosCount > 0 ? " stat-alerta" : ""}" id="ivCardCobrarVencido" href="#/pedidos?tab=cobros&ver=cobrar">
+            <div class="iv-card-head">
+              <span class="iv-card-kicker">Por cobrar · Vencido</span>
+              <span class="iv-card-badge es-rojo">${cv.pedidosCount} fact.</span>
+            </div>
+            <div class="iv-cobro-top">
+              <strong class="iv-clientes-grande">${cv.clientesUnicos} cliente${cv.clientesUnicos === 1 ? "" : "s"} <span class="iv-ped-sec">· ${cv.pedidosCount} pedido${cv.pedidosCount === 1 ? "" : "s"}</span></strong>
+              <strong class="iv-cobro-monto">${esc(formatoMonto(cv.totalUsd, "$"))}</strong>
+            </div>
+            <div class="iv-desglose-grid">
+              <div class="iv-sub-box es-bcv">
+                <span class="iv-sub-lbl">Dólares BCV</span>
+                <strong class="iv-sub-val">${esc(formatoMonto(cv.bcvUsd, "$"))}</strong>
+                <span class="iv-sub-bs">${esc(txtBs(cv.bcvBs, cv.bcvUsd))}</span>
+              </div>
+              <div class="iv-sub-box es-efectivo">
+                <span class="iv-sub-lbl">Efectivo ($)</span>
+                <strong class="iv-sub-val">${esc(formatoMonto(cv.efectivoUsd, "$"))}</strong>
+                <span class="iv-sub-bs">Cobro en efectivo</span>
+              </div>
+            </div>
+          </a>
+
+          <a class="iv-card card-por-vencer${cpv.proximosCount > 0 ? " con-proximo" : ""}" id="ivCardCobrarPorVencer" href="#/pedidos?tab=cobros&ver=cobrar">
+            <div class="iv-card-head">
+              <span class="iv-card-kicker">Por cobrar · Por vencer</span>
+              <span class="iv-card-badge ${cpv.proximosCount > 0 ? "es-ambar" : "es-verde"}">${cpv.proximosCount > 0 ? `${cpv.proximosCount} ≤ 3 días` : "Al día"}</span>
+            </div>
+            <div class="iv-cobro-top">
+              <strong class="iv-clientes-grande">${cpv.clientesUnicos} cliente${cpv.clientesUnicos === 1 ? "" : "s"} <span class="iv-ped-sec">· ${cpv.pedidosCount} pedido${cpv.pedidosCount === 1 ? "" : "s"}</span></strong>
+              <strong class="iv-cobro-monto">${esc(formatoMonto(cpv.totalUsd, "$"))}</strong>
+            </div>
+            <div class="iv-desglose-grid">
+              <div class="iv-sub-box es-bcv">
+                <span class="iv-sub-lbl">Dólares BCV</span>
+                <strong class="iv-sub-val">${esc(formatoMonto(cpv.bcvUsd, "$"))}</strong>
+                <span class="iv-sub-bs">${esc(txtBs(cpv.bcvBs, cpv.bcvUsd))}</span>
+              </div>
+              <div class="iv-sub-box es-efectivo">
+                <span class="iv-sub-lbl">Efectivo ($)</span>
+                <strong class="iv-sub-val">${esc(formatoMonto(cpv.efectivoUsd, "$"))}</strong>
+                <span class="iv-sub-bs">Cobro en efectivo</span>
+              </div>
+            </div>
+          </a>`;
+      }
+
+      const anaEl = $("iAnalyticsVendedor");
+      if (anaEl) {
+        const cyc = rv.cobrosYComision;
+        const ch = cyc.cobrosHoy;
+        const com = cyc.comisiones;
+        const ritmoAct = periodoRitmoInicio === 30 ? rv.ritmo.d30 : rv.ritmo.d7;
+        const cob = rv.coberturaHoy;
+        const topP = rv.topProductos;
+
+        anaEl.innerHTML = `
+          <section class="tarjeta iv-ana-card" id="ivAnaComision">
+            <div class="iv-ana-head">
+              <div>
+                <h3 class="iv-ana-tit">Mi Comisión y Cobros de Hoy</h3>
+                <p class="ped-det">${com.pendientesCount} comisión(es) por cobrar · ${ch.cantidad} cobro(s) hoy</p>
+              </div>
+              <a class="btn btn-ghost iv-btn-link" href="#/pedidos?tab=cobros&ver=comisiones">Comisiones</a>
+            </div>
+            <div class="iv-desglose-grid">
+              <div class="iv-sub-box es-com-ef">
+                <span class="iv-sub-lbl">Comisión · Efectivo ($)</span>
+                <strong class="iv-sub-val">${esc(formatoMonto(com.efectivoUsd, "$"))}</strong>
+                <span class="iv-sub-bs">Por liquidar en $</span>
+              </div>
+              <div class="iv-sub-box es-com-bs">
+                <span class="iv-sub-lbl">Comisión · BCV (Bs)</span>
+                <strong class="iv-sub-val">${esc(formatoMonto(com.bcvBs, "Bs"))}</strong>
+                <span class="iv-sub-bs">Equiv. ${esc(formatoMonto(com.bcvUsd, "$"))}</span>
+              </div>
+            </div>
+            <div class="iv-cobros-hoy-linea">
+              <span>Cobrado hoy: <strong>${esc(formatoMonto(ch.efectivoUsd, "$"))}</strong> efec. + <strong>${esc(formatoMonto(ch.bs, "Bs"))}</strong></span>
+              ${ch.pendientesConciliar > 0 ? `<span class="iv-chip-conc">${ch.pendientesConciliar} por conciliar</span>` : ""}
+            </div>
+          </section>
+
+          <section class="tarjeta iv-ana-card" id="ivAnaRadar">
+            <div class="iv-ana-head">
+              <div>
+                <h3 class="iv-ana-tit">Radar de Cobranza Urgente</h3>
+                <p class="ped-det">Top clientes con saldo vencido</p>
+              </div>
+              <a class="btn btn-ghost iv-btn-link" href="#/pedidos?tab=cobros&ver=cobrar">Ver todos</a>
+            </div>
+            ${rv.topVencidos.length
+              ? `<ul class="iv-radar-lista">${rv.topVencidos.map((it) => `
+                <li class="iv-radar-item">
+                  <div class="iv-radar-info">
+                    <strong>${esc(it.negocio)}</strong>
+                    <span class="ped-det">${esc(it.id)} · <span class="iv-mod-tag ${it.modalidad === "Efectivo" ? "es-ef" : "es-bcv"}">${esc(it.modalidad)}</span> · ${esc(it.textoEstado)}</span>
+                    <strong class="iv-radar-saldo">${esc(formatoMonto(it.saldoUsd, "$"))}</strong>
+                  </div>
+                  <div class="iv-radar-acciones">
+                    <a class="btn btn-primary iv-radar-btn" href="#/pedido/${encodeURIComponent(it.id)}">Cobrar</a>
+                    ${it.telefonoWhatsapp ? `<a class="btn btn-ghost iv-radar-btn" href="https://wa.me/${esc(it.telefonoWhatsapp)}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(it.negocio)}">WA</a>` : ""}
+                  </div>
+                </li>`).join("")}</ul>`
+              : `<p class="iv-vacio-ok">Sin facturas vencidas pendientes de cobro.</p>`}
+          </section>
+
+          <section class="tarjeta iv-ana-card" id="ivAnaRitmo">
+            <div class="iv-ana-head">
+              <div>
+                <h3 class="iv-ana-tit">Ritmo Comercial ($)</h3>
+                <p class="ped-det">Mostrando: <strong>Últimos ${periodoRitmoInicio} días</strong> (${ritmoAct.pedidos} ped.)</p>
+              </div>
+              <div class="iv-ritmo-tabs" data-pos="${periodoRitmoInicio === 30 ? "1" : "0"}" role="group" aria-label="Período de ritmo comercial">
+                <span class="iv-seg-slider es-ritmo" aria-hidden="true"></span>
+                <button type="button" class="iv-ritmo-btn${periodoRitmoInicio === 7 ? " active" : ""}" data-iv-ritmo="7" aria-pressed="${periodoRitmoInicio === 7}">
+                  <span class="iv-dot-ind" aria-hidden="true"></span><span>7d (${rv.ritmo.d7.pedidos})</span>
+                </button>
+                <button type="button" class="iv-ritmo-btn${periodoRitmoInicio === 30 ? " active" : ""}" data-iv-ritmo="30" aria-pressed="${periodoRitmoInicio === 30}">
+                  <span class="iv-dot-ind" aria-hidden="true"></span><span>30d (${rv.ritmo.d30.pedidos})</span>
+                </button>
+              </div>
+            </div>
+            <div class="iv-ritmo-cuerpo" id="ivRitmoCuerpo">
+              <div class="iv-ritmo-hero">
+                <div>
+                  <span class="iv-sub-lbl">Total ventas (${periodoRitmoInicio} días)</span>
+                  <strong class="iv-ritmo-total">${esc(formatoMonto(ritmoAct.totalUsd, "$"))}</strong>
+                </div>
+                <div class="iv-ritmo-ticket">
+                  <span class="iv-sub-lbl">Ticket prom.</span>
+                  <strong>${esc(formatoMonto(ritmoAct.ticketPromedioUsd, "$"))}</strong>
+                </div>
+              </div>
+              <div class="iv-barra-bicolor" aria-label="Proporción BCV vs Efectivo">
+                <div class="iv-barra-bcv" style="width:${ritmoAct.totalUsd > 0 ? ritmoAct.pctBcv : 50}%"></div>
+                <div class="iv-barra-ef" style="width:${ritmoAct.totalUsd > 0 ? ritmoAct.pctEfectivo : 50}%"></div>
+              </div>
+              <div class="iv-desglose-grid">
+                <div class="iv-sub-box es-bcv">
+                  <span class="iv-sub-lbl">Divisas BCV (${ritmoAct.pctBcv}%)</span>
+                  <strong class="iv-sub-val">${esc(formatoMonto(ritmoAct.bcvUsd, "$"))}</strong>
+                </div>
+                <div class="iv-sub-box es-efectivo">
+                  <span class="iv-sub-lbl">Efectivo (${ritmoAct.pctEfectivo}%)</span>
+                  <strong class="iv-sub-val">${esc(formatoMonto(ritmoAct.efectivoUsd, "$"))}</strong>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="tarjeta iv-ana-card" id="ivAnaTopCobertura">
+            <div class="iv-ana-head">
+              <div>
+                <h3 class="iv-ana-tit">Top 3 Productos y Cobertura</h3>
+                <p class="ped-det">Últimos 30 días en $ · Clientes atendidos hoy</p>
+              </div>
+            </div>
+            <div class="iv-cobertura-grid">
+              <div class="iv-cob-pill">
+                <span>En persona hoy</span>
+                <strong>${cob.en_persona}</strong>
+              </div>
+              <div class="iv-cob-pill">
+                <span>Online / Tel. hoy</span>
+                <strong>${cob.online_telefono}</strong>
+              </div>
+            </div>
+            ${topP.length
+              ? `<ul class="iv-top-prods">${topP.map((pr, idx) => `
+                <li class="iv-top-prod-item">
+                  <span class="iv-top-rank">${idx + 1}</span>
+                  <div class="iv-top-prod-info">
+                    <strong>${esc(pr.producto)}</strong>
+                    <span class="ped-det">${pr.cajas} caja${pr.cajas === 1 ? "" : "s"} · ${pr.pedidos} ped.</span>
+                  </div>
+                  <strong class="iv-top-prod-usd">${esc(formatoMonto(pr.totalUsd, "$"))}</strong>
+                </li>`).join("")}</ul>`
+              : `<p class="ped-det iv-vacio-chico">Sin ventas registradas en los últimos 30 días.</p>`}
+          </section>`;
+      }
+
+      if (tipoAnim === "modo" || tipoAnim === "alcance") {
+        dispararAnim(modo === "vendedor" ? wrapVendedor : statsEl, "iv-vista-animando");
+      } else if (tipoAnim === "ritmo") {
+        dispararAnim($("ivRitmoCuerpo"), "iv-ritmo-animando");
+      }
+
+      // Actualizar lista inferior según alcance activo
+      const todosPend = todosPedidos.filter((p) => p.estado === "pendiente");
+      const misPend = uidFiltro ? todosPend.filter((p) => String(p.vendedor_id) === uidFiltro) : todosPend;
+      const usarMios = r === "vendedor" || (modo === "vendedor" && alcance === "mios" && misPend.length > 0);
+      const listaDest = (usarMios ? misPend : todosPend).slice(0, 5);
+      const titEl = $("iListaTit");
+      const ulEl = $("iLista");
+      if (titEl && ulEl && !soloDespacha()) {
+        titEl.textContent = listaDest.length ? (usarMios ? "Tus pedidos en proceso" : "Por aprobar") : "";
+        ulEl.innerHTML = listaDest.map((p) => filaPedido(p)).join("");
+      }
+    };
+
+    const switchEl = $("iSwitchRol");
+    if (switchEl) {
+      switchEl.addEventListener("click", (e) => {
+        const bModo = e.target.closest("[data-inicio-modo]");
+        if (bModo) {
+          if (bModo.dataset.inicioModo === leerModoInicio()) {
+            dispararAnim($("iEstadoVistaBanner"), "iv-banner-pulso");
+            return;
+          }
+          try { sessionStorage.setItem(K_INICIO_MODO, bModo.dataset.inicioModo); } catch (_) {}
+          pintarVistaVendedor("modo");
+          return;
+        }
+        const bAlc = e.target.closest("[data-inicio-alcance]");
+        if (bAlc) {
+          if (bAlc.dataset.inicioAlcance === leerAlcanceInicio()) {
+            dispararAnim($("iEstadoVistaBanner"), "iv-banner-pulso");
+            return;
+          }
+          try { sessionStorage.setItem(K_INICIO_ALCANCE, bAlc.dataset.inicioAlcance); } catch (_) {}
+          pintarVistaVendedor("alcance");
+        }
+      });
+    }
+
+    const wrapVendEl = $("iVendedorWrap");
+    if (wrapVendEl) {
+      wrapVendEl.addEventListener("click", (e) => {
+        const bRitmo = e.target.closest("[data-iv-ritmo]");
+        if (!bRitmo) return;
+        const nuevoPer = Number(bRitmo.dataset.ivRitmo) === 30 ? 30 : 7;
+        periodoRitmoInicio = nuevoPer;
+        pintarVistaVendedor("ritmo");
+      });
+    }
+
+    obtenerTasaBcv(hoyIso()).then((info) => {
+      const el = $("chipTasaBcv");
+      if (info && info.tasa > 0) {
+        tasaActiva = info.tasa;
+        if (el) el.textContent = `BCV: Bs ${formatoNumInput(info.tasa, true)} / $`;
+        if (vigente() && datosListos) pintarVistaVendedor();
+      }
+    }).catch(() => {});
+
+    if (vende() && !leerLS(K_COMISION_CFG, null)) {
+      obtenerConfigComisiones(false).then((cfg) => {
+        if (cfg && vigente()) {
+          cfgComActual = cfg;
+          if (datosListos) pintarVistaVendedor();
+        }
+      }).catch(() => {});
+    }
+
+    const abiertos = await api("pedidos", { dias: 60 });
     if (!vigente()) return;
     const c = { pendiente: 0, confirmado: 0, en_ruta: 0 };
-    abiertos.pedidos.forEach((p) => (c[p.estado] = (c[p.estado] || 0) + 1));
+    abiertos.pedidos.forEach((p) => { if (c[p.estado] !== undefined) c[p.estado] = (c[p.estado] || 0) + 1; });
     const tile = (n, t, h) => `<a class="stat" href="${h}"><strong>${n}</strong><span>${t}</span></a>`;
     let tiles = "";
     let destacados = [];
     let destacadoHtml = "";
+    let cargaHtml = "";
     if (tiene("despachador")) {
       // Sus entregas (con varios roles, solo las asignadas a él)
       const mias = abiertos.pedidos.filter((p) => String(p.despachador_id) === String(u.id) && ["confirmado", "en_ruta"].includes(p.estado));
       const carga = totalCarga(mias);
       if (carga.cajas) {
-        destacadoHtml += `<section class="tarjeta carga-hoy"><p>Hoy tenés por entregar</p>
+        cargaHtml += `<section class="tarjeta carga-hoy"><p>Hoy tenés por entregar</p>
           <p class="carga-grande"><strong>${carga.cajas}</strong> cajas</p><p class="ped-det">${carga.pedidos} pedido(s)${carga.unidades ? " · " + esc(carga.unidades) : ""}</p>
           <button type="button" class="btn btn-primary btn-bloque" id="btnCargaTodo">Ver total de carga</button></section>`;
       }
@@ -442,11 +1032,11 @@
       }
     }
     if (vende()) {
-      const gestion = r !== "vendedor";
+      const esGestion = r !== "vendedor";
       const [hoy, porCobrar, porConciliar, web] = await Promise.all([
         api("resumen", { dias: 1 }),
         api("pedidos", { por_cobrar: true }),
-        gestion ? api("pedidos", { por_conciliar: true }) : Promise.resolve({ pedidos: [] }),
+        esGestion ? api("pedidos", { por_conciliar: true }) : Promise.resolve({ pedidos: [] }),
         api("pedidosWeb").catch(() => ({ pedidos: [] })),
       ]);
       if (!vigente()) return;
@@ -460,15 +1050,24 @@
         tile(c.pendiente, r === "vendedor" ? "en proceso" : "por aprobar", r === "vendedor" ? "#/pedidos?tab=curso" : "#/pedidos?tab=hacer") +
         tile(c.confirmado + c.en_ruta, "en despacho", "#/pedidos?tab=curso") +
         `<a class="stat${vencidos ? " stat-alerta" : ""}" href="#/pedidos?tab=cobros&ver=cobrar"><strong>${vencidos}</strong><span>crédito vencido${proximos ? ` · ${proximos} por vencer` : ""}</span></a>` +
-        (gestion ? tile(porConciliar.pedidos.length, "por conciliar", "#/pedidos?tab=cobros&ver=conciliar") : tile(porCobrar.pedidos.length, "por cobrar", "#/pedidos?tab=cobros&ver=cobrar"));
+        (esGestion ? tile(porConciliar.pedidos.length, "por conciliar", "#/pedidos?tab=cobros&ver=conciliar") : tile(porCobrar.pedidos.length, "por cobrar", "#/pedidos?tab=cobros&ver=cobrar"));
       destacados = abiertos.pedidos.filter((p) => p.estado === "pendiente").slice(0, 5);
       $("iListaTit").textContent = destacados.length ? (r === "vendedor" ? "Tus pedidos en proceso" : "Por aprobar") : "";
+
+      const mapaPed = {};
+      abiertos.pedidos.concat(porCobrar.pedidos || []).forEach((p) => { if (p && p.id) mapaPed[p.id] = p; });
+      todosPedidos = Object.values(mapaPed);
+      listaPorCobrar = porCobrar.pedidos || [];
+      datosListos = true;
     }
     $("iDestacado").innerHTML = destacadoHtml;
+    const cargaFondoEl = $("iCargaFondo");
+    if (cargaFondoEl) cargaFondoEl.innerHTML = cargaHtml;
     const bc = $("btnCargaTodo");
     if (bc) bc.addEventListener("click", () => { sessionStorage.removeItem(K_CARGA); ir("#/carga"); });
     $("iStats").innerHTML = tiles;
     $("iLista").innerHTML = destacados.map((p) => filaPedido(p)).join("");
+    if (datosListos) pintarVistaVendedor();
   }
 
   /* ---------- Nuevo pedido: 2) productos (cuadrícula: tocar = sumar una caja) ---------- */
@@ -488,27 +1087,75 @@
     }).catch(() => {});
     return mapa;
   }
-  function vNuevoProductos(v, _p, _q, vigente) {
-    const cli = clienteElegido(); // puede faltar: el cliente se elige antes o después
+  let modoVentaNuevo = "caja"; // "caja" (por defecto) o "unidad" (cuando el grupo permite venta por unidad, arranca en 6 unidades)
+  function vNuevoProductos(v, _p, q, vigente) {
+    if (q && q.has("p")) return importarEnlace(q);
+    iniciarCapturaGpsSilenciosa(); // calibra el GPS mientras elige productos (sugerencia de cliente cercano)
+    const cli = clienteElegido(); // el cliente se selecciona después de elegir los productos (o antes desde Clientes)
     const g0 = SkalaAPI.catalogoGuardado();
     if (g0) sumarProductosNuevos(g0.productos);
-    const productos = [...BANOS.map((p) => ({ ...p, tipo: "banos" })), ...KITS.map((p) => ({ ...p, tipo: "kits" }))];
+    const esDist = typeof GRUPOS_DISTRIBUIDORA !== "undefined" && Array.isArray(GRUPOS_DISTRIBUIDORA);
+    const productos = [...BANOS.map((p) => ({ ...p, tipo: p.tipo || "banos", grupo: p.grupoNombre || "Baño de crema 1 kg" })), ...KITS.map((p) => ({ ...p, tipo: "kits", grupo: "Kit shampoo + acond." }))];
+    const cfgGrupos = leerConfigGrupos();
+    const permiteUnidades = Object.values(cfgGrupos).some((g) => g && g.permite_unidad) || Object.values(leerModalidadVentaMap()).some((m) => m === "unidad" || m === "ambos");
+    if (!permiteUnidades) modoVentaNuevo = "caja";
     let precios = {};
-    v.innerHTML = `${pasos(2)}${avisoWeb()}
-      ${cli ? `<a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>`
-        : '<a class="cliente-elegido sin-cliente" href="#/nuevo"><span>Para</span><strong>Sin cliente todavía</strong><em>Elegir</em></a>'}
-      <div class="buscador"><input type="search" id="nBuscar" placeholder="Buscar producto o código" autocomplete="off" enterkeyhint="search" value="${esc(busquedaNuevo)}" /></div>
-      <div class="periodos" id="nFiltros">${[["todos", "Todos"], ["banos", "Baños de crema"], ["kits", "Kits"], ["elegidos", "Elegidos"]].map(([k, t]) =>
+    const pestanasFiltroNuevo = esDist
+      ? [
+          ["todos", "Todos"],
+          ["Detergentes", "Detergentes"],
+          ["Suavizantes", "Suavizantes"],
+          ["Cuidado Personal", "Cuidado Personal"],
+          ["Bebé y Pañales", "Bebé y Pañales"],
+          ["Hogar y Papel", "Hogar y Papel"],
+          ["Skala", "Skala"],
+          ["elegidos", "Elegidos"],
+        ]
+      : [
+          ["todos", "Todos"],
+          ["banos", "Baños 1 kg"],
+          ["kits", "Kits Dúo"],
+          ["Hidratación", "Hidratación"],
+          ["Nutrición", "Nutrición"],
+          ["Reconstrucción", "Reconstrucción"],
+          ["Definición", "Definición"],
+          ["elegidos", "Elegidos"],
+        ];
+    v.innerHTML = `${pasos(1)}${avisoWeb()}
+      <div class="cat-hero-panel">
+        <div class="cat-hero-txt">
+          <span class="cat-eyebrow">Distribuciones Ontiveros · ${esDist ? "Catálogo General" : "División Skala Brasil"}</span>
+          <h3>Elegí los productos del pedido</h3>
+          <p>Tocá cualquier tarjeta o usá <strong>+</strong> para sumar cajas. Después seleccionás el cliente.</p>
+        </div>
+        ${cli ? `<a class="cliente-elegido" href="#/nuevo/cliente"><span>Cliente</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>`
+          : '<a class="cliente-elegido sin-cliente" href="#/nuevo/cliente"><span>Paso siguiente</span><strong>Seleccionar cliente después de elegir productos</strong><em>Elegir ya</em></a>'}
+      </div>
+      <div class="barra-buscador-vista">
+        <div class="buscador"><input type="search" id="nBuscar" placeholder="🔍 Buscar producto, código, línea o beneficio…" autocomplete="off" enterkeyhint="search" value="${esc(busquedaNuevo)}" /></div>
+        ${selectorVistaCatHTML()}
+      </div>
+      ${permiteUnidades ? `<div class="periodos periodos-chicos" id="nModoUnidad" role="group" aria-label="Modo de venta">
+        <button type="button" class="tab${modoVentaNuevo === "caja" ? " active" : ""}" data-modo-u="caja">📦 Por Caja</button>
+        <button type="button" class="tab${modoVentaNuevo === "unidad" ? " active" : ""}" data-modo-u="unidad">🧴 Por Unidad (mín. 6)</button>
+      </div>` : ""}
+      <div class="periodos" id="nFiltros">${pestanasFiltroNuevo.map(([k, t]) =>
         `<button type="button" class="tab${k === filtroNuevo ? " active" : ""}" data-f="${k}">${t}</button>`).join("")}</div>
       <p class="nota-chica nivel-aviso" id="nNivel" aria-live="polite"></p>
-      <ul class="grilla-prod" id="nLista">${productos.map((p) => `
-        <li class="pcard" data-code="${p.code}" data-tipo="${p.tipo}" data-texto="${esc((p.name + " " + p.code + " " + p.line).toLowerCase())}">
+      <div class="progreso-mayor" id="nProgresoMayor"><div class="progreso-mayor-fill" id="nProgresoFill"></div></div>
+      <ul class="grilla-prod grilla-catalogo-principal" id="nLista">${productos.map((p) => `
+        <li class="pcard pcard-catalogo" data-code="${p.code}" data-tipo="${p.tipo}" data-linea="${esc(p.line || "")}" data-marca="${esc(p.marca || "")}" data-texto="${esc((p.name + " " + p.code + " " + (p.line || "") + " " + (p.marca || "") + " " + (p.benefit || "")).toLowerCase())}">
           <button type="button" class="pcard-tap" data-act="plus" aria-label="Sumar una caja de ${esc(p.name)}">
-            ${fotoHTML(p.code, { ancho: 64, alto: 51 })}
+            <div class="pcard-img-wrap">
+              ${fotoHTML(p.code, { ancho: 260, alto: 206 })}
+              <span class="pcard-stock" data-stock></span>
+            </div>
+            <span class="pcard-line">${esc(p.line || p.grupo)}</span>
             <strong>${esc(p.name)}</strong>
-            <span class="pcard-sub">${p.code} · ${esc(textoUnidades(p))}</span>
+            ${p.benefit ? `<span class="pcard-benefit">${esc(p.benefit)}</span>` : ""}
+            <span class="pcard-meta">${!esDist && p.hair ? `<span class="pcard-hair">${esc(p.hair)} ${iconosCabelloHTML(p.hair)}</span> · ` : ""}${esc(textoUnidades(p))}</span>
+            <span class="pcard-sub">Ref. ${p.code} · ${esc(textoUnidades(p))}</span>
             <span class="pcard-precio" data-precio></span>
-            <span class="pcard-stock" data-stock></span>
           </button>
           <b class="pcard-n" aria-hidden="true"></b>
           <div class="pcard-qty">
@@ -521,11 +1168,13 @@
       <div class="barra-accion" id="nBarra">
         <div><strong id="nTotal">0 cajas</strong><span id="nDetalle"></span></div>
         <button type="button" class="btn btn-ghost" id="nVaciar">Vaciar</button>
-        <a class="btn btn-primary" id="nSeguir" href="#/nuevo/enviar">Continuar</a>
+        <a class="btn btn-primary" id="nSeguir" href="${cli ? "#/nuevo/enviar" : "#/nuevo/cliente"}">${cli ? "Continuar" : "Elegir cliente →"}</a>
       </div>`;
     const lista = $("nLista");
+    enlazarSelectorVistaCat(v, lista);
     const pintar = () => {
       const c = carrito();
+      const cliAct = clienteElegido();
       let total = 0, prods = 0;
       Object.values(c).forEach((n) => { total += Number(n) || 0; });
       const nivel = nivelPrecio(total, excepcionMayor());
@@ -553,8 +1202,18 @@
       $("nNivel").textContent = !total ? `Precio al por menor; desde ${CAJAS_MAYOR} cajas, precio al mayor.`
         : nivel === "mayor" ? (total >= CAJAS_MAYOR ? `Precio al mayor (${total} cajas).` : "Precio al mayor por excepción.")
         : `Precio al por menor · faltan ${CAJAS_MAYOR - total} caja${CAJAS_MAYOR - total === 1 ? "" : "s"} para el precio al mayor.`;
-      $("nSeguir").classList.toggle("is-disabled", !total);
-      $("nSeguir").setAttribute("aria-disabled", String(!total));
+      const progEl = $("nProgresoMayor");
+      const fillEl = $("nProgresoFill");
+      if (progEl && fillEl) {
+        const pct = nivel === "mayor" ? 100 : Math.min(100, Math.round((total / CAJAS_MAYOR) * 100));
+        fillEl.style.width = `${pct}%`;
+        progEl.classList.toggle("completo", nivel === "mayor" || total >= CAJAS_MAYOR);
+      }
+      const btnSeguir = $("nSeguir");
+      btnSeguir.classList.toggle("is-disabled", !total);
+      btnSeguir.setAttribute("aria-disabled", String(!total));
+      btnSeguir.textContent = cliAct ? "Continuar" : "Elegir cliente →";
+      btnSeguir.setAttribute("href", cliAct ? "#/nuevo/enviar" : "#/nuevo/cliente");
       $("nVaciar").hidden = !total;
       pintarNav("nuevo");
       filtrar();
@@ -564,7 +1223,11 @@
       const c = carrito();
       let visibles = 0;
       lista.querySelectorAll(".pcard").forEach((li) => {
-        const okF = filtroNuevo === "todos" || li.dataset.tipo === filtroNuevo || (filtroNuevo === "elegidos" && Number(c[li.dataset.code]) > 0);
+        const okF = filtroNuevo === "todos"
+          || li.dataset.tipo === filtroNuevo
+          || li.dataset.linea === filtroNuevo
+          || li.dataset.marca === filtroNuevo
+          || (filtroNuevo === "elegidos" && Number(c[li.dataset.code]) > 0);
         const ok = okF && (!q || li.dataset.texto.includes(q));
         li.hidden = !ok; if (ok) visibles++;
       });
@@ -585,9 +1248,33 @@
       const li = b.closest(".pcard");
       const code = li.dataset.code;
       const actual = Number(carrito()[code]) || 0;
-      fijar(code, actual + (b.dataset.act === "plus" ? 1 : -1));
+      const mv = modoVentaProducto(code);
+      const usaUnidad = mv === "unidad" || (mv === "ambos" && modoVentaNuevo === "unidad");
+      const salto = b.dataset.act === "plus" ? (usaUnidad && actual === 0 ? 6 : 1) : -1;
+      fijar(code, actual + salto);
       if (b.dataset.act === "plus") { li.classList.remove("pulso"); void li.offsetWidth; li.classList.add("pulso"); }
     });
+    lista.addEventListener("focusin", (e) => {
+      if (e.target.classList.contains("qty-input") && modoVentaNuevo === "unidad") {
+        const li = e.target.closest(".pcard");
+        const code = li && li.dataset.code;
+        if (code && !(Number(carrito()[code]) > 0)) {
+          e.target.value = "6";
+          fijar(code, 6);
+          setTimeout(() => { try { e.target.select(); } catch (_) {} }, 0);
+        }
+      }
+    });
+    const elModoU = $("nModoUnidad");
+    if (elModoU) {
+      elModoU.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-modo-u]");
+        if (!btn) return;
+        modoVentaNuevo = btn.dataset.modoU === "unidad" ? "unidad" : "caja";
+        elModoU.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === btn));
+        toast(modoVentaNuevo === "unidad" ? "Modo Por Unidad activo: empieza en 6 unidades por defecto" : "Modo Por Caja activo");
+      });
+    }
     lista.addEventListener("input", (e) => {
       if (e.target.classList.contains("qty-input")) fijar(e.target.closest(".pcard").dataset.code, e.target.value);
     });
@@ -603,27 +1290,38 @@
     $("nVaciar").addEventListener("click", async () => {
       if (await hoja({ titulo: "¿Vaciar el pedido?", cuerpo: '<p class="modal-sub">Se quitan todos los productos elegidos.</p>', ok: "Vaciar" })) { guardarCarrito({}); guardarLS(K_MAYOR, false); borrarLS(K_PRECIOS_MANUAL); pintar(); }
     });
-    $("nSeguir").addEventListener("click", (e) => { e.preventDefault(); irAEnviar(); });
+    $("nSeguir").addEventListener("click", (e) => {
+      e.preventDefault();
+      if (!cajasCarrito()) {
+        toast("Elegí al menos un producto del catálogo para continuar.");
+        return;
+      }
+      if (!clienteElegido()) {
+        ir("#/nuevo/cliente");
+        return;
+      }
+      ir("#/nuevo/enviar");
+    });
     enlazarAvisoWeb();
     return preciosYStock((m) => { if (vigente() && $("nLista") === lista) { precios = m; pintar(); } }, () => { if (vigente() && $("nLista") === lista) render(); })
       .then((m) => { precios = m; pintar(); });
   }
 
   /* ---------- Nuevo pedido: pasos ---------- */
-  /* Pasos: 1 Cliente y 2 Productos se hacen en el orden que quieras; 3 Enviar pide los dos */
+  /* Pasos: 1 Productos (Catálogo) → 2 Cliente → 3 Enviar */
   function pasos(n) {
-    const listo = [!!clienteElegido(), cajasCarrito() > 0];
-    const p = [["#/nuevo", "Cliente"], ["#/nuevo/productos", "Productos"], ["#/nuevo/enviar", "Enviar"]];
+    const listo = [cajasCarrito() > 0, !!clienteElegido()];
+    const p = [["#/nuevo", "Productos"], ["#/nuevo/cliente", "Cliente"], ["#/nuevo/enviar", "Enviar"]];
     return `<ol class="pasos">${p.map(([h, t], i) => {
       const cls = [i + 1 === n ? "actual" : "", i < 2 && listo[i] ? "hecho" : ""].filter(Boolean).join(" ");
       return `<li class="${cls}" data-paso="${i + 1}"><a href="${h}"${i === 2 ? " data-enviar" : ""}${i + 1 === n ? ' aria-current="step"' : ""}><b>${i < 2 && listo[i] && i + 1 !== n ? "✓" : i + 1}</b>${t}</a></li>`;
     }).join("")}</ol>`;
   }
-  /* Ir a Enviar: si falta el cliente o los productos, se marca en rojo lo que falta y en verde lo que está */
+  /* Ir a Enviar: si falta los productos o el cliente, se marca en rojo lo que falta y en verde lo que está */
   function irAEnviar() {
     const falta = [];
-    if (!clienteElegido()) falta.push(1);
-    if (!cajasCarrito()) falta.push(2);
+    if (!cajasCarrito()) falta.push(1);
+    if (!clienteElegido()) falta.push(2);
     if (!falta.length) return ir("#/nuevo/enviar");
     document.querySelectorAll(".pasos li[data-paso]").forEach((li) => {
       const k = Number(li.dataset.paso);
@@ -632,7 +1330,7 @@
       void li.offsetWidth;
       li.classList.add(falta.includes(k) ? "falta-anim" : "ok-anim");
     });
-    toast(falta.length === 2 ? "Falta elegir el cliente y los productos." : falta[0] === 1 ? "Falta elegir el cliente." : "Falta elegir los productos.");
+    toast(falta.length === 2 ? "Falta elegir los productos y el cliente." : falta[0] === 1 ? "Falta elegir los productos." : "Falta elegir el cliente.");
     if (navigator.vibrate) try { navigator.vibrate(60); } catch (e) {}
   }
   /* Cliente del pedido en curso (guardado en el teléfono). _listo = ya elegido/confirmado */
@@ -641,9 +1339,14 @@
 
   function fichaCliente(c) {
     const mapa = linkMapa(c.latitud, c.longitud);
+    const ruta = rutaDeCliente(c);
     return `<section class="tarjeta ficha-cli" id="fichaCli">
       <div class="fila-top">
-        <div><h2 class="ped-titulo">${esc(c.negocio || c.contacto)}</h2>${c.negocio && c.contacto ? `<p class="ped-det">${esc(c.contacto)}</p>` : ""}</div>
+        <div>
+          <h2 class="ped-titulo">${esc(c.negocio || c.contacto)}</h2>
+          ${c.negocio && c.contacto ? `<p class="ped-det">${esc(c.contacto)}</p>` : ""}
+          <span class="chip-ruta-cli ruta-${slugRuta(ruta)}" style="margin-top:4px">📍 Ruta: ${esc(ruta)}</span>
+        </div>
         <button type="button" class="btn-lapiz" id="btnLapiz" aria-label="Editar datos del cliente" title="Editar datos">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4" /></svg></button>
       </div>
@@ -658,19 +1361,50 @@
   }
 
   /* Formulario de cliente (nuevo o editar con el lápiz) */
+  const TEXTOS_CANAL_ALTA = {
+    en_persona: "📍 En persona (Estoy en el local · Guardar GPS automático)",
+    online_telefono: "📱 Online / Por teléfono (Sin ubicación GPS)",
+  };
+  /* Alta de cliente: "en persona" rellena latitud/longitud con la lectura GPS (o la toma al instante);
+     "online" las limpia para no guardar jamás la ubicación de la casa/oficina del vendedor. */
+  function enlazarCanalAlta(nombreRadio, latEl, lngEl, botonGps, pintar) {
+    const radios = document.querySelectorAll(`input[name="${nombreRadio}"]`);
+    radios.forEach((rd) => rd.addEventListener("change", () => {
+      if (!rd.checked) return;
+      if (rd.value === "online_telefono") { latEl.value = ""; lngEl.value = ""; pintar(); return; }
+      const f = fixVigente();
+      if (f) { latEl.value = r6(f.lat).toFixed(6); lngEl.value = r6(f.lng).toFixed(6); pintar(f.accuracy); }
+      else if (botonGps) tomarGps(botonGps, (lat, lng, prec) => { latEl.value = lat; lngEl.value = lng; pintar(prec); });
+    }));
+    const marcarListo = () => {
+      const el = document.querySelector("[data-canal-gps]");
+      if (el && fixVigente()) el.textContent = `📡 GPS listo (±${Math.round(fixVigente().accuracy || 0)} m)`;
+      const sel = document.querySelector(`input[name="${nombreRadio}"]:checked`);
+      if (sel && sel.value === "en_persona" && !latEl.value && fixVigente()) {
+        latEl.value = r6(fixVigente().lat).toFixed(6); lngEl.value = r6(fixVigente().lng).toFixed(6); pintar(fixVigente().accuracy);
+      }
+    };
+    document.addEventListener("skala:gps", marcarListo);
+    window.addEventListener("hashchange", () => document.removeEventListener("skala:gps", marcarListo), { once: true });
+  }
   function formCliente(c) {
     const val = (k) => esc((c && c[k]) ?? "");
+    const rutaAct = c ? rutaDeCliente(c) : "Vigía";
     return `<form class="tarjeta" id="fCli" novalidate>
       <h3 class="sub-titulo">${c && c.id ? "Editar datos del cliente" : "Cliente nuevo"}</h3>
       <div class="form-grid">
         <label class="field"><span>Nombre del negocio</span><input id="cNegocio" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Peluquería / tienda" value="${val("negocio")}" /></label>
         <label class="field"><span>Nombre del cliente</span><input id="cContacto" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Persona de contacto" value="${val("contacto")}" /></label>
+        <label class="field"><span>Ruta asignada</span>
+          <select id="cRuta">${RUTAS_CARTERA.map((r) => `<option value="${esc(r)}"${r === rutaAct ? " selected" : ""}>📍 ${esc(r)}</option>`).join("")}</select>
+        </label>
         <label class="field"><span>RIF / Cédula</span><input id="cRif" type="text" autocomplete="off" autocapitalize="characters" enterkeyhint="next" placeholder="J-12345678-9" value="${val("rif_cedula")}" /></label>
         <label class="field"><span>Teléfono 1 *</span><input id="cTel1" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="0412-1234567" value="${val("telefono")}" /></label>
         <label class="field"><span>Teléfono 2</span><input id="cTel2" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="Opcional" value="${val("telefono2")}" /></label>
         <label class="field field-full"><span>Dirección</span><textarea id="cDireccion" class="dir-texto" rows="1" autocomplete="off" enterkeyhint="done" placeholder="Dirección de entrega">${val("direccion")}</textarea></label>
       </div>
       <div class="gps-box">
+        ${c && c.id ? "" : fieldsetCanalHTML("cCanalAltaFs", "cCanalAlta", "¿Dónde estás registrando a este cliente? *", "online_telefono", TEXTOS_CANAL_ALTA)}
         <button type="button" class="btn btn-ghost btn-gps" id="btnGps">Tomar ubicación GPS del cliente</button>
         <span class="gps-estado" id="gpsEstado">Sin ubicación</span>
         <input type="hidden" id="cLat" value="${val("latitud")}" /><input type="hidden" id="cLng" value="${val("longitud")}" />
@@ -693,9 +1427,95 @@
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
   }
 
+  /* -------------------- GPS silencioso (segundo plano) y canal de atención -------------------- */
+  /* Lectura que NO bloquea la pantalla: al entrar a Nuevo pedido, Cliente, Alta de cliente o Cobrar.
+     Solo se usa para sugerir clientes cercanos (<= 120 m), el canal "en persona" y aprender el GPS
+     de un cliente que no lo tenía. Nunca se guarda como ubicación de un cliente atendido online. */
+  let ultimoFixGps = null; // { lat, lng, accuracy, ts }
+  let gpsLeyendo = false;
+  const r6 = (n) => Math.round(Number(n) * 1e6) / 1e6;
+  function iniciarCapturaGpsSilenciosa() {
+    if (gpsLeyendo || !navigator.geolocation) return;
+    if (ultimoFixGps && Date.now() - ultimoFixGps.ts < 20000) return;
+    gpsLeyendo = true;
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          gpsLeyendo = false;
+          const { latitude, longitude, accuracy } = pos.coords;
+          if (!gpsValido(latitude, longitude)) return;
+          ultimoFixGps = { lat: latitude, lng: longitude, accuracy: Number(accuracy) || 0, ts: Date.now() };
+          document.dispatchEvent(new CustomEvent("skala:gps", { detail: ultimoFixGps }));
+        },
+        () => { gpsLeyendo = false; },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 20000 });
+    } catch (e) { gpsLeyendo = false; }
+  }
+  /* Lectura todavía útil (10 min) */
+  const fixVigente = () => (ultimoFixGps && Date.now() - ultimoFixGps.ts < 10 * 60000 ? ultimoFixGps : null);
+  /* Campos gps_* para el servidor (y la distancia al cliente si tiene GPS) */
+  function datosGpsEnvio(cli) {
+    const c = cli || {};
+    const f = gpsValido(c._gps_lat, c._gps_lng) ? { lat: Number(c._gps_lat), lng: Number(c._gps_lng) } : fixVigente();
+    if (!f) return {};
+    const out = { gps_lat: r6(f.lat), gps_lng: r6(f.lng) };
+    if (Number(c._gps_dist_m) >= 0 && c._gps_dist_m !== undefined && c._gps_dist_m !== "") out.gps_dist_m = Math.round(Number(c._gps_dist_m));
+    else if (gpsValido(c.latitud, c.longitud)) out.gps_dist_m = Math.round(haversineM(f.lat, f.lng, Number(c.latitud), Number(c.longitud)));
+    return out;
+  }
+  /* Cartera con coordenadas para la cercanía: memoria → datos del teléfono */
+  let carteraMem = [];
+  const carteraGps = () => {
+    if (carteraMem.length) return carteraMem;
+    const d = SkalaAPI.datosLocales();
+    return d && Array.isArray(d.clientes) ? d.clientes : [];
+  };
+  async function cargarCarteraGps() {
+    try {
+      const r = await api("clientes", { q: "", limite: 200 });
+      if (Array.isArray(r.clientes) && r.clientes.length) carteraMem = r.clientes;
+    } catch (e) {}
+    return carteraGps();
+  }
+  /* Clientes ya atendidos en persona hoy (para no sugerirlos primero) */
+  const K_VISITADOS_HOY = "skala_visitados_hoy_v1";
+  const hoyCaracas = () => new Date(Date.now() - 4 * 3600000).toISOString().slice(0, 10); // mismo día que el servidor (Caracas)
+  function visitadosHoy() {
+    const v = leerLS(K_VISITADOS_HOY, null);
+    const ids = v && v.fecha === hoyCaracas() && Array.isArray(v.ids) ? v.ids.slice() : [];
+    const d = SkalaAPI.datosLocales();
+    ((d && d.visitas) || []).forEach((x) => { if (x.fecha === hoyCaracas() && x.canal === "en_persona" && !x.anulada) ids.push(String(x.cliente_id)); });
+    return ids;
+  }
+  function marcarVisitadoHoy(id) {
+    if (!id) return;
+    const ids = visitadosHoy();
+    if (!ids.includes(String(id))) ids.push(String(id));
+    guardarLS(K_VISITADOS_HOY, { fecha: hoyCaracas(), ids });
+  }
+  /* Selector binario de canal (las 2 únicas opciones del sistema) */
+  function fieldsetCanalHTML(id, nombre, leyenda, preseleccion, textos = {}) {
+    return `<fieldset class="pay canal-atencion" id="${id}"><legend>${esc(leyenda)}</legend>
+      ${CANALES_ATENCION.map((c) => `<label class="pay-opt canal-opt canal-${c.id}"><input type="radio" name="${nombre}" value="${c.id}"${c.id === preseleccion ? " checked" : ""} /> ${esc(textos[c.id] || c.nombre)}</label>`).join("")}
+      <p class="nota-chica canal-gps-estado" data-canal-gps>${fixVigente() ? `📡 GPS listo (±${Math.round(fixVigente().accuracy || 0)} m)` : "📡 Buscando tu ubicación en segundo plano…"}</p>
+    </fieldset>`;
+  }
+  /* Si el cliente estaba en la ruta GPS de hoy (GPS-Clientes), se marca solo. Silencioso: sin señal o sin misión no pasa nada. */
+  function avisarAtencion(clienteId, canal, tipo, extra = {}) {
+    if (!clienteId || !canalValido(canal)) return;
+    if (canal === "en_persona") marcarVisitadoHoy(clienteId);
+    if (!SkalaAPI.gpsDb) return;
+    const f = canal === "en_persona" ? fixVigente() : null;
+    SkalaAPI.gpsDb({
+      action: "registrar_visita", origen: "crm", cliente_id: String(clienteId), vendedor_id: yo().id, canal,
+      motivo: `${tipo}_${canal === "en_persona" ? "en_persona" : "online"}`,
+      ...(f ? { latitud: r6(f.lat), longitud: r6(f.lng) } : {}), ...extra,
+    }).catch(() => {});
+  }
+
   /* ---------- Nuevo pedido desde el "Código de pedido para vendedor" (WhatsApp) ----------
      #/nuevo?p=BC-01:3,KT-02:5&pago=credito&ref=WEB-AB12CD&tel=584121234567
-     Carga las cantidades en el carrito y sigue con el paso 1 (cliente). */
+     Carga las cantidades en el carrito y sigue con la selección del cliente. */
   async function importarEnlace(q) {
     const map = allProductsMap();
     const nuevo = {}, desconocidos = [];
@@ -707,8 +1527,8 @@
       if (!(cajas > 0 && cajas <= 9999)) return;
       if (map[code]) nuevo[code] = (nuevo[code] || 0) + cajas; else desconocidos.push(code);
     });
-    const seguir = () => location.replace("#/nuevo");
-    if (!Object.keys(nuevo).length) { toast("El código de pedido no trae productos válidos."); return seguir(); }
+    const seguir = () => location.replace("#/nuevo/cliente");
+    if (!Object.keys(nuevo).length) { toast("El código de pedido no trae productos válidos."); return location.replace("#/nuevo"); }
     const aMedias = cajasCarrito() > 0 || clienteElegido() || tomandoWeb();
     if (aMedias) {
       const ok = await hoja({ titulo: "¿Reemplazar el pedido actual?", cuerpo: '<p class="modal-sub">Tenés un pedido a medias en este teléfono. ¿Querés reemplazarlo por el que llegó por WhatsApp?</p>', ok: "Reemplazar" });
@@ -739,45 +1559,105 @@
     seguir();
   }
 
-  /* ---------- Nuevo pedido: 1) cliente (buscar / nuevo) ---------- */
+  /* ---------- Nuevo pedido: 2) cliente (se elige después de los productos) ---------- */
   function vNuevoCliente(v, _p, q) {
     if (q && q.has("p")) return importarEnlace(q);
+    iniciarCapturaGpsSilenciosa();
     let modo = clienteElegido() ? "ficha" : "buscar"; // buscar · ficha · form
     let enEdicion = null;
+    /* Clientes detectados en mi ubicación (<= 120 m): 1 toque = cliente elegido + "en persona" */
+    const pintarSugeridosGps = () => {
+      const caja = $("cSugeridosGps");
+      if (!caja) return;
+      const f = fixVigente();
+      const cerca = f ? clientesCercanos(carteraGps(), f, { radio: RADIO_CERCANIA_M, max: 3, visitadosHoy: visitadosHoy() }) : [];
+      if (!cerca.length) { caja.innerHTML = ""; caja.hidden = true; return; }
+      caja.hidden = false;
+      caja.innerHTML = `<p class="sug-gps-tit">📍 Clientes detectados en tu ubicación (1 toque):</p>
+        <div class="sug-gps-lista">${cerca.map((x, i) => `<button type="button" class="btn btn-ghost sug-gps-btn" data-sug="${i}">🎯 ${esc(x.cliente.nombre)} · a ${Math.round(x.dist)} m</button>`).join("")}</div>`;
+      caja.onclick = (e) => {
+        const b = e.target.closest("[data-sug]");
+        if (!b) return;
+        const { cliente: c, dist } = cerca[Number(b.dataset.sug)];
+        const fx = fixVigente() || f;
+        fijarCliente({ id: c.id, negocio: c.nombre, contacto: c.contacto, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: c.telefono2,
+          direccion: c.direccion, latitud: c.latitud, longitud: c.longitud, ruta: rutaDeCliente(c),
+          _canal_atencion: "en_persona", _gps_en_sitio: true, _gps_lat: r6(fx.lat), _gps_lng: r6(fx.lng), _gps_dist_m: Math.round(dist) });
+        // avanza solo: con productos → enviar; sin productos → catálogo
+        if (cajasCarrito() > 0) ir("#/nuevo/enviar"); else { toast(`Cliente: ${c.nombre}. Ahora elegí los productos.`); ir("#/nuevo"); }
+      };
+    };
+    const alGps = () => { if (modo === "buscar") pintarSugeridosGps(); };
+    document.addEventListener("skala:gps", alGps);
+    window.addEventListener("hashchange", () => document.removeEventListener("skala:gps", alGps), { once: true });
     const pintar = () => {
       const cli = clienteElegido();
+      const nCajas = cajasCarrito();
       if (modo === "ficha" && !cli) modo = "buscar";
       if (modo === "buscar") {
-        v.innerHTML = `${pasos(1)}
-          <div class="buscador"><input type="search" id="cBuscar" placeholder="Buscar cliente: nombre, negocio o teléfono" autocomplete="off" enterkeyhint="search" /></div>
+        v.innerHTML = `${pasos(2)}
+          ${nCajas > 0
+            ? `<a class="cliente-elegido" href="#/nuevo"><span>Pedido</span><strong>${nCajas} caja${nCajas === 1 ? "" : "s"} seleccionada${nCajas === 1 ? "" : "s"}</strong><em>Ver productos</em></a>`
+            : `<a class="cliente-elegido sin-cliente" href="#/nuevo"><span>Catálogo</span><strong>Todavía no elegiste productos</strong><em>Ir al catálogo</em></a>`}
+          <div id="cSugeridosGps" class="sug-gps" data-gps-slot="clientes-cercanos" hidden></div>
+          <div class="buscador"><input type="search" id="cBuscar" placeholder="Buscar cliente por nombre, ruta o teléfono" autocomplete="off" enterkeyhint="search" /></div>
           <ul class="lista-cli" id="cResultados"></ul>
           <p class="o-separador"><span>o</span></p>
-          <button type="button" class="btn btn-primary btn-bloque" id="btnClienteNuevo">Cliente nuevo</button>`;
+          <button type="button" class="btn btn-primary btn-bloque" id="btnClienteNuevo">＋ Cliente nuevo</button>`;
         let t = null, ultimaQ = "";
+        const pintarResultados = (listaCli, buscado) => {
+          const ul = $("cResultados");
+          if (!ul) return;
+          if (!listaCli.length) {
+            ul.innerHTML = buscado ? '<li class="vacio-panel">No está registrado. Tocá <strong>Cliente nuevo</strong>.</li>' : "";
+            return;
+          }
+          ul.innerHTML = listaCli.map((c, i) => {
+            const ruta = rutaDeCliente(c);
+            return `<li><button type="button" class="res-cli res-cli-ruta" data-i="${i}">
+              <div class="cli-fila-compacta">
+                <strong class="cli-item-nombre">${esc(c.nombre)}</strong>
+                <span class="chip-ruta-cli ruta-${slugRuta(ruta)}">📍 ${esc(ruta)}</span>
+              </div>
+            </button></li>`;
+          }).join("");
+          ul.onclick = (e) => {
+            const b = e.target.closest("[data-i]");
+            if (!b) return;
+            const c = listaCli[Number(b.dataset.i)];
+            fijarCliente({ id: c.id, negocio: c.nombre, contacto: c.contacto, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: c.telefono2, direccion: c.direccion, latitud: c.latitud, longitud: c.longitud, ruta: rutaDeCliente(c) });
+            modo = "ficha"; pintar();
+          };
+        };
+        // Mostrar cartera inicial para selección rápida a 1 toque
+        pintarSugeridosGps();
+        cargarCarteraGps().then(() => { if (modo === "buscar") pintarSugeridosGps(); });
+        api("clientes", { q: "", limite: 30 }).then((r0) => {
+          if ($("cBuscar") && !$("cBuscar").value.trim()) pintarResultados(r0.clientes || [], false);
+        }).catch(() => {});
         $("cBuscar").addEventListener("input", () => {
           clearTimeout(t);
           const q = $("cBuscar").value.trim();
-          if (q.length < 2) { $("cResultados").innerHTML = ""; return; }
+          if (q.length < 1) {
+            api("clientes", { q: "", limite: 30 }).then((r0) => pintarResultados(r0.clientes || [], false)).catch(() => {});
+            return;
+          }
           $("cResultados").innerHTML = `<li>${spin("Buscando cliente…")}</li>`;
           t = setTimeout(async () => {
             ultimaQ = q;
             try {
-              const r = await api("clientes", { q });
+              const r = await api("clientes", { q: q.length >= 2 ? q : "", limite: 60 });
               if (q !== ultimaQ || !$("cResultados")) return;
-              $("cResultados").innerHTML = r.clientes.length
-                ? r.clientes.map((c, i) => `<li><button type="button" class="res-cli" data-i="${i}"><strong>${esc(c.nombre)}</strong><span>${esc([c.contacto, c.telefono].filter(Boolean).join(" · "))}</span>${c.direccion ? `<span>${esc(c.direccion)}</span>` : ""}</button></li>`).join("")
-                : '<li class="vacio-panel">No está registrado. Tocá <strong>Cliente nuevo</strong>.</li>';
-              $("cResultados").onclick = (e) => {
-                const b = e.target.closest("[data-i]");
-                if (!b) return;
-                const c = r.clientes[Number(b.dataset.i)];
-                fijarCliente({ id: c.id, negocio: c.nombre, contacto: c.contacto, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: c.telefono2, direccion: c.direccion, latitud: c.latitud, longitud: c.longitud });
-                modo = "ficha"; pintar();
-              };
+              const qNorm = q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+              const filtrados = (r.clientes || []).filter((c) => {
+                const txt = `${c.nombre || ""} ${c.contacto || ""} ${c.telefono || ""} ${rutaDeCliente(c)}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                return txt.includes(qNorm);
+              });
+              pintarResultados(filtrados, true);
             } catch (e) {
               if ($("cResultados")) $("cResultados").innerHTML = `<li class="vacio-panel">${esc(e instanceof ErrorRed ? "Sin señal para buscar. Podés cargarlo como Cliente nuevo." : e.message)}</li>`;
             }
-          }, 350);
+          }, 250);
         });
         $("btnClienteNuevo").addEventListener("click", () => { enEdicion = null; modo = "form"; pintar(); });
         // pedido que llegó por WhatsApp con el teléfono del cliente: buscarlo una vez
@@ -787,16 +1667,14 @@
           $("cBuscar").value = enl.tel.replace(/^58/, "0");
           $("cBuscar").dispatchEvent(new Event("input"));
         }
-        $("cBuscar").focus();
         return;
       }
       if (modo === "ficha") {
-        const nCajas = cajasCarrito();
-        v.innerHTML = `${pasos(1)}${avisoWeb()}${fichaCliente(cli)}
+        v.innerHTML = `${pasos(2)}${avisoWeb()}${fichaCliente(cli)}
           <div class="barra-accion">
             <button type="button" class="btn btn-ghost" id="btnCambiarCli">Cambiar cliente</button>
-            <a class="btn ${nCajas > 0 ? "btn-ghost" : "btn-primary"}" href="#/nuevo/productos" id="btnAProductos">${nCajas > 0 ? `Productos (${nCajas})` : "Continuar a productos"}</a>
-            ${nCajas > 0 ? '<a class="btn btn-primary" href="#/nuevo/enviar" id="btnAEnviar">Ir a enviar</a>' : ""}
+            <a class="btn ${nCajas > 0 ? "btn-ghost" : "btn-primary"}" href="#/nuevo" id="btnAProductos">${nCajas > 0 ? `Productos (${nCajas})` : "Elegir productos"}</a>
+            ${nCajas > 0 ? '<a class="btn btn-primary" href="#/nuevo/enviar" id="btnAEnviar">Continuar a enviar →</a>' : ""}
           </div>`;
         enlazarAvisoWeb();
         $("btnLapiz").addEventListener("click", () => { enEdicion = cli; modo = "form"; pintar(); });
@@ -810,7 +1688,7 @@
         return;
       }
       /* modo form: cliente nuevo o edición con el lápiz */
-      v.innerHTML = pasos(1) + formCliente(enEdicion);
+      v.innerHTML = pasos(2) + formCliente(enEdicion);
       const pintarGps = (prec) => {
         const lat = $("cLat").value, lng = $("cLng").value;
         $("gpsEstado").innerHTML = lat && lng
@@ -819,27 +1697,42 @@
         $("btnGps").textContent = lat && lng ? "Volver a tomar ubicación" : "Tomar ubicación GPS del cliente";
       };
       pintarGps();
-      $("btnGps").addEventListener("click", () => tomarGps($("btnGps"), (lat, lng, prec) => { $("cLat").value = lat; $("cLng").value = lng; pintarGps(prec); }));
+      $("btnGps").addEventListener("click", () => tomarGps($("btnGps"), (lat, lng, prec) => {
+        $("cLat").value = lat; $("cLng").value = lng;
+        const rd = document.querySelector('input[name="cCanalAlta"][value="en_persona"]');
+        if (rd) rd.checked = true;
+        pintarGps(prec);
+      }));
+      if (!(enEdicion && enEdicion.id)) enlazarCanalAlta("cCanalAlta", $("cLat"), $("cLng"), $("btnGps"), pintarGps);
       $("btnCliVolver").addEventListener("click", () => { modo = enEdicion || clienteElegido() ? "ficha" : "buscar"; pintar(); });
       $("fCli").addEventListener("input", () => { $("cError").hidden = true; });
       $("cNegocio").focus();
       $("fCli").addEventListener("submit", async (e) => {
         e.preventDefault();
+        const rutaElegida = $("cRuta") ? $("cRuta").value : "Vigía";
         const c = {
           id: enEdicion ? enEdicion.id : undefined,
           negocio: $("cNegocio").value.trim(), contacto: $("cContacto").value.trim(), rif_cedula: $("cRif").value.trim(),
           telefono: $("cTel1").value.trim(), telefono2: $("cTel2").value.trim(), direccion: $("cDireccion").value.trim(),
-          latitud: $("cLat").value, longitud: $("cLng").value,
+          latitud: $("cLat").value, longitud: $("cLng").value, ruta: rutaElegida,
         };
         const faltan = validarCliente(c);
+        const canalAlta = (document.querySelector('input[name="cCanalAlta"]:checked') || {}).value || "";
+        if (!c.id && !canalValido(canalAlta)) faltan.push("indicá si estás en el local (en persona) u online / por teléfono");
         if (faltan.length) { $("cError").textContent = "Falta: " + faltan.join(" · "); $("cError").hidden = false; return; }
+        if (!c.id) {
+          c._canal_atencion = canalAlta; // se pre-selecciona al enviar el pedido
+          if (canalAlta === "online_telefono") { c.latitud = ""; c.longitud = ""; }
+          else if (fixVigente()) { c._gps_lat = r6(fixVigente().lat); c._gps_lng = r6(fixVigente().lng); }
+        }
         if (c.id) {
-          // Cliente existente: el lápiz guarda los cambios en la hoja enseguida
+          guardarRutaCliente(c.id, rutaElegida);
           const b = $("btnCliUsar");
           b.disabled = true;
           try {
             const r = await api("guardarCliente", { cliente: c });
-            fijarCliente({ ...c, negocio: r.cliente.nombre });
+            guardarRutaCliente(r.cliente.id, rutaElegida);
+            fijarCliente({ ...c, negocio: r.cliente.nombre, ruta: rutaElegida });
             toast("Datos del cliente actualizados");
           } catch (e2) {
             if (e2.code === "auth") throw e2;
@@ -862,7 +1755,7 @@
     const items = itemsDePedido(carrito(), allProductsMap());
     if (!cli || !items.length) {
       // se entró directo sin completar: volver al paso que falta y marcarlo
-      ir(!cli ? "#/nuevo" : "#/nuevo/productos");
+      ir(!items.length ? "#/nuevo" : "#/nuevo/cliente");
       setTimeout(irAEnviar, 80);
       return;
     }
@@ -874,9 +1767,9 @@
     let manuales = preciosManuales();
     let usarManual = Object.keys(manuales).some((k) => Number(manuales[k]) > 0);
     v.innerHTML = `${pasos(3)}${avisoWeb()}
-      <a class="cliente-elegido" href="#/nuevo"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>
+      <a class="cliente-elegido" href="#/nuevo/cliente"><span>Para</span><strong>${esc(cli.negocio || cli.contacto)}</strong><em>Cambiar</em></a>
       <section class="tarjeta">
-        <div class="fila-top"><h3 class="sub-titulo">Productos</h3><a class="link-btn" href="#/nuevo/productos">Cambiar</a></div>
+        <div class="fila-top"><h3 class="sub-titulo">Productos</h3><a class="link-btn" href="#/nuevo">Cambiar</a></div>
         <ul class="resumen-items" id="eItems"></ul>
         <p class="total-ped"><strong>Total: ${total} caja${total === 1 ? "" : "s"}</strong> · ${Object.entries(unidades).map(([u, n]) => `${n} ${esc(u)}`).join(" + ")}</p>
         <p class="nota-chica" id="eNivel"></p>
@@ -893,6 +1786,7 @@
         </div>
       </section>
       <form id="fEnviar" novalidate>
+        ${fieldsetCanalHTML("fsCanal", "eCanal", "¿Cómo atendiste al cliente en este pedido? *", canalSugerido(cli, fixVigente(), carteraGps()) || "online_telefono")}
         <fieldset class="pay documento" id="fsDoc"><legend>¿El cliente quiere nota de entrega o factura? *</legend>
           <label class="pay-opt"><input type="radio" name="eDoc" value="Nota de entrega" /> Nota de entrega</label>
           <label class="pay-opt"><input type="radio" name="eDoc" value="Factura" /> Factura</label>
@@ -915,6 +1809,22 @@
         </div>
       </form>`;
     const doc = () => (document.querySelector('input[name="eDoc"]:checked') || {}).value || "";
+    const canalSel = () => (document.querySelector('input[name="eCanal"]:checked') || {}).value || "";
+    iniciarCapturaGpsSilenciosa();
+    // la lectura GPS llegó después de pintar: si nadie eligió todavía, aplicar la preselección inteligente
+    const alGpsEnviar = () => {
+      const el = document.querySelector("#fsCanal [data-canal-gps]");
+      if (!el) return;
+      if (fixVigente()) el.textContent = `📡 GPS listo (±${Math.round(fixVigente().accuracy || 0)} m)`;
+      if (!canalSel()) {
+        const sug = canalSugerido(cli, fixVigente(), carteraGps());
+        const rd = sug && document.querySelector(`input[name="eCanal"][value="${sug}"]`);
+        if (rd) rd.checked = true;
+      }
+    };
+    document.addEventListener("skala:gps", alGpsEnviar);
+    window.addEventListener("hashchange", () => document.removeEventListener("skala:gps", alGpsEnviar), { once: true });
+    if (!carteraMem.length) cargarCarteraGps().then(alGpsEnviar);
     const pagoSel = () => (document.querySelector('input[name="ePago"]:checked') || {}).value || "";
     const esCredito = () => !!(pagoPorId(pagoSel()) || {}).credito;
     const mapaManualActivo = () => (usarManual ? manuales : null);
@@ -931,11 +1841,11 @@
           const baseU = precioUnitario(baseIts[idx] || it, tipo);
           const valManual = manuales[it.code] !== undefined && manuales[it.code] > 0 ? String(manuales[it.code]) : "";
           return `<li class="con-foto${usarManual ? " con-precio-manual" : ""}">
-            <span class="item-foto">${fotoHTML(it.code, { ancho: 36, alto: 36 })}</span>
-            <span>${it.cajas} × ${esc(it.producto)}${it.total_unidades ? ` <span class="ped-det">${it.total_unidades} ${esc(it.unidad)}</span>` : ""}</span>
+            <span class="item-foto">${fotoHTML(it.code, { ancho: 42, alto: 42 })}</span>
+            <span class="item-prod-txt"><strong>${it.cajas} × ${esc(it.producto)}</strong>${it.total_unidades ? ` <span class="ped-det">${it.total_unidades} ${esc(it.unidad)}</span>` : ""}</span>
             ${usarManual
               ? `<span class="caja-precio-manual"><label class="lbl-precio-caja"><span>$</span><input type="text" inputmode="decimal" autocomplete="off" class="inp-precio-caja" data-precio-code="${esc(it.code)}" value="${esc(valManual)}" placeholder="${baseU ? baseU.toFixed(2) : "0.00"}" aria-label="Precio por caja de ${esc(it.producto)}" /></label><em data-sub-code="${esc(it.code)}">${u ? `<strong>${dinero(it.cajas * u)}</strong>` : "sin precio"}</em></span>`
-              : `<em>${it.precio ? `${dinero(u)} c/u · <strong>${dinero(it.cajas * u)}</strong>` : "sin precio"}</em>`}
+              : `<em class="item-precio-fijo">${it.precio ? `<span class="ped-det">${dinero(u)} c/u</span><strong>${dinero(it.cajas * u)}</strong>` : "sin precio"}</em>`}
           </li>`;
         }).join("");
       } else {
@@ -1010,6 +1920,7 @@
     });
     $("eDias").addEventListener("input", () => $("eCredito").querySelectorAll("[data-dias]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.dias === $("eDias").value))));
     $("fEnviar").addEventListener("input", () => { $("eError").hidden = true; });
+    $("fsCanal").addEventListener("change", () => $("fsCanal").classList.remove("falta"));
     $("fsDoc").addEventListener("change", () => {
       $("eRifWrap").hidden = doc() !== "Factura";
       $("fsDoc").classList.remove("falta");
@@ -1021,21 +1932,33 @@
       const d = doc();
       const rif = $("eRif").value.trim();
       const mostrar = (m, el) => { err.textContent = m; err.hidden = false; (el || err).scrollIntoView({ block: "center" }); };
+      const canal = canalSel();
+      if (!canalValido(canal)) { $("fsCanal").classList.add("falta"); return mostrar("Indicá cómo atendiste al cliente: 📍 En persona o 📱 Online / Por teléfono.", $("fsCanal")); }
       if (!d) { $("fsDoc").classList.add("falta"); return mostrar("Elegí si el cliente quiere nota de entrega o factura.", $("fsDoc")); }
       if (d === "Factura" && rif.replace(/\D/g, "").length < 6) return mostrar("Para factura hace falta el RIF o la cédula.", $("eRifWrap"));
       if (!pagoSel()) { $("fsPago").classList.add("falta"); return mostrar("Elegí la forma de pago.", $("fsPago")); }
       const dias = Math.floor(Number($("eDias").value));
       if (esCredito() && !(dias >= 1 && dias <= 180)) return mostrar("Indicá los días de crédito (1 a 180).", $("eCredito"));
       err.hidden = true;
-      const { _listo, ...cliente } = cli;
+      const { _listo, _canal_atencion, _gps_en_sitio, _gps_lat, _gps_lng, _gps_dist_m, ...cliente } = cli;
       if (d === "Factura") cliente.rif_cedula = rif;
+      // GPS: en persona aprende la ubicación si el cliente no tenía; online JAMÁS usa la del vendedor
+      const gps = datosGpsEnvio(cli);
+      if (canal === "en_persona") {
+        const apr = gpsAprendido(canal, cliente, gps.gps_lat !== undefined ? { lat: gps.gps_lat, lng: gps.gps_lng } : null);
+        if (apr) { cliente.latitud = apr.latitud; cliente.longitud = apr.longitud; }
+      } else if (gps.gps_lat !== undefined && gpsValido(cliente.latitud, cliente.longitud)
+        && Math.abs(Number(cliente.latitud) - gps.gps_lat) < 1e-5 && Math.abs(Number(cliente.longitud) - gps.gps_lng) < 1e-5) {
+        cliente.latitud = ""; cliente.longitud = "";
+      }
       const its = itemsDePedido(carrito(), allProductsMap()).map((it) => {
         const pm = usarManual ? montoNum(manuales[it.code]) : 0;
         return pm > 0 ? { ...it, precio_manual: pm } : it;
       });
       const datos = { client_ref: nuevoRef(), cliente, items: its, documento: d,
         tipo_pago: pagoSel(), pago: pagoPorId(pagoSel()).nombre, precio_mayor: !usarManual && total < CAJAS_MAYOR && excepcionMayor(),
-        dias_credito: esCredito() ? dias : 0, nota: $("eNota").value.trim() };
+        dias_credito: esCredito() ? dias : 0, nota: $("eNota").value.trim(),
+        canal_pedido: canal, ...gps };
       if (web) datos.web_id = web.id;
       const btn = $("btnEnviar");
       btn.disabled = true; btn.classList.add("ocupado"); btn.textContent = "Enviando…";
@@ -1052,10 +1975,12 @@
       };
       try {
         const r = await api("guardarPedido", datos);
-        terminar({ pedido: r.pedido, cliente: r.cliente || cliente });
+        const cid = (r.cliente && r.cliente.id) || r.cliente_id || cliente.id;
+        avisarAtencion(cid, canal, "pedido", { pedido_id: r.pedido && r.pedido.id });
+        terminar({ pedido: r.pedido, cliente: r.cliente || cliente, canal });
       } catch (e2) {
         btn.disabled = false; btn.classList.remove("ocupado"); btn.textContent = "Enviar pedido";
-        if (e2 instanceof ErrorRed) { SkalaAPI.encolar(datos); return terminar({ offline: true, cliente }); }
+        if (e2 instanceof ErrorRed) { SkalaAPI.encolar(datos); if (canal === "en_persona") marcarVisitadoHoy(cliente.id); return terminar({ offline: true, cliente }); }
         if (e2.code === "auth") throw e2;
         mostrar(e2.message);
       }
@@ -1084,8 +2009,65 @@
       <div class="fila-botones">
         <a class="btn btn-ghost" href="#/pedido/${encodeURIComponent(d.pedido.id)}">Ver pedido</a>
         <a class="btn btn-ghost" href="#/nuevo">Nuevo pedido</a>
-      </div></div>`;
+      </div>
+      <button type="button" class="btn btn-ghost btn-bloque btn-corregir-cli" id="btnCorregirClientePed">🔄 ¿Te equivocaste de cliente? Cambiar cliente</button></div>`;
     $("btnGrupo").addEventListener("click", () => enviarAlGrupo(mensaje));
+    $("btnCorregirClientePed").addEventListener("click", async () => {
+      const rc = await corregirClientePedido(d.pedido);
+      if (!rc) return;
+      sessionStorage.setItem(K_LISTO, JSON.stringify({ ...d, pedido: { ...d.pedido, ...rc.pedido }, cliente: rc.cliente }));
+      render();
+    });
+  }
+
+  /* ¿Se equivocó de cliente? Elegir el correcto: el servidor pasa el pedido, anula la visita (y el GPS aprendido)
+     del cliente equivocado y, si fue en persona, registra la visita en el correcto. Devuelve la respuesta o null. */
+  async function corregirClientePedido(ped) {
+    let lista = [];
+    const pintarLista = (ul, clientes) => {
+      lista = clientes.filter((c) => String(c.id) !== String(ped.cliente_id));
+      ul.innerHTML = lista.length
+        ? lista.map((c, i) => `<label class="pay-opt cc-opt"><input type="radio" name="cc_i" value="${i}" /> <span><strong>${esc(c.nombre)}</strong>${c.contacto ? ` <span class="ped-det">${esc(c.contacto)}</span>` : ""} <span class="chip-ruta-cli ruta-${slugRuta(rutaDeCliente(c))}">📍 ${esc(rutaDeCliente(c))}</span></span></label>`).join("")
+        : '<p class="vacio-panel">Sin resultados. Probá con otro nombre o teléfono.</p>';
+    };
+    const r = await hoja({
+      titulo: "🔄 Cambiar el cliente del pedido",
+      cuerpo: `<p class="modal-sub">Pedido <strong>${esc(ped.id)}</strong> · ahora es de <strong>${esc(ped.negocio || "")}</strong>.
+          Elegí el cliente correcto: la visita registrada por error se anula${ped.canal_pedido === "en_persona" ? " y la visita en persona pasa al cliente correcto" : ""}.</p>
+        <div class="buscador"><input type="search" id="ccBuscar" placeholder="Buscar cliente por nombre, ruta o teléfono" autocomplete="off" enterkeyhint="search" /></div>
+        <div class="cc-lista" id="ccLista" role="radiogroup" aria-label="Cliente correcto">${spin("Cargando clientes…")}</div>`,
+      ok: "Cambiar cliente",
+      alAbrir: () => {
+        const ul = $("ccLista"), inp = $("ccBuscar");
+        let t = null;
+        const buscar = () => {
+          const q = inp.value.trim();
+          api("clientes", { q: q.length >= 2 ? q : "", limite: 40 }).then((x) => { if ($("ccLista")) pintarLista(ul, x.clientes || []); })
+            .catch((e) => { if ($("ccLista")) ul.innerHTML = `<p class="vacio-panel">${esc(e.message)}</p>`; });
+        };
+        inp.addEventListener("input", () => { clearTimeout(t); t = setTimeout(buscar, 250); });
+        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); clearTimeout(t); buscar(); } });
+        buscar();
+      },
+      validar: (x) => (x.cc_i !== undefined && lista[Number(x.cc_i)] ? "" : "Elegí el cliente correcto de la lista."),
+    });
+    if (!r) return null;
+    const elegido = lista[Number(r.cc_i)];
+    try {
+      const rc = await api("cambiarClientePedido", { pedido_id: ped.id, cliente_id: elegido.id });
+      guardarEnMemoria(rc.pedido);
+      // la marca "visitado hoy" y la ruta GPS siguen al cliente correcto
+      if (canalValido(ped.canal_pedido) && SkalaAPI.gpsDb) {
+        SkalaAPI.gpsDb({ action: "corregir_cliente_visita", origen: "crm", pedido_id: ped.id, cliente_id_anterior: String(ped.cliente_id),
+          cliente_id_nuevo: String(elegido.id), canal: ped.canal_pedido, vendedor_id: yo().id }).catch(() => {});
+      }
+      if (ped.canal_pedido === "en_persona") marcarVisitadoHoy(elegido.id);
+      toast(`Pedido pasado a ${elegido.nombre}${rc.visitas_anuladas ? " · visita anulada en el cliente equivocado" : ""}${rc.gps_revertido ? " · GPS revertido" : ""}`);
+      return rc;
+    } catch (e) {
+      toast(e instanceof ErrorRed ? "Sin señal: probá de nuevo cuando vuelva la conexión." : e.message);
+      return null;
+    }
   }
 
   /* ---------- Pedidos / Entregas ---------- */
@@ -1128,12 +2110,17 @@
       : Number(p.pagado_usd) > 0 && !p.cobro
         ? ` · abonado <strong>${esc(dinero(p.pagado_usd))}</strong> (resta <strong>${esc(dinero(p.saldo))}</strong>)`
         : "";
+    const tieneAbonoParcial = vende() && Number(p.pagado_usd) > 0 && Number(p.saldo) > 0 && !p.cobro;
+    const pctAbono = tieneAbonoParcial
+      ? Math.max(5, Math.min(95, Math.round((Number(p.pagado_usd) / (Number(p.pagado_usd) + Number(p.saldo))) * 100)))
+      : 0;
     return `<li class="${elegible ? "con-check" : ""}">${elegible ? `<label class="check-ped"><input type="checkbox" value="${esc(p.id)}" aria-label="Elegir ${esc(p.negocio)} para la carga" /></label>` : ""}
       <a class="fila-ped est-borde-${esc(p.estado)}" href="#/pedido/${encodeURIComponent(p.id)}">
       <div class="fila-top"><strong>${esc(p.negocio)}</strong>${chipEstado(p.estado)}</div>
       <div class="fila-linea"><span class="ped-det">${esc(p.id)} · ${esc(fechaLegible(p.fecha))}</span>${montoFila(p)}</div>
       <div class="ped-det">${esc(p.total_cajas)} caja(s)${p.detalle_unidades ? " · " + esc(p.detalle_unidades) : ""}${infoCobro}</div>
       ${extra ? `<div class="ped-det">${esc(extra)}</div>` : ""}
+      ${tieneAbonoParcial ? `<div class="abono-barra-mini" aria-hidden="true"><i style="width:${pctAbono}%"></i></div>` : ""}
       ${chipBandera(p)}
     </a></li>`;
   }
@@ -1486,12 +2473,13 @@
   async function vEntregas(v, query, vigente) {
     const tab = query.get("tab") === "entregado" ? "entregado" : "curso";
     const admin = gestion(); // sin depositario: Administración despacha todos los pedidos aprobados
-    if (admin) { $("appTitulo").textContent = "Despacho"; document.title = "Despacho · Skala Equipo"; }
+    if (admin) { $("appTitulo").textContent = "Despacho"; document.title = "Despacho · Ontiveros Equipo"; }
     v.innerHTML = `
       <div class="periodos tabs-ped tabs-ent" role="tablist">
         <a role="tab" class="tab${tab === "curso" ? " active" : ""}" aria-selected="${tab === "curso"}" href="#/entregas?tab=curso">Por entregar<b class="cuenta" data-cuenta="curso"></b></a>
         <a role="tab" class="tab${tab === "entregado" ? " active" : ""}" aria-selected="${tab === "entregado"}" href="#/entregas?tab=entregado">Entregados</a>
       </div>
+      <div class="banner-prox-ruteo" data-gps-slot="despacho-ruteo"><span class="chip-prox">Próximamente</span><span>🚚 Secuencia óptima de paradas de camión (1 → N) y navegación giro a giro</span></div>
       <div id="eResumen"></div>
       <div id="pLista" class="ent-lista">${spin()}</div>
       ${tab === "curso" ? '<div class="barra-accion" id="pBarra" hidden><div><strong id="pSel">0 pedidos</strong><span id="pSelCajas"></span></div><button type="button" class="btn btn-primary" id="btnVerCarga">Ver total de carga</button></div>' : ""}`;
@@ -2428,6 +3416,7 @@
       ...t.productos.map((x) => `• ${x.cajas} × ${x.producto} (${x.code})`), "", "*Pedidos*",
       ...peds.map((p) => `• ${p.id} · ${p.negocio} · ${cajasPendientes(p) || p.total_cajas} caja(s)`)].join("\n");
     v.innerHTML = `
+      <div class="banner-prox-ruteo" data-gps-slot="despacho-ruteo"><span class="chip-prox">Próximamente</span><span>🚚 Secuencia óptima de paradas de camión (1 → N) y navegación giro a giro</span></div>
       <section class="tarjeta carga-total">
         <p class="carga-grande"><strong>${t.cajas}</strong> cajas</p>
         <p class="ped-det">${t.pedidos} pedido(s)${t.unidades ? " · " + esc(t.unidades) : ""}</p>
@@ -2499,7 +3488,10 @@
         ${facturado ? `<p class="aviso-chico">Ya está <strong>facturado</strong>${p.factura ? ` (factura ${esc(p.factura)})` : ""}. Si cambiás productos o precios, corregí también la factura.${avisoEstado}</p>` : ""}
         <p class="nota-chica">Los datos del cliente (RIF, teléfono, dirección) se corrigen en <a href="#/cliente/${encodeURIComponent(p.cliente_id)}">su ficha</a>.</p>
       </section>
-      <div class="buscador"><input type="search" id="xBuscar" placeholder="Buscar producto o código" autocomplete="off" enterkeyhint="search" /></div>
+      <div class="barra-buscador-vista">
+        <div class="buscador"><input type="search" id="xBuscar" placeholder="Buscar producto o código" autocomplete="off" enterkeyhint="search" /></div>
+        ${selectorVistaCatHTML()}
+      </div>
       <div class="periodos" id="xFiltros">${[["elegidos", "En el pedido"], ["todos", "Agregar"], ["banos", "Baños"], ["kits", "Kits"]].map(([k, t]) =>
         `<button type="button" class="tab${k === filtroEditar ? " active" : ""}" data-f="${k}">${t}</button>`).join("")}</div>
       <ul class="grilla-prod" id="xLista">${productos.map((x) => `
@@ -2546,6 +3538,7 @@
         <button type="button" class="btn btn-primary" id="btnGuardarEdicion">Guardar</button>
       </div>`;
     const lista = $("xLista");
+    enlazarSelectorVistaCat(v, lista);
     const manualesEdit = {};
     if (p.nivel_precio === "personalizado") {
       (p.items || []).forEach((it) => { if (Number(it.precio) > 0) manualesEdit[it.code] = Number(it.precio); });
@@ -2784,6 +3777,7 @@
         </dl>
       </section>
       ${puedeEditar(p) ? `<a class="btn btn-ghost btn-bloque" id="btnEditarPed" href="#/editar/${encodeURIComponent(p.id)}">Editar pedido</a>` : ""}
+      ${p.estado === "pendiente" && (gestion() || String(p.vendedor_id) === String(yo().id)) ? '<button type="button" class="btn btn-ghost btn-bloque btn-corregir-cli" id="btnCorregirClientePed">🔄 ¿Te equivocaste de cliente? Cambiar cliente</button>' : ""}
       <button type="button" class="btn btn-ghost btn-bloque" id="btnReenviar">Reenviar al grupo de WhatsApp</button>
       ${puedeBorrar(roles(), yo().id, p) ? '<button type="button" class="btn btn-ghost btn-bloque btn-peligro" id="btnBorrarPed">Borrar pedido</button>' : ""}
       ${p.historial === null ? `<section class="tarjeta"><h3 class="sub-titulo">Historial</h3>${spin("Cargando historial…")}</section>` : ""}
@@ -2792,9 +3786,15 @@
           cobrado: "Cancelado (pago reportado)", abono: "Abono reportado", conciliado: "Pago conciliado", abono_conciliado: "Abono conciliado",
           ajuste_precio: "Ajuste de precios por facturación", ajuste_revertido: "Precios originales restaurados",
           comision_pagada: "Comisión pagada al vendedor", comision_deshecha: "Pago de comisión revertido",
+          cliente_cambiado: "Cliente del pedido corregido",
           borrado: "Borrado", entregado: "Entregado", entrega_parcial: "Entrega parcial", editado: "Editado", pago_rechazado: "Pago no recibido", conciliacion_deshecha: "Conciliación deshecha" }[h.accion] || nombreEstado(h.accion))}</strong> · ${esc(h.usuario)}<br><span class="ped-det">${esc(new Date(h.fecha).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" }))}${h.detalle ? " · " + esc(h.detalle) : ""}</span></li>`).join("")}</ol></section>` : ""}`;
 
     $("btnReenviar").addEventListener("click", () => enviarAlGrupo(mensajeGrupo(p, c)));
+    const btnCorrCli = $("btnCorregirClientePed");
+    if (btnCorrCli) btnCorrCli.addEventListener("click", async () => {
+      const rc = await corregirClientePedido(p);
+      if (rc) render();
+    });
     const btnRev = $("btnRevertirAjuste");
     if (btnRev) btnRev.addEventListener("click", async () => {
       const ok = await hoja({
@@ -3029,6 +4029,7 @@
   }
 
   async function accionCobro(p, acc) {
+    if (acc === "cobrar") iniciarCapturaGpsSilenciosa(); // lectura GPS en segundo plano para el canal "en persona"
     const textos = {
       cobrar: [`¿Cómo cancelaron ${p.id}?`, "Indicá si fue en efectivo ($) o en Bs, la fecha del pago y el monto recibido. Si cubre el total queda como <strong>Cancelado completo</strong>; si es menor, se registrará como un <strong>Abono</strong>.", "Sí, canceló completo"],
       conciliar: [`Conciliar pago · ${p.id}`, "Verificá los datos del pago reportado por el vendedor. Si todo está correcto, tocá <strong>Es correcto · Conciliar</strong>.", "✓ Es correcto · Conciliar"],
@@ -3146,6 +4147,8 @@
               </div>
             </div>` : ""}
 
+            ${acc === "cobrar" ? fieldsetCanalHTML("hCanalCobro", "canal_cobro", "¿Cómo recibiste o gestionaste este pago? *", canalSugerido(p.cliente_datos || {}, fixVigente(), carteraGps())) : ""}
+
             <fieldset class="pay moneda"><legend>¿Cómo cancelaron?</legend>
               <label class="pay-opt"><input type="radio" name="moneda" value="USD"${mon !== "Bs" ? " checked" : ""} /> Efectivo / Dólares ($)</label>
               <label class="pay-opt"><input type="radio" name="moneda" value="Bs"${mon === "Bs" ? " checked" : ""} /> Bolívares (Bs)</label>
@@ -3184,6 +4187,7 @@
           </div>`,
         ok,
         validar: (d) => {
+          if (acc === "cobrar" && !canalValido(d.canal_cobro)) return "Indicá cómo recibiste el pago: 📍 En persona o 📱 Online / Por teléfono.";
           if (!(montoNum(d.monto) > 0)) return "Escribí el monto recibido (mayor que 0).";
           if (d.moneda === "Bs") {
             if (!/^\d{4}-\d{2}-\d{2}$/.test(d.fecha_pago || "")) return "Indicá la fecha en que realizaron el pago en Bs.";
@@ -3448,6 +4452,10 @@
         tipo_pago_real: r.tipo_pago_real,
         ...(esBs ? { fecha_pago: r.fecha_pago, tasa: montoNum(r.tasa), referencia: String(r.referencia || "").trim() } : {}),
         ...(hayAjustePrecios() ? { ajuste_precios: preciosAjustados, ajuste_motivo: String(r.ajuste_motivo || "").trim() } : {}),
+        // canal de atención del cobro: en persona manda la lectura GPS (el servidor aprende el GPS solo si el cliente no tenía)
+        ...(acc === "cobrar" && canalValido(r.canal_cobro)
+          ? { canal_cobro: r.canal_cobro, ...(r.canal_cobro === "en_persona" ? datosGpsEnvio(p.cliente_datos) : {}) }
+          : {}),
       };
     } else if (acc === "rechazar") {
       const r = await hoja({
@@ -3464,6 +4472,7 @@
     try {
       const rc = await api("cobro", { pedido_id: p.id, accion: { cobrar: "cancelar" }[acc] || acc, ...extra });
       guardarEnMemoria(rc.pedido);
+      if (extra.canal_cobro) avisarAtencion(p.cliente_id, extra.canal_cobro, "cobro", { pedido_id: p.id });
       const fueAbono = rc.es_abono || (rc.pedido && !rc.pedido.cobro && Number(rc.pedido.pagado_usd) > 0);
       toast(acc === "cobrar"
         ? (fueAbono ? `Abono registrado · restan ${dinero(rc.pedido.saldo)}` : "Marcado como cancelado completo")
@@ -3478,24 +4487,220 @@
 
   /* ---------- Clientes ---------- */
   let cacheClientes = [];
+  let rutaFiltroCli = "todas";
+  let modoRutaGps = false;
+  const seleccionadosRutaGps = new Set();
+  async function abrirMisRutasVendedor() {
+    const u = yo() || {};
+    const actuales = Array.isArray(u.rutas) ? u.rutas : [];
+    const ok = await hoja({
+      titulo: "📍 Marcar las rutas que atiendo",
+      cuerpo: `<p class="modal-sub">Seleccioná las rutas o zonas comerciales que atendés. Cuando un cliente elija vendedor en el catálogo, verá tu nombre junto a estas rutas:</p>
+        <div class="roles-usuario" id="modalMisRutas">
+          ${RUTAS_CARTERA.map((r) => `<label class="check rol-opt"><input type="checkbox" name="miRutaChk" value="${esc(r)}"${actuales.includes(r) ? " checked" : ""} /> <span><strong>📍 ${esc(r)}</strong></span></label>`).join("")}
+        </div>
+        <p class="form-warn" id="errMisRutas" hidden></p>`,
+      ok: "Guardar mis rutas",
+      cancelar: "Cancelar",
+      validar: async () => {
+        const marcadas = [...document.querySelectorAll('input[name="miRutaChk"]:checked')].map((x) => x.value);
+        const err = $("errMisRutas");
+        if (!marcadas.length) {
+          if (err) { err.textContent = "Marcá al menos una ruta que atendés."; err.hidden = false; }
+          return false;
+        }
+        try {
+          const r = await api("guardarMisRutas", { rutas: marcadas });
+          const s = sesion();
+          if (s) SkalaAPI.guardarSesion(s.token, { ...s.usuario, rutas: r.rutas || marcadas });
+          const btn = $("btnMisRutasVend");
+          if (btn) btn.textContent = `📍 Mis rutas (${(r.rutas || marcadas).join(", ")})`;
+          toast("Rutas actualizadas");
+          return true;
+        } catch (e) {
+          if (err) { err.textContent = e.message; err.hidden = false; }
+          return false;
+        }
+      },
+    });
+    return ok;
+  }
   async function vClientes(v, _p, _q, vigente) {
+    const misRutasActuales = Array.isArray((yo() || {}).rutas) ? yo().rutas : [];
     v.innerHTML = `
-      <a class="btn btn-primary btn-bloque" href="#/cliente/nuevo" id="btnAnadirCliente">Añadir cliente</a>
-      <div class="buscador"><input type="search" id="kBuscar" placeholder="Buscar por nombre, negocio o teléfono" autocomplete="off" enterkeyhint="search" /></div>
-      <p class="modal-sub" id="kInfo"></p>
-      <ul class="lista-cli" id="kLista"><li>${spin()}</li></ul>`;
+      <div class="cli-top-acciones">
+        <div class="buscador cli-buscador-top"><input type="search" id="kBuscar" placeholder="Buscar cliente o ruta…" autocomplete="off" enterkeyhint="search" /></div>
+        <a class="btn btn-primary btn-cli-nuevo" href="#/cliente/nuevo" id="btnAnadirCliente" aria-label="Añadir nuevo cliente"><span class="simbolo-mas" aria-hidden="true">＋</span> Nuevo</a>
+        <button type="button" class="btn btn-ghost btn-cli-mapa" id="btnMapaNew" data-gps-slot="clientes-mapa" aria-label="Mapa y futuras funciones nuevas" title="Mapa y futuras funciones">
+          <span class="badge-new-mapa">New</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="ico-mapa-svg"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6zm6-3v15m6-12v15"/></svg>
+        </button>
+      </div>
+      <div class="periodos periodos-chicos cli-rutas-tabs" id="kRutasFiltro" role="group" aria-label="Filtrar por ruta">
+        <button type="button" class="tab${rutaFiltroCli === "todas" ? " active" : ""}" data-ruta-f="todas">Todas</button>
+        ${RUTAS_CARTERA.map((r) => `<button type="button" class="tab${rutaFiltroCli === r ? " active" : ""}" data-ruta-f="${esc(r)}">📍 ${esc(r)}</button>`).join("")}
+      </div>
+      <div class="cli-mision-bar">
+        <button type="button" class="btn ${modoRutaGps ? "btn-primary" : "btn-ghost"} btn-chico" id="btnModoRutaGps" aria-pressed="${modoRutaGps}">
+          ${modoRutaGps ? "✕ Salir de selección de ruta" : "🗺️ Armar ruta de visita"}
+        </button>
+        <button type="button" class="btn btn-ghost btn-chico" id="btnMisRutasVend">
+          📍 Mis rutas (${misRutasActuales.length ? esc(misRutasActuales.join(", ")) : "Marcar rutas"})
+        </button>
+        <button type="button" class="btn btn-ghost btn-chico" id="btnSelTodaRuta" ${modoRutaGps ? "" : "hidden"}>Elegir visibles</button>
+      </div>
+      <div id="kVistaListaWrap">
+        <p class="modal-sub" id="kInfo"></p>
+        <ul class="lista-cli lista-cli-rutas" id="kLista"><li>${spin()}</li></ul>
+      </div>
+      <div class="barra-fija" id="barraMisionGps" ${modoRutaGps && seleccionadosRutaGps.size ? "" : "hidden"}>
+        <div class="barra-total"><strong id="misionGpsConteo">${seleccionadosRutaGps.size} cliente(s) en ruta</strong><span class="ped-det">Se optimizará en GPS-Clientes</span></div>
+        <button type="button" class="btn btn-primary" id="btnLanzarMisionGps">🚀 Abrir en GPS-Clientes</button>
+      </div>`;
+    const btnMapa = $("btnMapaNew");
+    if (btnMapa) btnMapa.addEventListener("click", abrirAdelantoGps);
+    const btnMisRutas = $("btnMisRutasVend");
+    if (btnMisRutas) btnMisRutas.addEventListener("click", abrirMisRutasVendedor);
+    let ultimosFiltrados = [];
+    const actualizarBarraMision = () => {
+      const b = $("barraMisionGps"), c = $("misionGpsConteo");
+      if (!b || !c) return;
+      const n = seleccionadosRutaGps.size;
+      b.hidden = !(modoRutaGps && n > 0);
+      c.textContent = `${n} cliente${n === 1 ? "" : "s"} para visitar hoy`;
+    };
+    const pintarListaCli = () => {
+      const q = ($("kBuscar") ? $("kBuscar").value : "").trim();
+      const qNorm = q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const filtrados = (cacheClientes || []).filter((c) => {
+        const ruta = rutaDeCliente(c);
+        if (rutaFiltroCli !== "todas" && ruta !== rutaFiltroCli) return false;
+        if (!qNorm) return true;
+        const txt = `${c.nombre || ""} ${c.contacto || ""} ${c.telefono || ""} ${ruta}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        return txt.includes(qNorm);
+      });
+      ultimosFiltrados = filtrados;
+      const infoEl = $("kInfo");
+      if (infoEl) {
+        infoEl.textContent = filtrados.length
+          ? `${filtrados.length} cliente(s)${rutaFiltroCli !== "todas" ? ` · Ruta ${rutaFiltroCli}` : " · por ruta comercial"}${modoRutaGps ? " · marcá los que visitarás hoy" : ""}`
+          : "";
+      }
+      const listaEl = $("kLista");
+      if (listaEl) {
+        listaEl.innerHTML = filtrados.length
+          ? filtrados.map((c) => {
+              const ruta = rutaDeCliente(c);
+              if (modoRutaGps) {
+                const sel = seleccionadosRutaGps.has(String(c.id));
+                return `<li><label class="cli-card-compacta cli-card-check${sel ? " seleccionada" : ""}">
+                  <input type="checkbox" class="chk-ruta-gps" data-cli-ruta-id="${esc(c.id)}"${sel ? " checked" : ""} />
+                  <strong class="cli-nombre-solo">${esc(c.nombre)}</strong>
+                  <span class="chip-ruta-cli ruta-${slugRuta(ruta)}">📍 ${esc(ruta)}</span>
+                </label></li>`;
+              }
+              return `<li><a class="cli-card-compacta" href="#/cliente/${encodeURIComponent(c.id)}">
+                <strong class="cli-nombre-solo">${esc(c.nombre)}</strong>
+                <span class="chip-ruta-cli ruta-${slugRuta(ruta)}">📍 ${esc(ruta)}</span>
+              </a></li>`;
+            }).join("")
+          : '<li class="vacio-panel">Sin clientes en esa ruta o búsqueda.</li>';
+      }
+      actualizarBarraMision();
+    };
+    $("btnModoRutaGps").addEventListener("click", () => {
+      modoRutaGps = !modoRutaGps;
+      if (modoRutaGps) iniciarCapturaGpsSilenciosa();
+      $("btnModoRutaGps").className = `btn ${modoRutaGps ? "btn-primary" : "btn-ghost"} btn-chico`;
+      $("btnModoRutaGps").setAttribute("aria-pressed", String(modoRutaGps));
+      $("btnModoRutaGps").textContent = modoRutaGps ? "✕ Salir de selección de ruta" : "🗺️ Armar ruta de visita";
+      $("btnSelTodaRuta").hidden = !modoRutaGps;
+      pintarListaCli();
+    });
+    $("btnSelTodaRuta").addEventListener("click", () => {
+      const todosMarcados = ultimosFiltrados.length > 0 && ultimosFiltrados.every((c) => seleccionadosRutaGps.has(String(c.id)));
+      ultimosFiltrados.forEach((c) => {
+        if (todosMarcados) seleccionadosRutaGps.delete(String(c.id));
+        else seleccionadosRutaGps.add(String(c.id));
+      });
+      pintarListaCli();
+    });
+    $("kLista").addEventListener("change", (e) => {
+      const chk = e.target.closest("[data-cli-ruta-id]");
+      if (!chk) return;
+      const id = String(chk.dataset.cliRutaId);
+      if (chk.checked) seleccionadosRutaGps.add(id); else seleccionadosRutaGps.delete(id);
+      const lbl = chk.closest(".cli-card-check");
+      if (lbl) lbl.classList.toggle("seleccionada", chk.checked);
+      actualizarBarraMision();
+    });
+    $("btnLanzarMisionGps").addEventListener("click", async () => {
+      const elegidos = (cacheClientes || []).filter((c) => seleccionadosRutaGps.has(String(c.id)));
+      if (!elegidos.length) return toast("Elegí al menos un cliente para armar la ruta.");
+      const btn = $("btnLanzarMisionGps");
+      btn.disabled = true; btn.textContent = "Creando misión…";
+      const f = fixVigente();
+      const paradas = elegidos.map((c, idx) => ({
+        orden: idx + 1,
+        cliente_id: String(c.id),
+        fuente: "crm",
+        negocio: String(c.nombre || ""),
+        direccion: String(c.direccion || ""),
+        zona: rutaDeCliente(c),
+        latitud: gpsValido(c.latitud, c.longitud) ? Number(c.latitud) : null,
+        longitud: gpsValido(c.latitud, c.longitud) ? Number(c.longitud) : null,
+      }));
+      let misionId = `MIS-${hoyCaracas().replace(/-/g, "")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      try {
+        if (SkalaAPI.gpsDb) {
+          const r = await SkalaAPI.gpsDb({
+            action: "crear_mision",
+            mision: {
+              id: misionId,
+              vendedor_id: String(yo().id || ""),
+              vendedor: String(yo().nombre || ""),
+              fecha: hoyCaracas(),
+              origen: "crm",
+              ...(f ? { start_lat: r6(f.lat), start_lng: r6(f.lng) } : {}),
+            },
+            paradas,
+          });
+          if (r && r.mision_id) misionId = String(r.mision_id);
+        }
+      } catch (_) {}
+      guardarLS("skala_ultima_mision_gps", { mision_id: misionId, fecha: hoyCaracas(), paradas });
+      btn.disabled = false; btn.textContent = "🚀 Abrir en GPS-Clientes";
+      const deepLink = `gpsclientes://mision?mision_id=${encodeURIComponent(misionId)}`;
+      const webUrl = SkalaAPI.gpsClientesUrl && SkalaAPI.gpsClientesUrl()
+        ? `${SkalaAPI.gpsClientesUrl().replace(/\/+$/, "")}/?mision_id=${encodeURIComponent(misionId)}`
+        : "";
+      await hoja({
+        titulo: `🗺️ Misión ${misionId} lista`,
+        cuerpo: `<p class="modal-sub">Se preparó la ruta con <strong>${paradas.length} cliente(s)</strong> para hoy.</p>
+          <a class="btn btn-primary btn-bloque" href="${esc(deepLink)}" id="lnkAbrirApkGps">📱 Abrir en App GPS-Clientes</a>
+          ${webUrl ? `<a class="btn btn-ghost btn-bloque" href="${esc(webUrl)}" target="_blank" rel="noopener">🌐 Abrir en navegador</a>` : ""}`,
+        ok: "Listo",
+      });
+    });
+    $("kRutasFiltro").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-ruta-f]");
+      if (!b) return;
+      rutaFiltroCli = b.dataset.rutaF;
+      $("kRutasFiltro").querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
+      pintarListaCli();
+    });
     let t = null;
     const cargar = async (q) => {
-      const r = await api("clientes", { q, limite: 100 });
-      if (!vigente() || q !== $("kBuscar").value.trim()) return;
-      cacheClientes = r.clientes;
-      $("kInfo").textContent = r.clientes.length ? (q ? `${r.clientes.length} resultado(s)` : `${r.clientes.length} cliente(s) · los más recientes primero`) : "";
-      $("kLista").innerHTML = r.clientes.length ? r.clientes.map((c) => `<li><a href="#/cliente/${encodeURIComponent(c.id)}">
-          <strong>${esc(c.nombre)}</strong><span>${esc([c.contacto, c.telefono].filter(Boolean).join(" · "))}</span>
-          ${c.direccion ? `<span>${esc(c.direccion)}</span>` : ""}</a></li>`).join("")
-        : '<li class="vacio-panel">Sin clientes con esa búsqueda.</li>';
+      const r = await api("clientes", { q: "", limite: 200 });
+      if (!vigente()) return;
+      cacheClientes = r.clientes || [];
+      pintarListaCli();
     };
-    $("kBuscar").addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => cargar($("kBuscar").value.trim()).catch((e) => toast(e.message)), 350); });
+    $("kBuscar").addEventListener("input", () => {
+      clearTimeout(t);
+      if (cacheClientes.length) { pintarListaCli(); return; }
+      t = setTimeout(() => cargar($("kBuscar").value.trim()).catch((e) => toast(e.message)), 250);
+    });
     await cargar("");
   }
 
@@ -3508,11 +4713,18 @@
     if (query.get("editar")) return vClienteForm(v, c);
     $("appTitulo").textContent = c.nombre;
     const tel = telLink(c.telefono), tel2 = telLink(c.telefono2), wa = telefonoWhatsapp(c.telefono), mapa = linkMapa(c.latitud, c.longitud);
+    const ruta = rutaDeCliente(c);
     v.innerHTML = `
       <section class="tarjeta">
-        <h2 class="ped-titulo">${esc(c.nombre)}</h2>
-        ${c.contacto ? `<p class="ped-det">${esc(c.contacto)}</p>` : ""}
+        <div class="fila-top">
+          <div>
+            <h2 class="ped-titulo">${esc(c.nombre)}</h2>
+            ${c.contacto ? `<p class="ped-det">${esc(c.contacto)}</p>` : ""}
+          </div>
+          <span class="chip-ruta-cli ruta-${slugRuta(ruta)}">📍 ${esc(ruta)}</span>
+        </div>
         <dl class="datos">
+          <dt>Ruta / Zona</dt><dd><strong>${esc(ruta)}</strong> · <span class="ped-det">Base compartida</span></dd>
           ${c.rif_cedula ? `<dt>RIF</dt><dd>${esc(c.rif_cedula)}</dd>` : ""}
           <dt>Teléfono</dt><dd>${esc([c.telefono, c.telefono2].filter(Boolean).join(" / ") || "—")}</dd>
           ${c.direccion ? `<dt>Dirección</dt><dd>${esc(c.direccion)}</dd>` : ""}
@@ -3527,11 +4739,20 @@
         <button type="button" class="btn btn-primary btn-bloque" id="btnPedirCliente">Nuevo pedido para este cliente</button>
         <a class="btn btn-ghost btn-bloque" href="#/cliente/${encodeURIComponent(c.id)}?editar=1" id="btnEditarCliente">Editar datos</a>
       </section>
+      <section class="tarjeta tarjeta-prox-gps" data-gps-slot="ficha-cliente-gps">
+        <div class="prox-gps-cab">
+          <div>
+            <span class="chip-prox">Próximamente</span>
+            <h3 class="prox-gps-tit">📍 Inteligencia de Visita en Sitio</h3>
+          </div>
+        </div>
+        <p class="ped-det">📍 Check-in de visita en sitio · Geocerca automática · Historial de rutas y frecuencia de visita</p>
+      </section>
       <h3 class="sub-titulo">Pedidos</h3>
       <ul class="lista-ped" id="kPedidos"><li>${spin()}</li></ul>`;
     $("btnPedirCliente").addEventListener("click", () => {
-      fijarCliente({ id: c.id, contacto: c.contacto, negocio: c.nombre, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: c.telefono2, direccion: c.direccion, latitud: c.latitud, longitud: c.longitud });
-      ir("#/nuevo/productos");
+      fijarCliente({ id: c.id, contacto: c.contacto, negocio: c.nombre, rif_cedula: c.rif_cedula, telefono: c.telefono, telefono2: c.telefono2, direccion: c.direccion, latitud: c.latitud, longitud: c.longitud, ruta });
+      ir("#/nuevo");
     });
     const r = await api("pedidos", { cliente_id: c.id });
     if (!vigente()) return;
@@ -3541,21 +4762,27 @@
   /* ---------- Añadir / editar cliente (sin pedido: traspaso de la base) ---------- */
   function vClienteForm(v, c) {
     const nuevo = !c;
+    if (nuevo) iniciarCapturaGpsSilenciosa();
     $("appTitulo").textContent = nuevo ? "Añadir cliente" : "Editar cliente";
     $("btnAtras").hidden = false;
     $("btnAtras").dataset.destino = nuevo ? "#/clientes" : `#/cliente/${encodeURIComponent(c.id)}`;
     const val = (k) => esc(c ? (k === "negocio" ? c.nombre : c[k]) ?? "" : "");
+    const rutaAct = c ? rutaDeCliente(c) : "Vigía";
     v.innerHTML = `<form class="tarjeta" id="fNuevoCli" novalidate>
       ${nuevo ? '<p class="modal-sub">Para pasar tu base de clientes: no hace falta que tenga pedidos. Solo el nombre es obligatorio.</p>' : ""}
       <div class="form-grid">
         <label class="field"><span>Nombre del negocio</span><input id="fnNegocio" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Peluquería / tienda" value="${val("negocio")}" /></label>
         <label class="field"><span>Nombre del cliente</span><input id="fnContacto" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Persona de contacto" value="${val("contacto")}" /></label>
+        <label class="field"><span>Ruta / Zona asignada</span>
+          <select id="fnRuta">${RUTAS_CARTERA.map((r) => `<option value="${esc(r)}"${r === rutaAct ? " selected" : ""}>📍 ${esc(r)}</option>`).join("")}</select>
+        </label>
         <label class="field"><span>RIF / Cédula</span><input id="fnRif" type="text" autocomplete="off" autocapitalize="characters" enterkeyhint="next" placeholder="J-12345678-9" value="${val("rif_cedula")}" /></label>
         <label class="field"><span>Teléfono 1</span><input id="fnTel1" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="0412-1234567" value="${val("telefono")}" /></label>
         <label class="field"><span>Teléfono 2</span><input id="fnTel2" type="tel" inputmode="tel" autocomplete="off" enterkeyhint="next" placeholder="Opcional" value="${val("telefono2")}" /></label>
         <label class="field field-full"><span>Dirección</span><input id="fnDireccion" type="text" autocomplete="off" enterkeyhint="next" placeholder="Dirección" value="${val("direccion")}" /></label>
       </div>
       <fieldset class="pay ubicacion"><legend>Ubicación</legend>
+        ${nuevo ? fieldsetCanalHTML("fnCanalAltaFs", "fnCanalAlta", "¿Dónde estás registrando a este cliente? *", "online_telefono", TEXTOS_CANAL_ALTA) : ""}
         <label class="field field-full"><span>Pegar enlace de Google Maps o coordenadas</span>
           <input id="fnPegar" type="text" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="ej. 8.6123, -71.6543 o https://www.google.com/maps/…" /></label>
         <button type="button" class="btn btn-ghost btn-bloque" id="fnGps">Usar mi ubicación actual (estoy con el cliente)</button>
@@ -3570,16 +4797,22 @@
     </form>`;
     const pintarUbic = (msg) => {
       const lat = $("fnLat").value, lng = $("fnLng").value;
-      $("fnGpsEstado").innerHTML = msg ? esc(msg) : lat && lng
+      $("fnGpsEstado").innerHTML = msg && typeof msg === "string" ? esc(msg) : lat && lng
         ? `Ubicación lista (${esc(lat)}, ${esc(lng)}) · <a href="${esc(linkMapa(lat, lng))}" target="_blank" rel="noopener">ver mapa</a> · <button type="button" class="link-btn" id="fnQuitar">Quitar</button>`
         : "Sin ubicación (se puede agregar después).";
     };
     pintarUbic();
+    if (nuevo) enlazarCanalAlta("fnCanalAlta", $("fnLat"), $("fnLng"), $("fnGps"), () => pintarUbic());
     $("fnPegar").addEventListener("input", () => {
       const t = $("fnPegar").value.trim();
       if (!t) return pintarUbic();
       const co = coordsDeTexto(t);
-      if (co) { $("fnLat").value = co.lat; $("fnLng").value = co.lng; pintarUbic(); }
+      if (co) {
+        $("fnLat").value = co.lat; $("fnLng").value = co.lng;
+        const rd = document.querySelector('input[name="fnCanalAlta"][value="en_persona"]');
+        if (rd) rd.checked = true;
+        pintarUbic();
+      }
       else pintarUbic(/goo\.gl|maps\.app/.test(t)
         ? "Ese enlace corto no trae las coordenadas: abrilo, mantené presionado el punto en el mapa y copiá los números (ej. 8.6123, -71.6543)."
         : "No reconozco esa ubicación. Pegá coordenadas (8.6123, -71.6543) o un enlace largo de Google Maps.");
@@ -3592,15 +4825,25 @@
       const b = $("fnGps");
       b.disabled = true; b.textContent = "Buscando GPS…";
       navigator.geolocation.getCurrentPosition(
-        (pos) => { $("fnLat").value = pos.coords.latitude.toFixed(6); $("fnLng").value = pos.coords.longitude.toFixed(6); b.disabled = false; b.textContent = "Usar mi ubicación actual (estoy con el cliente)"; pintarUbic(); },
+        (pos) => {
+          $("fnLat").value = pos.coords.latitude.toFixed(6); $("fnLng").value = pos.coords.longitude.toFixed(6);
+          const rd = document.querySelector('input[name="fnCanalAlta"][value="en_persona"]');
+          if (rd) rd.checked = true;
+          b.disabled = false; b.textContent = "Usar mi ubicación actual (estoy con el cliente)"; pintarUbic();
+        },
         (err) => { b.disabled = false; b.textContent = "Usar mi ubicación actual (estoy con el cliente)"; toast(err.code === 1 ? "Permiso de ubicación negado." : "No se pudo obtener el GPS."); },
         { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
     });
     const guardar = async (otro) => {
+      const rutaElegida = $("fnRuta") ? $("fnRuta").value : "Vigía";
+      const canalAlta = nuevo ? ((document.querySelector('input[name="fnCanalAlta"]:checked') || {}).value || "online_telefono") : "";
       const cliente = {
         id: c ? c.id : undefined, negocio: $("fnNegocio").value.trim(), contacto: $("fnContacto").value.trim(),
         rif_cedula: $("fnRif").value.trim(), telefono: $("fnTel1").value.trim(), telefono2: $("fnTel2").value.trim(),
-        direccion: $("fnDireccion").value.trim(), latitud: $("fnLat").value, longitud: $("fnLng").value,
+        direccion: $("fnDireccion").value.trim(),
+        latitud: nuevo && canalAlta === "online_telefono" && !$("fnPegar").value.trim() ? "" : $("fnLat").value,
+        longitud: nuevo && canalAlta === "online_telefono" && !$("fnPegar").value.trim() ? "" : $("fnLng").value,
+        ruta: rutaElegida,
       };
       const faltan = validarCliente(cliente, { telefonoOpcional: true });
       const err = $("fnError");
@@ -3610,6 +4853,11 @@
       btns.forEach((b) => (b.disabled = true));
       try {
         const r = await api("guardarCliente", { cliente });
+        guardarRutaCliente(r.cliente.id, rutaElegida);
+        if (nuevo && canalAlta === "en_persona") {
+          api("registrarVisita", { cliente_id: r.cliente.id, canal: "en_persona", tipo: "alta_cliente", latitud: cliente.latitud, longitud: cliente.longitud }).catch(() => {});
+          avisarAtencion(r.cliente.id, "en_persona", "alta_cliente");
+        }
         cacheClientes = [r.cliente, ...cacheClientes.filter((x) => x.id !== r.cliente.id)];
         toast(r.existia ? `${r.cliente.nombre} ya existía: se actualizaron sus datos` : `Cliente ${r.cliente.nombre} guardado`);
         if (otro) { render(); return; }
@@ -3679,97 +4927,247 @@
     return "";
   }
   const preciosDe = (d) => Object.fromEntries(CAMPOS_P.map((k) => [k, String(d[k] || "").trim() === "" ? 0 : numTxt(d[k])]));
+  const esProductoSkala = (code) => /^(BC|KT)-/i.test(String(code || ""));
+  let filtroCatInv = "todos";
+  let catPreciosActual = "";
+  let busquedaPre = "";
 
+  function gruposDeCatalogoParaPrecios(cat) {
+    const mapa = allProductsMap();
+    const codesSkalaBanos = Object.keys(mapa).filter((c) => /^BC-/i.test(c));
+    const codesSkalaKits = Object.keys(mapa).filter((c) => /^KT-/i.test(c));
+    if (cat === "skala") {
+      return [
+        { id: "GRP-SKALA-1KG", aliasId: "GRP-SKL-BANOS-DIST", nombre: `Baño de Crema Skala 1 kg (${codesSkalaBanos.length || 16} var. · 1 cja = 6 und)`, codes: codesSkalaBanos },
+        { id: "GRP-SKALA-KIT", aliasId: "GRP-SKL-KITS-DIST", nombre: `Kits Skala Shampoo + Acondicionador (${codesSkalaKits.length || 8} var. · 1 cja = 6 dúos)`, codes: codesSkalaKits },
+      ];
+    }
+    const DEFINICION_GRUPOS_ONTIVEROS = [
+      // Grupos con mismo precio entre sus fragancias
+      { id: "GRP-ALV-DET-1KG", nom: "Detergente Alive 1kg", rx: /^ALV-DET1K-/i, empaque: "1 cja = 12 bolsas de 1 kg" },
+      { id: "GRP-AZ-DET", nom: "Detergente A-Z 1kg", rx: /^AZ-DET-/i, empaque: "1 cja = 12 bolsas de 1 kg" },
+      { id: "GRP-ALV-DET-500G", nom: "Detergente Alive 500g", rx: /^ALV-DET500-/i, empaque: "1 cja = 24 bolsas de 500 g" },
+      { id: "GRP-ALV-PAN-150G", nom: "Jabón Panela Alive 150g", rx: /^ALV-PAN-\d/i, empaque: "1 cja = 36 panelas de 150 g" },
+      { id: "GRP-JAB-POPULAR", nom: "Jabón Popular Barra", rx: /^JAB-POP-/i, empaque: "1 cja = 36 barras" },
+      { id: "GRP-ALV-SUA-1L", nom: "Suavizante Alive 1L", rx: /^ALV-SUA-/i, empaque: "1 cja = 12 botellas de 1 L" },
+      { id: "GRP-ALV-LAV", nom: "Lavaplatos Aliclean 350ml", rx: /^ALV-LAV-0[123]$/i, empaque: "1 cja = 24 envases de 350 ml" },
+      { id: "GRP-ALV-LAV-750", nom: "Lavaplatos Aliclean 750ml", rx: /^ALV-LAV-0[45]$/i, empaque: "1 cja = 12 envases de 750 ml" },
+      { id: "GRP-BER-ESP", nom: "Espirales Bernice x60", rx: /^BER-ESP-/i, empaque: "1 cja = 24 cajas × 60 espirales" },
+      { id: "GRP-DOR-PACE3", nom: "Afeitadora Dorco Pace 3", rx: /^DOR-PACE3-/i, empaque: "1 cja = 12 blísters · 1 blíster = 12 pqts de 3 afeitadoras", sinConteoVar: true },
+      { id: "GRP-ALV-CAP", nom: "Baño de Crema Alive 400g", rx: /^ALV-CAP-/i, empaque: "1 cja = 12 potes de 400 g" },
+      { id: "GRP-ALV-LOC", nom: "Loción Corporal Alive 400ml", rx: /^ALV-LOC-/i, empaque: "1 cja = 12 frascos de 400 ml" },
+      { id: "GRP-ALV-SHA-413", nom: "Shampoo Alive 413ml", rx: /^ALV-SHA413-/i, empaque: "1 cja = 12 envases de 413 ml" },
+      { id: "GRP-ALV-ACO-413", nom: "Acondicionador Alive 413ml", rx: /^ALV-ACO413-/i, empaque: "1 cja = 12 envases de 413 ml" },
+      { id: "GRP-ALV-SHA-400", nom: "Shampoo Anticaspa Alive 400ml", rx: /^ALV-SHA400-/i, empaque: "1 cja = 12 envases de 400 ml" },
+      { id: "GRP-ALV-SHA-350", nom: "Shampoo 2en1 y Gold Alive 350ml", rx: /^ALV-SHA350-/i, empaque: "1 cja = 12 envases de 350 ml" },
+      { id: "GRP-ALV-SHA-250", nom: "Shampoo Alive 250ml", rx: /^ALV-SHA250-/i, empaque: "4 disp. de 8 variaciones · 1 cja = 12 envases de 250 ml", sinConteoVar: true },
+      { id: "GRP-ALV-DEN", nom: "Crema Dental Alident 100g", rx: /^ALV-DEN-\d/i, empaque: "1 cja = 8 blísters × 12 und" },
+      { id: "GRP-ALV-DEN-75G", nom: "Crema Dental Alident 75g", rx: /^ALV-DEN75-/i, empaque: "1 cja = 10 blísters × 12 und" },
+      { id: "GRP-ALV-JAB-ANITA", nom: "Jabón de Tocador Anita 125g", rx: /^ALV-JAB-/i, empaque: "1 cja = 72 pastillas de 125 g" },
+      { id: "GRP-HAR-MILKY", nom: "Jabón Harmony 135g (Milky)", rx: /^HAR-MIL-/i, empaque: "1 cja = 48 und de 135 g" },
+      { id: "GRP-HAR-FRUITY", nom: "Jabón Harmony Pequeño (Fruit)", rx: /^HAR-FRU-/i, empaque: "1 cja = 72 und" },
+      { id: "GRP-BF-THU", nom: "Toallas Húmedas Baby Finger", rx: /^BF-THU-/i, empaque: "1 cja = 24 pqts × 50 und" },
+      { id: "GRP-BF-CUI", nom: "Cuidado Bebé Baby Finger", rx: /^BF-CUI-/i, empaque: "1 cja = 12 und" },
+      // Papel Alisoft (cada presentación maneja distinto precio)
+      { id: "ALV-PAP-01", groupId: "GRP-ALV-PAP", familia: "🧻 Papel Higiénico Alisoft (precios distintos por presentación · 1 bulto = 12 pqts)", nom: "Alisoft Rosado 215 Hojas × 4 Rollos", rx: /^ALV-PAP-01$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "ALV-PAP-02", groupId: "GRP-ALV-PAP", familia: "🧻 Papel Higiénico Alisoft (precios distintos por presentación · 1 bulto = 12 pqts)", nom: "Alisoft Dorado Comfort Plus 300 Hojas × 4 Rollos", rx: /^ALV-PAP-02$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "ALV-PAP-03", groupId: "GRP-ALV-PAP", familia: "🧻 Papel Higiénico Alisoft (precios distintos por presentación · 1 bulto = 12 pqts)", nom: "Alisoft Azul Premium Max 400 Hojas × 4 Rollos", rx: /^ALV-PAP-03$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "ALV-PAP-04", groupId: "GRP-ALV-PAP", familia: "🧻 Papel Higiénico Alisoft (precios distintos por presentación · 1 bulto = 12 pqts)", nom: "Alisoft Negro Premium Jumbo 600 Hojas × 4 Rollos", rx: /^ALV-PAP-04$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      // Toallín Alisoft (cada presentación maneja distinto precio)
+      { id: "ALV-TOAABS-01", groupId: "GRP-ALV-TOA-ABS", familia: "🧻 Toallín Absorbente Alisoft (precios distintos por presentación · 1 bulto = 12 rollos)", nom: "Toallín Alisoft Azul 80 Hojas", rx: /^ALV-TOAABS-01$/i, empaque: "1 bulto = 12 rollos", sinConteoVar: true },
+      { id: "ALV-TOAABS-02", groupId: "GRP-ALV-TOA-ABS", familia: "🧻 Toallín Absorbente Alisoft (precios distintos por presentación · 1 bulto = 12 rollos)", nom: "Toallín Alisoft Naranja Doble Hoja", rx: /^ALV-TOAABS-02$/i, empaque: "1 bulto = 12 rollos", sinConteoVar: true },
+      // Toallas Femeninas y Protectores Alive (todas las cajas traen 72 pqts · precios distintos)
+      { id: "ALV-TOAFEM-01", groupId: "GRP-ALV-TOA-FEM", familia: "🌸 Toallas Femeninas y Protectores Alive (precios distintos · 1 cja = 72 pqts)", nom: "Toallas Alive Regular Día con Alas 245mm", rx: /^ALV-TOAFEM-01$/i, empaque: "1 cja = 72 pqts", sinConteoVar: true },
+      { id: "ALV-TOAFEM-02", groupId: "GRP-ALV-TOA-FEM", familia: "🌸 Toallas Femeninas y Protectores Alive (precios distintos · 1 cja = 72 pqts)", nom: "Toallas Alive Nocturna Noche 290mm", rx: /^ALV-TOAFEM-02$/i, empaque: "1 cja = 72 pqts", sinConteoVar: true },
+      { id: "ALV-TOAFEM-03", groupId: "GRP-ALV-TOA-FEM", familia: "🌸 Toallas Femeninas y Protectores Alive (precios distintos · 1 cja = 72 pqts)", nom: "Toallas Alive Extra Larga 340mm", rx: /^ALV-TOAFEM-03$/i, empaque: "1 cja = 72 pqts", sinConteoVar: true },
+      { id: "ALV-TOAFEM-04", groupId: "GRP-ALV-TOA-FEM", familia: "🌸 Toallas Femeninas y Protectores Alive (precios distintos · 1 cja = 72 pqts)", nom: "Protectores Diarios Alive × 20 und", rx: /^ALV-TOAFEM-04$/i, empaque: "1 cja = 72 pqts", sinConteoVar: true },
+      // Pañales Baby Finger y Adulto (todos los bultos llevan 12 pqts · precios distintos por talla)
+      { id: "BF-PAN-P20", groupId: "GRP-BF-PAN", familia: "👶 Pañales Baby Finger y Adulto (precios distintos por talla · 1 bulto = 12 pqts)", nom: "Pañal Baby Finger Talla P · 20 und", rx: /^BF-PAN-P20$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "BF-PAN-P10", groupId: "GRP-BF-PAN", familia: "👶 Pañales Baby Finger y Adulto (precios distintos por talla · 1 bulto = 12 pqts)", nom: "Pañal Baby Finger Talla P · 10 und", rx: /^BF-PAN-P10$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "BF-PAN-M18", groupId: "GRP-BF-PAN", familia: "👶 Pañales Baby Finger y Adulto (precios distintos por talla · 1 bulto = 12 pqts)", nom: "Pañal Baby Finger Talla M · 18 und", rx: /^BF-PAN-M18$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "BF-PAN-G18", groupId: "GRP-BF-PAN", familia: "👶 Pañales Baby Finger y Adulto (precios distintos por talla · 1 bulto = 12 pqts)", nom: "Pañal Baby Finger Talla G · 18 und", rx: /^BF-PAN-G18$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "BF-PAN-XG16", groupId: "GRP-BF-PAN", familia: "👶 Pañales Baby Finger y Adulto (precios distintos por talla · 1 bulto = 12 pqts)", nom: "Pañal Baby Finger Talla XG · 16 und", rx: /^BF-PAN-XG16$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "BF-PAN-XXG16", groupId: "GRP-BF-PAN", familia: "👶 Pañales Baby Finger y Adulto (precios distintos por talla · 1 bulto = 12 pqts)", nom: "Pañal Baby Finger Talla XXG · 16 und", rx: /^BF-PAN-XXG16$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "BF-PAN-XXXG", groupId: "GRP-BF-PAN", familia: "👶 Pañales Baby Finger y Adulto (precios distintos por talla · 1 bulto = 12 pqts)", nom: "Pañal Baby Finger Talla XXXG · 14 und", rx: /^BF-PAN-XXXG$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "ALV-PAN-ADM", groupId: "GRP-BF-PAN", familia: "👶 Pañales Baby Finger y Adulto (precios distintos por talla · 1 bulto = 12 pqts)", nom: "Pañal Adulto Alive Talla M · 6 und", rx: /^ALV-PAN-ADM$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+      { id: "ALV-PAN-ADXG", groupId: "GRP-BF-PAN", familia: "👶 Pañales Baby Finger y Adulto (precios distintos por talla · 1 bulto = 12 pqts)", nom: "Pañal Adulto Alive Talla XG · 6 und", rx: /^ALV-PAN-ADXG$/i, empaque: "1 bulto = 12 pqts", sinConteoVar: true },
+    ];
+    const todosCodes = Object.keys(mapa).filter((c) => !esProductoSkala(c));
+    return DEFINICION_GRUPOS_ONTIVEROS.map((def) => {
+      const codes = todosCodes.filter((c) => def.rx.test(c));
+      const sufijo = def.sinConteoVar ? `(${def.empaque})` : `(${codes.length} var. · ${def.empaque})`;
+      return {
+        id: def.id,
+        aliasId: def.groupId || "",
+        familia: def.familia || "",
+        nombre: `${def.nom} ${sufijo}`,
+        codes,
+      };
+    }).filter((g) => g.codes.length > 0);
+  }
+
+  /* Modalidad de venta por producto ("caja" = Caja/Bulto · "unidad" = Unidad/Blíster · "ambos" = Caja/Bulto y Unidad/Blíster) */
+  const K_MODO_VENTA_PROD = "skala_modalidad_venta_v1";
+  const K_CFG_GRUPOS_DIST = "dist_ontiveros_config_grupos_v1";
+  const leerModalidadVentaMap = () => leerLS(K_MODO_VENTA_PROD, {}) || {};
+  function todosLosGruposConCodigos() {
+    return [...gruposDeCatalogoParaPrecios("skala"), ...gruposDeCatalogoParaPrecios("distribuidora")];
+  }
+  function grupoDeProductoCode(code) {
+    const c = String(code || "").toUpperCase();
+    return todosLosGruposConCodigos().find((g) => g.codes.some((x) => String(x).toUpperCase() === c)) || null;
+  }
+  function modoVentaProducto(code) {
+    const c = String(code || "").toUpperCase();
+    const mapa = leerModalidadVentaMap();
+    if (mapa[c] === "caja" || mapa[c] === "unidad" || mapa[c] === "ambos") return mapa[c];
+    const grp = grupoDeProductoCode(c);
+    if (grp) {
+      const cfg = leerConfigGrupos();
+      const cg = cfg[grp.id] || (grp.aliasId && cfg[grp.aliasId]);
+      if (cg && cg.modo_venta) return cg.modo_venta;
+      if (cg && typeof cg.permite_unidad === "boolean") return cg.permite_unidad ? "ambos" : "caja";
+    }
+    return esProductoSkala(c) ? "caja" : "ambos";
+  }
+  function fijarModalidadVentaProducto(code, modo) {
+    const c = String(code || "").toUpperCase();
+    const m = modo === "unidad" || modo === "ambos" ? modo : "caja";
+    const mapa = leerModalidadVentaMap();
+    mapa[c] = m;
+    guardarLS(K_MODO_VENTA_PROD, mapa);
+
+    const grp = grupoDeProductoCode(c);
+    if (grp) {
+      const permiteUnd = grp.codes.some((cod) => {
+        const mc = String(cod).toUpperCase() === c ? m : modoVentaProducto(cod);
+        return mc === "unidad" || mc === "ambos";
+      });
+      const cfg = leerConfigGrupos();
+      const prev = cfg[grp.id] || (grp.aliasId && cfg[grp.aliasId]) || {};
+      const act = { ...prev, permite_unidad: permiteUnd, modo_venta: m };
+      cfg[grp.id] = act;
+      if (grp.aliasId) cfg[grp.aliasId] = act;
+      guardarConfigGrupos(cfg);
+      try {
+        const rawDist = localStorage.getItem(K_CFG_GRUPOS_DIST);
+        const cfgDist = rawDist ? JSON.parse(rawDist) : {};
+        const prevDist = cfgDist[grp.id] || (grp.aliasId && cfgDist[grp.aliasId]) || {};
+        const actDist = { ...prevDist, permiteUnidad: permiteUnd, modoVenta: m };
+        cfgDist[grp.id] = actDist;
+        if (grp.aliasId) cfgDist[grp.aliasId] = actDist;
+        localStorage.setItem(K_CFG_GRUPOS_DIST, JSON.stringify(cfgDist));
+      } catch (_) {}
+    }
+    return m;
+  }
+  function etiquetaModoVenta(modo) {
+    if (modo === "unidad") return "Unidad / Blíster";
+    if (modo === "ambos") return "Caja/Bulto y Unidad/Blíster";
+    return "Caja / Bulto";
+  }
+
+  /* ---------- Inventario (Ajustar existencias y si se vende por Caja/Bulto o Unidad/Blíster) ---------- */
   async function vInventario(v, _p, _q, vigente) {
     const r = await api("inventario");
     if (!vigente()) return;
     const nombre = (c) => (allProductsMap()[c] || {}).name;
     const prods = r.productos.map((x) => ({ ...x, producto: nombre(x.code) || x.producto }));
-    const linea = (pre, tit, x) => {
-      const v = (k) => x[pre ? (k ? `mayor_${k}` : "mayor") : (k || "menor")];
-      const partes = FORMAS.map(([k, t]) => (v(k) ? `${k ? t.replace("Efectivo", "Ef.").replace(" pago", "") : "Normal"} ${dinero(v(k))}` : "")).filter(Boolean);
-      return partes.length ? `<span class="inv-nivel"><b>${tit}</b> ${partes.join(" · ")}</span>` : "";
-    };
-    const precioTxt = (x) => x.menor ? `${linea(false, "Menor:", x)}${linea(true, "Mayor:", x)}` : "<em>Sin precio</em>";
-    const fila = (x) => `<li class="inv-fila${x.controlado && x.disponible <= 0 ? " sin-stock" : ""}" data-code="${esc(x.code)}" data-texto="${esc((x.producto + " " + x.code).toLowerCase())}">
+    const fila = (x) => {
+      const catItem = esProductoSkala(x.code) ? "skala" : "distribuidora";
+      const modoV = modoVentaProducto(x.code);
+      return `<li class="inv-fila${x.controlado && x.disponible <= 0 ? " sin-stock" : ""}" data-code="${esc(x.code)}" data-cat="${catItem}" data-texto="${esc((x.producto + " " + x.code).toLowerCase())}">
         <div class="inv-top">
-          <label class="inv-check"><input type="checkbox" value="${esc(x.code)}" aria-label="Elegir ${esc(x.producto)}" /></label>
           <div class="inv-nombre"><strong>${esc(x.producto)}</strong><span class="ped-det">${esc(x.code)}${x.nuevo ? ' · <span class="etq-nuevo">Nuevo</span>' : ""}</span></div>
           <div class="inv-stock${x.controlado && x.disponible <= 0 ? " agotado" : ""}">${x.controlado ? `<strong>${x.disponible}</strong><span>${x.disponible <= 0 ? "sin stock" : "disponibles"}</span>` : '<span>Sin cargar</span>'}</div></div>
         <p class="ped-det">${x.controlado ? `En depósito ${x.fisico}${x.por_salir ? ` · ${x.por_salir} aprobadas por salir` : ""}` : "No se controla hasta la primera entrada o conteo"}${x.en_proceso ? ` · en proceso ${x.en_proceso}` : ""}</p>
-        <p class="ped-det inv-precios">${precioTxt(x)}</p>
-        <div class="inv-botones"><button type="button" class="btn btn-ghost" data-inv="entrada">Ajustar stock</button><button type="button" class="btn btn-ghost" data-inv="precio">Precios</button>${x.nuevo ? '<button type="button" class="btn btn-ghost" data-inv="editar">Editar</button>' : ""}</div>
+        <div class="inv-modo-venta" role="group" aria-label="Modalidad de venta de ${esc(x.producto)}">
+          <span class="inv-modo-lbl">Se vende por:</span>
+          <div class="inv-modo-pills">
+            <button type="button" class="btn-modo-venta${modoV === "caja" ? " active" : ""}" data-modo-venta="caja" data-code="${esc(x.code)}">📦 Caja / Bulto</button>
+            <button type="button" class="btn-modo-venta${modoV === "unidad" ? " active" : ""}" data-modo-venta="unidad" data-code="${esc(x.code)}">🧴 Unidad / Blíster</button>
+            <button type="button" class="btn-modo-venta${modoV === "ambos" ? " active" : ""}" data-modo-venta="ambos" data-code="${esc(x.code)}">📦+🧴 Ambos</button>
+          </div>
+        </div>
+        <div class="inv-botones"><button type="button" class="btn btn-ghost" data-inv="entrada">Ajustar stock</button>${x.nuevo ? '<button type="button" class="btn btn-ghost" data-inv="editar">Editar</button>' : ""}</div>
       </li>`;
-    const sinPrecio = prods.filter((x) => !x.menor).length;
+    };
     v.innerHTML = `
       <div class="inv-acciones">
         <a class="inv-accion" href="#/inventario/cargar?modo=entrada" id="lnkEntrada"><b>+</b><span><strong>Cargar mercancía</strong><em>Sumar las cajas que llegaron</em></span></a>
         <a class="inv-accion" href="#/inventario/cargar?modo=conteo" id="lnkConteo"><b>#</b><span><strong>Conteo total</strong><em>Escribir cuántas hay en el depósito</em></span></a>
       </div>
       <button type="button" class="btn btn-ghost btn-bloque" id="btnNuevoProd">Nuevo producto</button>
-      <div class="buscador"><input type="search" id="invBuscar" placeholder="Buscar producto o código" autocomplete="off" value="${esc(busquedaInv)}" /></div>
-      ${sinPrecio ? `<p class="aviso-chico">${sinPrecio} producto(s) sin precio. Elegí varios con la casilla y tocá <strong>Poner precios</strong>.</p>` : ""}
-      <div class="fila-elegir"><label class="check"><input type="checkbox" id="invTodos" /> Elegir todos los que se ven</label></div>
+      <div class="periodos" id="invCatTabs" role="tablist" aria-label="Filtrar existencias por catálogo">
+        <button type="button" class="tab${filtroCatInv === "todos" ? " active" : ""}" data-cat-inv="todos">Todos</button>
+        <button type="button" class="tab${filtroCatInv === "skala" ? " active" : ""}" data-cat-inv="skala">Skala Venezuela</button>
+        <button type="button" class="tab${filtroCatInv === "distribuidora" ? " active" : ""}" data-cat-inv="distribuidora">Dist. Ontiveros</button>
+      </div>
+      <div class="buscador"><input type="search" id="invBuscar" placeholder="Buscar producto o código para ajustar existencias" autocomplete="off" value="${esc(busquedaInv)}" /></div>
       <ul class="lista-inv" id="invLista">${prods.map(fila).join("")}</ul>
-      <div class="barra-accion" id="invBarra" hidden><div><strong id="invSel">0 elegidos</strong><span> · mismo precio para todos</span></div><button type="button" class="btn btn-primary" id="btnPreciosVarios">Poner precios</button></div>
       <details class="tarjeta"><summary class="sub-titulo">Últimos movimientos</summary>
         ${r.movimientos.length ? `<ul class="resumen-items">${r.movimientos.slice(0, 30).map((m) => `<li><span>${esc(nombre(m.code) || m.producto)} <span class="ped-det">${esc(new Date(m.fecha).toLocaleDateString("es-VE"))} · ${esc(m.usuario)}${m.nota ? " · " + esc(m.nota) : ""}</span></span><em>${m.tipo === "alta" ? "alta" : `${m.tipo === "conteo" ? "conteo " : ""}${m.cajas > 0 ? "+" : ""}${m.cajas}`}</em></li>`).join("")}</ul>` : '<p class="modal-sub">Todavía no hay entradas.</p>'}
       </details>
       <p class="nota-chica">En depósito = entradas, conteos y ajustes − lo que ya salió (en ruta o entregado). Disponible = en depósito − aprobados que todavía no salieron. Los productos sin stock salen en gris en el catálogo y no se pueden pedir. Un producto nuevo empieza sin stock hasta su primera entrada.</p>`;
-    const filtrar = () => { const q = busquedaInv.trim().toLowerCase(); v.querySelectorAll(".inv-fila").forEach((li) => { li.hidden = !!q && !li.dataset.texto.includes(q); }); };
+    const filtrar = () => {
+      const q = busquedaInv.trim().toLowerCase();
+      v.querySelectorAll(".inv-fila").forEach((li) => {
+        const okCat = filtroCatInv === "todos" || li.dataset.cat === filtroCatInv;
+        const okQ = !q || li.dataset.texto.includes(q);
+        li.hidden = !(okCat && okQ);
+      });
+    };
     filtrar();
-    const elegidos = () => [...v.querySelectorAll(".inv-check input:checked")].map((c) => c.value);
-    const pintarSel = () => {
-      const n = elegidos().length;
-      $("invBarra").hidden = !n;
-      $("invSel").textContent = `${n} elegido${n === 1 ? "" : "s"}`;
-      v.querySelectorAll(".inv-fila").forEach((li) => li.classList.toggle("elegida", li.querySelector(".inv-check input").checked));
-    };
     $("invBuscar").addEventListener("input", (e) => { busquedaInv = e.target.value; filtrar(); });
-    $("invLista").addEventListener("change", pintarSel);
-    $("invTodos").addEventListener("change", (e) => {
-      v.querySelectorAll(".inv-fila:not([hidden]) .inv-check input").forEach((c) => (c.checked = e.target.checked));
-      pintarSel();
-    });
-    const guardarPrecios = async (codes, titulo, previo) => {
-      const d = await hoja({ titulo, cuerpo: camposPrecios(previo), ok: "Guardar precios", validar: validarPrecios });
-      if (!d) return false;
-      try {
-        const res = await api("guardarPrecio", { codes, ...preciosDe(d) });
-        toast(res.guardados > 1 ? `Precios guardados en ${res.guardados} productos` : "Precios guardados");
-        SkalaAPI.catalogo(true).catch(() => {});
-        render();
-        return true;
-      } catch (e2) { toast(e2.message); return false; }
-    };
-    $("btnPreciosVarios").addEventListener("click", () => {
-      const codes = elegidos();
-      if (codes.length) guardarPrecios(codes, `Precios para ${codes.length} producto${codes.length === 1 ? "" : "s"}`);
+    $("invCatTabs").addEventListener("click", (e) => {
+      const t = e.target.closest("[data-cat-inv]");
+      if (!t) return;
+      filtroCatInv = t.dataset.catInv;
+      $("invCatTabs").querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b === t));
+      filtrar();
     });
     $("btnNuevoProd").addEventListener("click", () => formProducto(null));
     $("invLista").addEventListener("click", async (e) => {
+      const btnModo = e.target.closest("[data-modo-venta]");
+      if (btnModo) {
+        const code = btnModo.dataset.code;
+        const nuevoModo = fijarModalidadVentaProducto(code, btnModo.dataset.modoVenta);
+        const li = btnModo.closest(".inv-fila");
+        if (li) {
+          li.querySelectorAll("[data-modo-venta]").forEach((b) => b.classList.toggle("active", b.dataset.modoVenta === nuevoModo));
+        }
+        const prod = prods.find((p) => p.code === code);
+        toast(`${prod ? prod.producto : code}: se vende por ${etiquetaModoVenta(nuevoModo)}`);
+        return;
+      }
       const b = e.target.closest("[data-inv]");
       if (!b) return;
       const x = prods.find((p) => p.code === b.closest(".inv-fila").dataset.code);
-      if (b.dataset.inv === "precio") return guardarPrecios([x.code], `Precios · ${x.producto}`, x);
       if (b.dataset.inv === "editar") return formProducto(x);
+      const modoActual = modoVentaProducto(x.code);
       const d = await hoja({
         titulo: `${x.producto} · inventario`,
         cuerpo: `<p class="modal-sub">${x.controlado ? `En depósito: <strong>${x.fisico}</strong> cajas · disponibles: <strong>${x.disponible}</strong>.` : "Primera carga: desde aquí se empieza a controlar el stock."}</p>
-          <fieldset class="pay"><legend>Tipo</legend>
+          <fieldset class="pay"><legend>Se vende por (Modalidad)</legend>
+            <label class="pay-opt"><input type="radio" name="modo_venta" value="caja"${modoActual === "caja" ? " checked" : ""} /> 📦 Caja / Bulto</label>
+            <label class="pay-opt"><input type="radio" name="modo_venta" value="unidad"${modoActual === "unidad" ? " checked" : ""} /> 🧴 Unidad / Blíster</label>
+            <label class="pay-opt"><input type="radio" name="modo_venta" value="ambos"${modoActual === "ambos" ? " checked" : ""} /> 📦+🧴 Ambos (Caja/Bulto y Unidad/Blíster)</label></fieldset>
+          <fieldset class="pay"><legend>Tipo de movimiento de stock</legend>
             <label class="pay-opt"><input type="radio" name="tipo" value="entrada" checked /> Entrada de mercancía (sumar)</label>
             <label class="pay-opt"><input type="radio" name="tipo" value="conteo" /> Conteo total (cuántas hay en el depósito)</label>
             <label class="pay-opt"><input type="radio" name="tipo" value="ajuste" /> Ajuste (rotura, pérdida…) — puede ser negativo</label></fieldset>
-          <label class="field field-full"><span id="hCajasTxt">Cajas *</span><input name="cajas" id="hCajas" inputmode="numeric" autocomplete="off" placeholder="ej. 20 (ajuste: -2)" /></label>
+          <label class="field field-full"><span id="hCajasTxt">Cajas (opcional si solo cambiás modalidad)</span><input name="cajas" id="hCajas" inputmode="numeric" autocomplete="off" placeholder="ej. 20 (ajuste: -2)" /></label>
           <label class="field field-full"><span>Nota</span><input name="nota" maxlength="200" autocomplete="off" placeholder="Factura del proveedor, motivo del ajuste…" /></label>`,
         ok: "Guardar",
         alAbrir: (form) => form.addEventListener("change", (e) => {
           if (e.target.name !== "tipo") return;
-          form.querySelector("#hCajasTxt").textContent = e.target.value === "conteo" ? "Total de cajas en el depósito *" : "Cajas *";
+          form.querySelector("#hCajasTxt").textContent = e.target.value === "conteo" ? "Total de cajas en el depósito *" : "Cajas (opcional si solo cambiás modalidad)";
         }),
         validar: (d2) => {
+          const rawCajas = String(d2.cajas || "").trim();
+          if (!rawCajas && d2.modo_venta && d2.modo_venta !== modoActual) return "";
           const n = Math.round(numTxt(d2.cajas));
-          if (d2.tipo === "conteo") return String(d2.cajas).trim() !== "" && n >= 0 ? "" : "Escribí cuántas cajas contaste (0 si no hay).";
+          if (d2.tipo === "conteo") return rawCajas !== "" && n >= 0 ? "" : "Escribí cuántas cajas contaste (0 si no hay).";
           if (!n) return "Indicá la cantidad de cajas.";
           if (d2.tipo === "entrada" && n < 0) return "Una entrada debe ser mayor que 0. Para restar elegí Ajuste.";
           if (d2.tipo === "ajuste" && !d2.nota.trim()) return "Escribí el motivo del ajuste.";
@@ -3777,6 +5175,12 @@
         },
       });
       if (!d) return;
+      if (d.modo_venta) fijarModalidadVentaProducto(x.code, d.modo_venta);
+      if (String(d.cajas || "").trim() === "") {
+        toast(`${x.producto}: se vende por ${etiquetaModoVenta(d.modo_venta || modoActual)}`);
+        render();
+        return;
+      }
       try {
         const res = await api("movimiento", { code: x.code, producto: x.producto, cajas: Math.round(numTxt(d.cajas)), tipo: d.tipo, nota: d.nota.trim() });
         toast(d.tipo === "conteo" ? `${x.producto}: ${res.fisico} en depósito${res.diferencia ? ` (${res.diferencia > 0 ? "+" : ""}${res.diferencia})` : ", coincide"}` : `${x.producto}: ${res.disponible} disponibles`);
@@ -3784,6 +5188,210 @@
         render();
       } catch (e2) { toast(e2.message); }
     });
+  }
+
+  /* ---------- Precios (SOLO para ajustar precios · selector Skala Venezuela o Dist. Ontiveros) ---------- */
+  async function vPrecios(v, _p, query, vigente) {
+    const esDistDefault = typeof GRUPOS_DISTRIBUIDORA !== "undefined" && Array.isArray(GRUPOS_DISTRIBUIDORA);
+    const qCat = query && query.get ? query.get("cat") : "";
+    if (qCat === "skala" || qCat === "distribuidora") catPreciosActual = qCat;
+    else if (!catPreciosActual) catPreciosActual = esDistDefault ? "distribuidora" : "skala";
+
+    const r = await api("inventario");
+    if (!vigente()) return;
+    const nombre = (c) => (allProductsMap()[c] || {}).name;
+    const todosProds = r.productos.map((x) => ({ ...x, producto: nombre(x.code) || x.producto }));
+    const linea = (pre, tit, x) => {
+      const v = (k) => x[pre ? (k ? `mayor_${k}` : "mayor") : (k || "menor")];
+      const partes = FORMAS.map(([k, t]) => (v(k) ? `${k ? t.replace("Efectivo", "Ef.").replace(" pago", "") : "Normal"} ${dinero(v(k))}` : "")).filter(Boolean);
+      return partes.length ? `<span class="inv-nivel"><b>${tit}</b> ${partes.join(" · ")}</span>` : "";
+    };
+    const precioTxt = (x) => x.menor ? `${linea(false, "Menor:", x)}${linea(true, "Mayor:", x)}` : "<em>Sin precio</em>";
+
+    const pintarVistaPrecios = () => {
+      const esSkalaSel = catPreciosActual === "skala";
+      const prodsCat = todosProds.filter((x) => (esSkalaSel ? esProductoSkala(x.code) : !esProductoSkala(x.code)));
+      const GRUPOS_PANEL = gruposDeCatalogoParaPrecios(catPreciosActual);
+      const cfgG = leerConfigGrupos();
+      const sinPrecio = prodsCat.filter((x) => !x.menor).length;
+
+      const filaPrecio = (x) => `<li class="inv-fila" data-code="${esc(x.code)}" data-texto="${esc((x.producto + " " + x.code).toLowerCase())}">
+        <div class="inv-top">
+          <label class="inv-check"><input type="checkbox" value="${esc(x.code)}" aria-label="Elegir ${esc(x.producto)}" /></label>
+          <div class="inv-nombre"><strong>${esc(x.producto)}</strong><span class="ped-det">${esc(x.code)}</span></div>
+        </div>
+        <p class="ped-det inv-precios">${precioTxt(x)}</p>
+        <div class="inv-botones"><button type="button" class="btn btn-ghost" data-pre="precio">Ajustar precio</button></div>
+      </li>`;
+
+      v.innerHTML = `
+        <section class="tarjeta" style="margin-bottom:12px">
+          <h3 class="sub-titulo" style="margin-bottom:6px">Elegí el catálogo para ajustar precios</h3>
+          <div class="periodos" id="preCatalogoTabs" role="tablist" aria-label="Catálogo para ajustar precios">
+            <button type="button" role="tab" class="tab${esSkalaSel ? " active" : ""}" aria-selected="${esSkalaSel}" data-cat-precios="skala">🌸 Skala Venezuela</button>
+            <button type="button" role="tab" class="tab${!esSkalaSel ? " active" : ""}" aria-selected="${!esSkalaSel}" data-cat-precios="distribuidora">🏢 Dist. Ontiveros</button>
+          </div>
+          <p class="nota-chica" style="margin-top:8px">${esSkalaSel
+            ? "Ajustando precios de <strong>Skala Venezuela</strong> (Baños de Crema 1 kg y Kits Dúo Shampoo + Acondicionador)."
+            : "Ajustando precios de <strong>Dist. Ontiveros</strong> (Detergentes, Suavizantes, Cuidado Personal, Bebé y Hogar)."}</p>
+        </section>
+        <details class="tarjeta inv-grupos-card" id="secPreciosGrupo" open>
+          <summary class="sub-titulo">📦 Precios por Grupo y Presentación · ${esSkalaSel ? "Skala Venezuela" : "Dist. Ontiveros"}</summary>
+          <p class="nota-chica">Configurá precios en 1 clic por grupo (mismo precio para sus fragancias) o por presentación/talla individual (Alisoft, Toallín, Toallas y Pañales). La modalidad de venta (Caja/Bulto o Unidad/Blíster) se ajusta en <strong>Inventario</strong>.</p>
+          <ul class="resumen-items lista-grupos-inv">
+            ${(() => {
+              let famAnt = "";
+              return GRUPOS_PANEL.map((g) => {
+                const cg = cfgG[g.id] || {};
+                const refP = todosProds.find((p) => p.code === g.codes[0]) || {};
+                const pMenor = Number(cg.menor) || Number(refP.menor) || 0;
+                const pMayor = Number(cg.mayor) || Number(refP.mayor) || 0;
+                const pUnd = Number(cg.precio_unidad) || 0;
+                const etqUnd = g.id === "GRP-DOR-PACE3" ? "Blíster" : "Und";
+                const resPrecio = pMenor > 0
+                  ? `Menor: <strong>${dinero(pMenor)}</strong> · Mayor: <strong>${dinero(pMayor || pMenor)}</strong>${pUnd > 0 ? ` · ${etqUnd}: <strong>${dinero(pUnd)}</strong>` : ""}`
+                  : "<em>Sin precio configurado</em>";
+                let sepFam = "";
+                if (g.familia && g.familia !== famAnt) {
+                  famAnt = g.familia;
+                  sepFam = `<li class="item-familia-sep" style="padding:10px 4px 4px;border-top:1px solid var(--borde,#e2e8f0);margin-top:6px"><strong style="font-size:0.86rem;color:var(--verde-osc,#0f5132)">${esc(g.familia)}</strong></li>`;
+                }
+                return `${sepFam}<li class="item-grupo-inv" data-grupo-id="${esc(g.id)}">
+                  <div class="grupo-inv-info">
+                    <strong>${esc(g.nombre)}</strong>
+                    <span class="ped-det" data-grp-resumen="${esc(g.id)}">${resPrecio}</span>
+                  </div>
+                  <button type="button" class="btn btn-ghost" data-grp-precio="${esc(g.id)}">Precios</button>
+                </li>`;
+              }).join("");
+            })()}
+          </ul>
+        </details>
+        <div class="buscador"><input type="search" id="preBuscar" placeholder="Buscar producto o código en ${esSkalaSel ? "Skala Venezuela" : "Dist. Ontiveros"}" autocomplete="off" value="${esc(busquedaPre)}" /></div>
+        ${sinPrecio ? `<p class="aviso-chico">${sinPrecio} producto(s) sin precio en ${esSkalaSel ? "Skala Venezuela" : "Dist. Ontiveros"}. Elegí varios con la casilla y tocá <strong>Poner precios</strong>.</p>` : ""}
+        <div class="fila-elegir"><label class="check"><input type="checkbox" id="preTodos" /> Elegir todos los que se ven</label></div>
+        <ul class="lista-inv" id="preLista">${prodsCat.map(filaPrecio).join("")}</ul>
+        <div class="barra-accion" id="preBarra" hidden><div><strong id="preSel">0 elegidos</strong><span> · mismo precio para todos</span></div><button type="button" class="btn btn-primary" id="btnPreciosVarios">Poner precios</button></div>`;
+
+      const filtrar = () => {
+        const q = busquedaPre.trim().toLowerCase();
+        v.querySelectorAll("#preLista .inv-fila").forEach((li) => {
+          li.hidden = !!q && !li.dataset.texto.includes(q);
+        });
+      };
+      filtrar();
+
+      const elegidos = () => [...v.querySelectorAll("#preLista .inv-check input:checked")].map((c) => c.value);
+      const pintarSel = () => {
+        const n = elegidos().length;
+        $("preBarra").hidden = !n;
+        $("preSel").textContent = `${n} elegido${n === 1 ? "" : "s"}`;
+        v.querySelectorAll("#preLista .inv-fila").forEach((li) => li.classList.toggle("elegida", li.querySelector(".inv-check input").checked));
+      };
+
+      $("preCatalogoTabs").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-cat-precios]");
+        if (!b) return;
+        catPreciosActual = b.dataset.catPrecios;
+        pintarVistaPrecios();
+      });
+      $("preBuscar").addEventListener("input", (e) => { busquedaPre = e.target.value; filtrar(); });
+      $("preLista").addEventListener("change", pintarSel);
+      $("preTodos").addEventListener("change", (e) => {
+        v.querySelectorAll("#preLista .inv-fila:not([hidden]) .inv-check input").forEach((c) => (c.checked = e.target.checked));
+        pintarSel();
+      });
+
+      const sincronizarPreciosConCatalogoPublico = (idsOCodes, pObj, pUnd = 0) => {
+        try {
+          const rawDist = localStorage.getItem(K_CFG_GRUPOS_DIST);
+          const cfgDist = rawDist ? JSON.parse(rawDist) : {};
+          idsOCodes.filter(Boolean).forEach((key) => {
+            const prev = cfgDist[key] || {};
+            cfgDist[key] = {
+              ...prev,
+              precioMenor: Number(pObj.menor) || prev.precioMenor || 0,
+              precioMayor: Number(pObj.mayor) || Number(pObj.menor) || prev.precioMayor || 0,
+              ...(pUnd > 0 ? { precioUnidad: pUnd } : {}),
+            };
+          });
+          localStorage.setItem(K_CFG_GRUPOS_DIST, JSON.stringify(cfgDist));
+        } catch (_) {}
+      };
+
+      const guardarPrecios = async (codes, titulo, previo) => {
+        const d = await hoja({ titulo, cuerpo: camposPrecios(previo), ok: "Guardar precios", validar: validarPrecios });
+        if (!d) return false;
+        const pObj = preciosDe(d);
+        try {
+          const res = await api("guardarPrecio", { codes, ...pObj });
+          sincronizarPreciosConCatalogoPublico(codes, pObj);
+          toast(res.guardados > 1 ? `Precios guardados en ${res.guardados} productos` : "Precios guardados");
+          SkalaAPI.catalogo(true).catch(() => {});
+          render();
+          return true;
+        } catch (e2) { toast(e2.message); return false; }
+      };
+
+      $("btnPreciosVarios").addEventListener("click", () => {
+        const codes = elegidos();
+        if (codes.length) guardarPrecios(codes, `Precios para ${codes.length} producto${codes.length === 1 ? "" : "s"}`);
+      });
+
+      const secG = $("secPreciosGrupo");
+      if (secG) {
+        secG.addEventListener("click", async (e) => {
+          const btn = e.target.closest("[data-grp-precio]");
+          if (!btn) return;
+          const gid = btn.dataset.grpPrecio;
+          const grp = GRUPOS_PANEL.find((g) => g.id === gid);
+          if (!grp) return;
+          const cfg = leerConfigGrupos();
+          const cg = cfg[gid] || {};
+          const refP = todosProds.find((p) => p.code === grp.codes[0]) || {};
+          const previo = { ...refP, ...cg };
+          const esDorco = gid === "GRP-DOR-PACE3";
+          const d = await hoja({
+            titulo: `Precios · ${grp.nombre}`,
+            cuerpo: `${camposPrecios(previo)}
+              <fieldset class="pay grupo-precios">
+                <legend>${esDorco ? "Precio por Blíster (1 blíster = ×12 pqts de 3 afeitadoras)" : "Precio por Unidad / Blíster (opcional)"}</legend>
+                <label class="field field-full"><span>${esDorco ? "Precio por blíster ($)" : "Precio por unidad suelta ($)"}</span><input name="precio_unidad" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${cg.precio_unidad ? String(cg.precio_unidad).replace(".", ",") : ""}" /></label>
+              </fieldset>`,
+            ok: "Guardar precios",
+            validar: validarPrecios,
+          });
+          if (!d) return;
+          const pObj = preciosDe(d);
+          const pUnd = String(d.precio_unidad || "").trim() === "" ? 0 : numTxt(d.precio_unidad);
+          const pUndFinal = isFinite(pUnd) && pUnd > 0 ? pUnd : 0;
+          const nuevoCfg = {
+            ...cg,
+            ...pObj,
+            precio_unidad: pUndFinal,
+          };
+          cfg[gid] = nuevoCfg;
+          if (grp.aliasId && !grp.familia) cfg[grp.aliasId] = nuevoCfg;
+          guardarConfigGrupos(cfg);
+          sincronizarPreciosConCatalogoPublico([gid, !grp.familia ? grp.aliasId : "", ...grp.codes], pObj, pUndFinal);
+          try {
+            await api("guardarPrecio", { codes: grp.codes, ...pObj });
+            toast(grp.codes.length > 1 ? `Precios aplicados a las ${grp.codes.length} variedades` : `Precio actualizado: ${grp.nombre}`);
+            SkalaAPI.catalogo(true).catch(() => {});
+            render();
+          } catch (e2) { toast(e2.message); }
+        });
+      }
+
+      $("preLista").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-pre]");
+        if (!b) return;
+        const x = prodsCat.find((p) => p.code === b.closest(".inv-fila").dataset.code);
+        if (x && b.dataset.pre === "precio") guardarPrecios([x.code], `Precios · ${x.producto}`, x);
+      });
+    };
+
+    pintarVistaPrecios();
   }
 
   /* ---------- Cargar inventario: grilla con fotos, como al tomar un pedido ----------
@@ -3795,6 +5403,24 @@
     const leerBorrador = () => { const b = leerLS(K_INV, {}) || {}; return b[modo] && typeof b[modo] === "object" ? b[modo] : {}; };
     const guardarBorrador = (m) => { const b = leerLS(K_INV, {}) || {}; b[modo] = m; guardarLS(K_INV, b); };
     if (filtroInvC === "elegidos" && !Object.keys(leerBorrador()).length) filtroInvC = "todos"; // nada elegido: mostrar todo
+    const esDistInv = typeof GRUPOS_DISTRIBUIDORA !== "undefined" && Array.isArray(GRUPOS_DISTRIBUIDORA);
+    const pestanasFiltroInv = esDistInv
+      ? [
+          ["todos", "Todos"],
+          ["Detergentes", "Detergentes"],
+          ["Suavizantes", "Suavizantes"],
+          ["Cuidado Personal", "Cuidado Personal"],
+          ["Bebé y Pañales", "Bebé y Pañales"],
+          ["Hogar y Papel", "Hogar y Papel"],
+          ["Skala", "Skala"],
+          ["elegidos", conteo ? "Contados" : "Elegidos"],
+        ]
+      : [
+          ["todos", "Todos"],
+          ["banos", "Baños de crema"],
+          ["kits", "Kits"],
+          ["elegidos", conteo ? "Contados" : "Elegidos"],
+        ];
     v.innerHTML = `
       <div class="periodos tabs-ped tabs-ent" role="tablist">
         <a role="tab" class="tab${!conteo ? " active" : ""}" aria-selected="${!conteo}" href="#/inventario/cargar?modo=entrada">Entrada</a>
@@ -3803,8 +5429,11 @@
       <p class="aviso-chico inv-explica">${conteo
         ? "Escribí <strong>cuántas cajas hay</strong> de cada producto en el depósito. Se guarda la diferencia con el sistema. Solo cuentan los productos que llenes."
         : "Tocá un producto para sumar las cajas que <strong>llegaron</strong>. Se suman a lo que ya hay."}</p>
-      <div class="buscador"><input type="search" id="icBuscar" placeholder="Buscar producto o código" autocomplete="off" enterkeyhint="search" value="${esc(busquedaInvC)}" /></div>
-      <div class="periodos" id="icFiltros">${[["todos", "Todos"], ["banos", "Baños de crema"], ["kits", "Kits"], ["elegidos", conteo ? "Contados" : "Elegidos"]].map(([k, t]) =>
+      <div class="barra-buscador-vista">
+        <div class="buscador"><input type="search" id="icBuscar" placeholder="Buscar producto o código" autocomplete="off" enterkeyhint="search" value="${esc(busquedaInvC)}" /></div>
+        ${selectorVistaCatHTML()}
+      </div>
+      <div class="periodos" id="icFiltros">${pestanasFiltroInv.map(([k, t]) =>
         `<button type="button" class="tab${k === filtroInvC ? " active" : ""}" data-f="${k}">${t}</button>`).join("")}</div>
       <ul class="grilla-prod grilla-inv${conteo ? " modo-conteo" : ""}" id="icLista">${spin()}</ul>
       <p class="vacio-panel" id="icVacio" hidden>No hay productos con ese filtro.</p>
@@ -3817,11 +5446,12 @@
     if (!vigente()) return;
     sumarProductosNuevos(r.productos.filter((x) => x.info).map((x) => ({ code: x.code, info: x.info }))); // quedan en BANOS / KITS
     const stock = Object.fromEntries(r.productos.map((x) => [x.code, x]));
-    const productos = [...BANOS.map((p) => ({ ...p, tipo: "banos" })), ...KITS.map((p) => ({ ...p, tipo: "kits" }))];
+    const productos = [...BANOS.map((p) => ({ ...p, tipo: p.tipo || "banos" })), ...KITS.map((p) => ({ ...p, tipo: "kits" }))];
     const lista = $("icLista");
+    enlazarSelectorVistaCat(v, lista);
     lista.innerHTML = productos.map((p) => {
       const st = stock[p.code] || {};
-      return `<li class="pcard" data-code="${p.code}" data-tipo="${p.tipo}" data-texto="${esc((p.name + " " + p.code + " " + p.line).toLowerCase())}">
+      return `<li class="pcard" data-code="${p.code}" data-tipo="${p.tipo}" data-linea="${esc(p.line || "")}" data-marca="${esc(p.marca || "")}" data-texto="${esc((p.name + " " + p.code + " " + (p.line || "") + " " + (p.marca || "")).toLowerCase())}">
         <button type="button" class="pcard-tap" data-act="${conteo ? "contar" : "plus"}" aria-label="${conteo ? `Contar ${esc(p.name)}` : `Sumar una caja de ${esc(p.name)}`}">
           ${fotoHTML(p.code, { ancho: 64, alto: 51 })}
           <strong>${esc(p.name)}</strong>
@@ -3867,7 +5497,11 @@
       const q = busquedaInvC.trim().toLowerCase();
       let visibles = 0;
       lista.querySelectorAll(".pcard").forEach((li) => {
-        const okF = filtroInvC === "todos" || li.dataset.tipo === filtroInvC || (filtroInvC === "elegidos" && li.classList.contains("elegido"));
+        const okF = filtroInvC === "todos"
+          || li.dataset.tipo === filtroInvC
+          || li.dataset.linea === filtroInvC
+          || li.dataset.marca === filtroInvC
+          || (filtroInvC === "elegidos" && li.classList.contains("elegido"));
         const ok = okF && (!q || li.dataset.texto.includes(q));
         li.hidden = !ok; if (ok) visibles++;
       });
@@ -3985,8 +5619,24 @@
     } catch (e2) { toast(e2.message); }
   }
 
-  /* ---------- Usuarios (Master) ---------- */
+  /* ---------- Usuarios (Master) y Catálogo + Rutas asignadas por vendedor ---------- */
+  const CATALOGOS_VENDEDOR = [
+    ["ambos", "Ambos catálogos", "Skala Venezuela y Distribuciones Ontiveros (Alive · Baby Finger · DO)"],
+    ["skala", "Solo Catálogo Skala", "Recibe pedidos del catálogo de Skala Venezuela"],
+    ["distribuidora", "Solo Catálogo Distribuciones Ontiveros", "Recibe pedidos del catálogo Alive · Baby Finger · DO"],
+  ];
+  const etiquetaCatalogo = (c) => {
+    const v = String(c || "").trim().toLowerCase();
+    if (v === "skala") return "Catálogo Skala";
+    if (v === "distribuidora") return "Catálogo Distribuidora";
+    return "Ambos catálogos";
+  };
+  const etiquetaRutasVendedor = (rutas) => {
+    if (Array.isArray(rutas) && rutas.length) return "📍 " + rutas.join(", ");
+    return "📍 Sin rutas marcadas";
+  };
   let cacheUsuarios = [];
+
   async function vUsuarios(v, _p, _q, vigente) {
     const r = await api("usuarios");
     if (!vigente()) return;
@@ -3994,11 +5644,14 @@
     const orden = { master: 0, admin: 1, vendedor: 2, despachador: 3 };
     const lista = r.usuarios.slice().sort((a, b) => (orden[a.rol] ?? 9) - (orden[b.rol] ?? 9) || a.nombre.localeCompare(b.nombre));
     v.innerHTML = `<a class="btn btn-primary btn-bloque" href="#/usuario/nuevo">Nuevo usuario</a>
-      <ul class="usuarios-lista">${lista.map((u) => `<li class="${u.activo ? "" : "inactivo"}">
-        <div><strong>${esc(u.nombre)}</strong> <span class="ped-det">@${esc(u.usuario)}</span></div>
-        <div class="ped-det"><span class="rol rol-${esc(u.rol)}">${esc(u.rol_nombre)}</span>${u.activo ? "" : " · Inactivo"}</div>
-        <a class="btn btn-ghost" href="#/usuario/${encodeURIComponent(u.id)}">Editar</a>
-      </li>`).join("")}</ul>`;
+      <ul class="usuarios-lista">${lista.map((u) => {
+        const esVend = (u.roles || [u.rol]).includes("vendedor");
+        return `<li class="${u.activo ? "" : "inactivo"}">
+          <div><strong>${esc(u.nombre)}</strong> <span class="ped-det">@${esc(u.usuario)}</span></div>
+          <div class="ped-det"><span class="rol rol-${esc(u.rol)}">${esc(u.rol_nombre)}</span>${esVend ? ` · <span class="chip-cat-vend">${esc(etiquetaCatalogo(u.catalogo))}</span> · <span class="ped-det">${esc(etiquetaRutasVendedor(u.rutas))}</span>` : ""}${u.activo ? "" : " · Inactivo"}</div>
+          <a class="btn btn-ghost" href="#/usuario/${encodeURIComponent(u.id)}">Editar</a>
+        </li>`;
+      }).join("")}</ul>`;
   }
 
   async function vUsuario(v, id, _q, vigente) {
@@ -4011,6 +5664,10 @@
       if (!u) { v.innerHTML = '<p class="vacio-panel">Usuario no encontrado.</p>'; return; }
     }
     $("appTitulo").textContent = nuevo ? "Nuevo usuario" : u.nombre;
+    const catActual = u && ["skala", "distribuidora", "ambos"].includes(String(u.catalogo || "").toLowerCase())
+      ? String(u.catalogo).toLowerCase()
+      : "ambos";
+    const rutasActuales = u && Array.isArray(u.rutas) ? u.rutas : [];
     v.innerHTML = `<form class="tarjeta" id="fUsuario" novalidate>
       <label class="field field-full"><span>Usuario (para ingresar)</span><input id="uUsuario" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="ej. kevin" value="${esc(u ? u.usuario : "")}" /></label>
       <label class="field field-full"><span>Nombre</span><input id="uNombre" type="text" autocapitalize="words" autocomplete="off" placeholder="ej. Kevin Pérez" value="${esc(u ? u.nombre : "")}" /></label>
@@ -4019,12 +5676,23 @@
           .filter(([k]) => k !== "despachador" || (u && (u.roles || [u.rol]).includes("despachador"))).map(([k, t, d]) =>
           `<label class="check rol-opt"><input type="checkbox" name="uRol" value="${k}"${(u ? u.roles || [u.rol] : ["vendedor"]).includes(k) ? " checked" : ""} /> <span><strong>${t}</strong> <span class="ped-det">${d}</span></span></label>`).join("")}
       </fieldset>
+      <fieldset class="pay" id="uCatalogoWrap"><legend>Catálogo que maneja (para vendedores)</legend>
+        ${CATALOGOS_VENDEDOR.map(([k, t, d]) =>
+          `<label class="pay-opt"><input type="radio" name="uCatalogo" value="${k}"${catActual === k ? " checked" : ""} /> <span><strong>${t}</strong> <span class="ped-det">· ${d}</span></span></label>`
+        ).join("")}
+      </fieldset>
+      <fieldset class="pay roles-usuario" id="uRutasWrap"><legend>Rutas / Zonas que atiende (obligatorio para vendedores)</legend>
+        ${RUTAS_CARTERA.map((r) =>
+          `<label class="check rol-opt"><input type="checkbox" name="uRuta" value="${esc(r)}"${rutasActuales.includes(r) ? " checked" : ""} /> <span><strong>📍 ${esc(r)}</strong></span></label>`
+        ).join("")}
+        <p class="nota-chica">Marcá las rutas que atiende este vendedor. Los clientes nuevos verán estas rutas al seleccionar su vendedor.</p>
+      </fieldset>
       <label class="field field-full"><span>${nuevo ? "Clave" : "Clave nueva (dejar vacía para no cambiarla)"}</span>
         <span class="clave-wrap"><input id="uClave" type="password" maxlength="64" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Letras y números" />
         <button type="button" class="ver-clave" data-ver="uClave" aria-label="Mostrar clave">Ver</button></span></label>
       <p class="nota-chica">Mínimo 6 caracteres con letras y números (Master: 8). Puede llevar símbolos como * # @ !</p>
       <label class="field field-full"><span>WhatsApp (para vendedores)</span><input id="uTelefono" type="tel" inputmode="tel" autocomplete="off" placeholder="0424-1234567" value="${esc(u ? u.telefono || "" : "")}" />
-        <span class="nota-chica">Los clientes le mandan su pedido a este número desde el catálogo.</span></label>
+        <span class="nota-chica">Los clientes de su ruta le mandan el pedido a este número desde el catálogo asignado.</span></label>
       <label class="check"><input type="checkbox" id="uActivo"${!u || u.activo ? " checked" : ""} /> Activo (puede ingresar)</label>
       <p class="form-warn" id="uError" hidden></p>
       <div class="fila-botones"><a class="btn btn-ghost" href="#/usuarios">Cancelar</a><button type="submit" class="btn btn-primary" id="btnGuardarUsuario">Guardar</button></div>
@@ -4034,11 +5702,19 @@
       const btn = $("btnGuardarUsuario");
       const elegidos = [...document.querySelectorAll('input[name="uRol"]:checked')].map((x) => x.value);
       if (!elegidos.length) { $("uError").textContent = "Elegí al menos un rol."; $("uError").hidden = false; return; }
+      const catElegido = (document.querySelector('input[name="uCatalogo"]:checked') || {}).value || "ambos";
+      const rutasElegidas = [...document.querySelectorAll('input[name="uRuta"]:checked')].map((x) => x.value);
+      if (elegidos.includes("vendedor") && !rutasElegidas.length) {
+        $("uError").textContent = "Marcá al menos una ruta que atiende el vendedor.";
+        $("uError").hidden = false;
+        return;
+      }
       btn.disabled = true;
       try {
         const r = await api("guardarUsuario", {
           id: u ? u.id : undefined, usuario: $("uUsuario").value.trim(), nombre: $("uNombre").value.trim(),
-          roles: elegidos, activo: $("uActivo").checked, clave: $("uClave").value || undefined, telefono: $("uTelefono").value.trim(),
+          roles: elegidos, activo: $("uActivo").checked, clave: $("uClave").value || undefined,
+          telefono: $("uTelefono").value.trim(), catalogo: catElegido, rutas: rutasElegidas,
         });
         toast(`Usuario ${r.usuario.usuario} guardado`);
         if (r.usuario.id === yo().id) {
@@ -4062,7 +5738,8 @@
     const items = [];
     if (vende()) items.push(["#/pedidos?tab=comisiones", "Comisiones", "Comisiones por pagar y pagadas sobre cobros conciliados"]);
     if (vende()) items.push(["#/resumen", "Resumen", "Pedidos, cajas y productos más pedidos"]);
-    if (gestion()) items.push(["#/inventario", "Inventario y precios", "Existencias, cargar mercancía, conteo y precios"]);
+    if (gestion()) items.push(["#/inventario", "Inventario", "Ajustar existencias, entradas de mercancía y conteo total"]);
+    if (gestion()) items.push(["#/precios", "Precios", "Ajustar precios de Skala Venezuela o Dist. Ontiveros"]);
     if (tiene("master")) items.push(["#/usuarios", "Usuarios", "Crear usuarios, claves, roles y activar"]);
     if (!APP) items.push(["index.html", "Ver catálogo", "La página que ven los clientes"]);
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -4075,7 +5752,7 @@
       <section class="tarjeta perfil"><strong>${esc(u.nombre)}</strong><span>@${esc(u.usuario)} · ${esc(u.rol_nombre)}</span></section>
       <ul class="menu-mas">${items.map(([h, t, d]) => `<li><a href="${h}"><strong>${t}</strong><span>${d}</span></a></li>`).join("")}</ul>
       ${instalada ? "" : `<section class="tarjeta"><h3 class="sub-titulo">Instalar en el teléfono</h3>
-        ${eventoInstalar ? '<button type="button" class="btn btn-primary btn-bloque" id="btnInstalar">Instalar app Skala Equipo</button>'
+        ${eventoInstalar ? '<button type="button" class="btn btn-primary btn-bloque" id="btnInstalar">Instalar app Ontiveros Equipo</button>'
           : `<p class="modal-sub">${ios ? "En Safari: botón Compartir → <strong>Agregar a inicio</strong>." : "En Chrome: menú ⋮ → <strong>Instalar app</strong> o <strong>Agregar a pantalla principal</strong>."}</p>`}</section>`}
       <section class="tarjeta" id="secDatos"><h3 class="sub-titulo">Datos en el teléfono</h3>
         <p class="modal-sub" id="datosEstado">${local && local.fecha ? `Actualizados ${esc(horaCorta(local.fecha))} · ${(local.pedidos || []).length} pedidos · ${(local.clientes || []).length} clientes` : "Todavía no hay datos guardados en este teléfono."}</p>
@@ -4083,6 +5760,17 @@
         <p class="nota-chica">Se actualizan solos a las 8 am, 1 pm y 4 pm${prox ? ` (próxima: ${esc(horaCorta(prox.toISOString()))})` : ""}. Sin señal, la app muestra lo guardado.</p>
         ${APP ? `<p class="nota-chica" id="verApp">App ${esc(verApp)}${verPant ? ` · pantallas ${esc(verPant)}` : ""}</p>` : ""}
       </section>
+      ${tiene("master") ? (() => {
+        const supa = SkalaAPI.configSupabase ? SkalaAPI.configSupabase() : { url: "", key: "", activo: false };
+        return `<section class="tarjeta" id="secSupabase">
+          <div class="fila-top">
+            <h3 class="sub-titulo">Base de datos · Supabase</h3>
+            <span class="chip ${supa.activo ? "chip-ok" : "chip-pend"}">${supa.activo ? "Usando Supabase" : "Usando Google Sheets"}</span>
+          </div>
+          <p class="modal-sub">Copiá todos los datos de Google Sheets a Supabase sin modificar ni borrar nada de la hoja original.</p>
+          <button type="button" class="btn btn-ghost btn-bloque" id="btnConfigSupabase">⚙️ Configurar / Migrar a Supabase</button>
+        </section>`;
+      })() : ""}
       <section class="tarjeta"><h3 class="sub-titulo">Tema</h3>
         <div class="selector-tema" role="group" aria-label="Tema de la app">${[["auto", "Automático"], ["claro", "Claro"], ["oscuro", "Oscuro"]].map(([k, t]) =>
           `<button type="button" data-tema="${k}" aria-pressed="${SkalaTema.pref() === k}">${t}</button>`).join("")}</div>
@@ -4111,6 +5799,69 @@
         cargando(-1);
         if ($("btnSync")) { b.disabled = false; b.classList.remove("ocupado"); b.textContent = "Actualizar ahora"; }
       }
+    });
+    const btnSupa = $("btnConfigSupabase");
+    if (btnSupa) btnSupa.addEventListener("click", async () => {
+      const actual = SkalaAPI.configSupabase ? SkalaAPI.configSupabase() : { url: "", key: "", activo: false };
+      const d = await hoja({
+        titulo: "Base de datos · Supabase",
+        cuerpo: `<p class="modal-sub">1. Ejecutá primero <code>supabase/schema.sql</code> en el SQL Editor de tu proyecto Supabase.<br/>2. Pegá acá tu <strong>Project URL</strong> y tu clave <strong>pública</strong> (publishable <code>sb_publishable_…</code> o anon <code>eyJ…</code>). Nunca la clave secreta.</p>
+          <label class="field field-full"><span>Project URL *</span>
+            <input name="url" type="url" autocomplete="off" placeholder="https://xxxx.supabase.co" value="${esc(actual.url)}" />
+          </label>
+          <label class="field field-full"><span>Clave pública (publishable / anon) *</span>
+            <input name="key" type="text" autocomplete="off" placeholder="sb_publishable_…" value="${esc(actual.key)}" />
+          </label>
+          <button type="button" class="btn btn-ghost btn-bloque" id="btnMigrarDatos" style="margin:8px 0">📥 1. Copiar datos de Google Sheets a Supabase</button>
+          <div class="aviso-cobro" id="supaResultado" hidden></div>
+          <label class="check" style="margin-top:8px">
+            <input type="checkbox" name="activo" value="1" ${actual.activo ? "checked" : ""} />
+            <span>Usar Supabase como base de datos activa en este dispositivo</span>
+          </label>`,
+        ok: "Guardar configuración",
+        alAbrir: (form) => {
+          const btnM = form.querySelector("#btnMigrarDatos");
+          const boxR = form.querySelector("#supaResultado");
+          btnM.addEventListener("click", async () => {
+            const uVal = form.elements.url.value.trim();
+            const kVal = form.elements.key.value.trim();
+            if (!uVal || !kVal) {
+              boxR.hidden = false;
+              boxR.className = "aviso-cobro es-abono";
+              boxR.textContent = "Pegá primero la URL y la clave pública de Supabase.";
+              return;
+            }
+            btnM.disabled = true;
+            btnM.textContent = "Copiando todas las hojas a Supabase…";
+            boxR.hidden = true;
+            try {
+              const res = await SkalaAPI.migrarDesdeSheetsASupabase(uVal, kVal);
+              const imp = (res && res.importados) || {};
+              boxR.hidden = false;
+              boxR.className = "aviso-cobro es-completo";
+              boxR.innerHTML = `<strong>✓ Datos copiados con éxito (Google Sheets intacto)</strong>
+                <span>Usuarios: ${imp.usuarios || 0} · Clientes: ${imp.clientes || 0} · Pedidos: ${imp.pedidos || 0} · Ítems: ${imp.pedido_items || 0} · Pagos: ${imp.pagos || 0} · Precios: ${imp.precios || 0} · Inventario: ${imp.inventario || 0}</span>`;
+            } catch (err) {
+              boxR.hidden = false;
+              boxR.className = "aviso-cobro es-abono";
+              boxR.textContent = err.message;
+            } finally {
+              btnM.disabled = false;
+              btnM.textContent = "📥 1. Copiar datos de Google Sheets a Supabase";
+            }
+          });
+        },
+      });
+      if (!d) return;
+      try {
+        SkalaAPI.configurarSupabase({ url: d.url, key: d.key, activo: !!d.activo });
+      } catch (err) {
+        toast(err.message); // p. ej. se pegó la clave secreta
+        return;
+      }
+      memoria.pedidos = null; memoria.t = 0;
+      toast(d.activo ? "Conectado a Supabase" : "Usando Google Sheets");
+      render();
     });
     const bi = $("btnInstalar");
     if (bi) bi.addEventListener("click", async () => { eventoInstalar.prompt(); await eventoInstalar.userChoice; eventoInstalar = null; render(); });

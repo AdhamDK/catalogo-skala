@@ -1,0 +1,683 @@
+/* Tests de js/crm-core.js — node --test tests/crm-core.test.js */
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const core = require("../js/crm-core.js");
+
+const PRODUCTOS = {
+  "BC-01": { code: "BC-01", name: "Babosa", unidades: 6, unidad: "unidades" },
+  "KT-01": { code: "KT-01", name: "Kit 12 em 1", unidades: 6, unidad: "dúos" },
+};
+
+test("itemsDePedido arma items ordenados y omite cantidades en 0", () => {
+  const items = core.itemsDePedido({ "KT-01": 1, "BC-01": 2, "BC-99": 0 }, PRODUCTOS);
+  assert.deepEqual(items, [
+    { code: "BC-01", producto: "Babosa", cajas: 2, unidades_caja: 6, unidad: "unidades", total_unidades: 12 },
+    { code: "KT-01", producto: "Kit 12 em 1", cajas: 1, unidades_caja: 6, unidad: "dúos", total_unidades: 6 },
+  ]);
+});
+
+test("telefonoWhatsapp convierte números venezolanos", () => {
+  assert.equal(core.telefonoWhatsapp("0412-1234567"), "584121234567");
+  assert.equal(core.telefonoWhatsapp("+58 414 555 0000"), "584145550000");
+  assert.equal(core.telefonoWhatsapp("4241112233"), "584241112233");
+  assert.equal(core.telefonoWhatsapp("123"), "");
+});
+
+test("linkMapa con coordenadas; vacío sin ellas", () => {
+  assert.equal(core.linkMapa(8.612346, -71.654322), "https://maps.google.com/?q=8.612346,-71.654322");
+  assert.equal(core.linkMapa("", ""), "");
+});
+
+const PEDIDO = {
+  id: "SKL-261025-007", fecha: "2026-10-25 14:32", vendedor: "Óscar", total_cajas: 3,
+  detalle_unidades: "12 unidades + 6 dúos", pago: "Divisas · Contado", nota: "Entregar viernes",
+  items: [
+    { code: "BC-01", producto: "Babosa", cajas: 2, total_unidades: 12, unidad: "unidades" },
+    { code: "KT-01", producto: "Kit 12 em 1", cajas: 1, total_unidades: 6, unidad: "dúos" },
+  ],
+};
+const CLIENTE = {
+  contacto: "María Pérez", nombre: "Peluquería Bella", rif_cedula: "J-12345678-9",
+  telefono: "0412-1234567", telefono2: "0275-8812345", direccion: "Av. Bolívar, El Vigía",
+  latitud: 8.612346, longitud: -71.654322,
+};
+
+test("mensajeGrupo: formato fácil de leer para la oficina", () => {
+  const m = core.mensajeGrupo(PEDIDO, CLIENTE);
+  assert.equal(m, [
+    "*PEDIDO SKL-261025-007*",
+    "25/10/2026 · 14:32 · Vendedor: Óscar",
+    "",
+    "*Cliente*",
+    "Peluquería Bella · María Pérez",
+    "RIF: J-12345678-9",
+    "Tel: 0412-1234567 / 0275-8812345",
+    "Dirección: Av. Bolívar, El Vigía",
+    "Ubicación: https://maps.google.com/?q=8.612346,-71.654322",
+    "",
+    "*Productos*",
+    "• 2 × Babosa (BC-01) = 12 unidades",
+    "• 1 × Kit 12 em 1 (KT-01) = 6 dúos",
+    "",
+    "*Total: 3 cajas* · 12 unidades + 6 dúos",
+    "Pago: Divisas · Contado",
+    "Nota: Entregar viernes",
+  ].join("\n"));
+});
+
+test("mensajeGrupo omite líneas vacías (sin RIF, tel2, GPS ni nota)", () => {
+  const m = core.mensajeGrupo({ ...PEDIDO, nota: "", pago: "", total_cajas: 1, items: [PEDIDO.items[1]], detalle_unidades: "6 dúos" },
+    { nombre: "Barbería Max", contacto: "", telefono: "0416-5550000" });
+  assert.ok(!/RIF|Ubicación|Nota|Pago|Dirección/.test(m), m);
+  assert.match(m, /Barbería Max\nTel: 0416-5550000\n/);
+  assert.match(m, /\*Total: 1 caja\* · 6 dúos/);
+});
+
+test("mensajeGrupo marca el estado si no está pendiente", () => {
+  assert.match(core.mensajeGrupo({ ...PEDIDO, estado: "cancelado", motivo: "Cerrado" }, CLIENTE), /^\*PEDIDO SKL-261025-007 — ANULADO\*/);
+});
+
+test("validarCliente exige nombre/negocio y teléfono válido", () => {
+  assert.deepEqual(core.validarCliente({ negocio: "X", telefono: "0412-1234567" }), []);
+  assert.deepEqual(core.validarCliente({ telefono: "0412-1234567" }), ["Nombre del cliente o del negocio"]);
+  assert.deepEqual(core.validarCliente({ contacto: "Ana", telefono: "12" }), ["Teléfono 1 (mínimo 7 números)"]);
+});
+
+test("expiracionToken lee la fecha del token", () => {
+  assert.equal(core.expiracionToken("V1.1793000000000.abc"), 1793000000000);
+  assert.equal(core.expiracionToken("malo"), 0);
+});
+
+test("nuevoRef genera ids únicos", () => {
+  const a = core.nuevoRef(), b = core.nuevoRef();
+  assert.match(a, /^[0-9a-f-]{20,}$/);
+  assert.notEqual(a, b);
+});
+
+/* ---------- v2: roles ---------- */
+const P = (estado, extra = {}) => ({ id: "SKL-1", estado, vendedor_id: "U3", despachador_id: "U5", ...extra });
+
+test("acciones de gestión (master/admin) según estado", () => {
+  for (const rol of ["master", "admin"]) {
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("pendiente")), ["confirmar", "cancelar"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("confirmado")), ["en_ruta", "entregado", "cancelar"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("en_ruta")), ["entregado", "cancelar"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("entregado")), ["conciliar", "reabrir"]);
+    assert.deepEqual(core.accionesPedido(rol, "U2", P("cancelado")), ["reabrir"]);
+  }
+});
+
+test("vendedor: solo cancelar sus pedidos pendientes", () => {
+  assert.deepEqual(core.accionesPedido("vendedor", "U3", P("pendiente")), ["cancelar"]);
+  assert.deepEqual(core.accionesPedido("vendedor", "U4", P("pendiente")), []);
+  assert.deepEqual(core.accionesPedido("vendedor", "U3", P("confirmado")), []);
+});
+
+test("despachador: en ruta / entregado solo en los asignados", () => {
+  assert.deepEqual(core.accionesPedido("despachador", "U5", P("confirmado")), ["en_ruta", "entregado"]);
+  assert.deepEqual(core.accionesPedido("despachador", "U5", P("en_ruta")), ["entregado"]);
+  assert.deepEqual(core.accionesPedido("despachador", "U6", P("en_ruta")), []);
+  assert.deepEqual(core.accionesPedido("despachador", "U5", P("entregado")), []);
+});
+
+test("pestañas del panel por rol", () => {
+  const ids = (rol) => core.pestanasPanel(rol).map((t) => t.id);
+  assert.deepEqual(ids("vendedor"), ["pendiente", "web", "curso", "entregado", "cobrar", "conciliados", "cancelado", "resumen"]);
+  assert.deepEqual(ids("admin"), ["pendiente", "web", "curso", "entregado", "cobrar", "conciliar", "conciliados", "cancelado", "resumen"]);
+  assert.deepEqual(ids("master"), ["pendiente", "web", "curso", "entregado", "cobrar", "conciliar", "conciliados", "cancelado", "resumen", "usuarios"]);
+  assert.deepEqual(ids("despachador"), ["curso", "entregado"]);
+  assert.equal(core.pestanasPanel("admin")[0].nombre, "Por aprobar");
+  assert.equal(core.pestanasPanel("vendedor")[0].nombre, "En proceso");
+  assert.equal(core.pestanasPanel("admin").find((t) => t.id === "cancelado").nombre, "Anulados");
+  assert.equal(core.pestanasPanel("despachador")[0].nombre, "Por entregar");
+  assert.deepEqual(core.pestanasPanel("admin")[2].estados, ["confirmado", "en_ruta"]);
+});
+
+test("puedeTomarPedidos y nombre de estado", () => {
+  assert.equal(core.puedeTomarPedidos("vendedor"), true);
+  assert.equal(core.puedeTomarPedidos("master"), true);
+  assert.equal(core.puedeTomarPedidos("despachador"), false);
+  assert.equal(core.nombreEstado("en_ruta"), "En ruta");
+  assert.equal(core.nombreEstado("pendiente"), "En proceso");
+  assert.equal(core.nombreEstado("confirmado"), "Aprobado · Por despachar");
+  assert.equal(core.nombreEstado("cancelado"), "Anulado");
+  assert.match(core.mensajeGrupo({ ...PEDIDO, estado: "en_ruta" }, CLIENTE), /^\*PEDIDO SKL-261025-007 — EN RUTA\*/);
+});
+
+/* ---------- Ubicación pegada (traspaso de clientes) ---------- */
+test("coordsDeTexto entiende coordenadas y enlaces de Google Maps", () => {
+  const c = core.coordsDeTexto;
+  assert.deepEqual(c("8.612346, -71.654322"), { lat: 8.612346, lng: -71.654322 });
+  assert.deepEqual(c("8.6123,-71.6543"), { lat: 8.6123, lng: -71.6543 });
+  assert.deepEqual(c("https://maps.google.com/?q=8.61,-71.65"), { lat: 8.61, lng: -71.65 });
+  assert.deepEqual(c("https://www.google.com/maps/place/Bella/@8.6123456,-71.6543219,17z/data=x"), { lat: 8.612346, lng: -71.654322 });
+  assert.deepEqual(c("https://www.google.com/maps/place/x/data=!3d8.61!4d-71.65"), { lat: 8.61, lng: -71.65 });
+  assert.deepEqual(c("https://www.google.com/maps/search/?api=1&query=8.5,-71.2"), { lat: 8.5, lng: -71.2 });
+  assert.equal(c("https://maps.app.goo.gl/abc123"), null);   // enlace corto: no trae coordenadas
+  assert.equal(c("Av. Bolívar"), null);
+  assert.equal(c("200, 300"), null);                          // fuera de rango
+  assert.equal(c(""), null);
+});
+
+test("validarCliente para alta manual: teléfono opcional", () => {
+  assert.deepEqual(core.validarCliente({ negocio: "X" }, { telefonoOpcional: true }), []);
+  assert.deepEqual(core.validarCliente({ negocio: "X", telefono: "12" }, { telefonoOpcional: true }), ["Teléfono 1 (mínimo 7 números)"]);
+  assert.deepEqual(core.validarCliente({}, { telefonoOpcional: true }), ["Nombre del cliente o del negocio"]);
+});
+
+test("mensajeGrupo incluye si es nota de entrega o factura", () => {
+  assert.match(core.mensajeGrupo({ ...PEDIDO, documento: "Factura" }, CLIENTE), /Pago: Divisas · Contado\nDocumento: Factura\nNota:/);
+});
+
+/* ---------- Crédito: banderas por vencimiento ---------- */
+test("estadoCredito: cuenta desde la entrega; verde, amarilla, roja y morada", () => {
+  const ent = { estado: "entregado", dias_credito: 15, entregado_at: "2026-10-01T15:00:00Z", fecha: "2026-09-30 10:00" };
+  const en = (hoy) => core.estadoCredito(ent, new Date(hoy));
+  assert.deepEqual(en("2026-10-05T12:00:00"), { nivel: "al_dia", vence: "2026-10-16", dias: 11, texto: "Vence en 11 días" });
+  assert.equal(en("2026-10-13T12:00:00").nivel, "proximo");              // faltan 3
+  assert.equal(en("2026-10-16T12:00:00").texto, "Vence hoy");
+  assert.equal(en("2026-10-17T12:00:00").nivel, "vencido");
+  assert.equal(en("2026-10-17T12:00:00").texto, "Vencido hace 1 día");
+  assert.equal(en("2026-10-31T12:00:00").nivel, "vencido");              // 15 días
+  assert.equal(en("2026-11-01T12:00:00").nivel, "muy_vencido");          // 16 días
+  assert.equal(en("2026-11-01T12:00:00").texto, "Vencido hace 16 días");
+});
+
+test("estadoCredito: sin entregar todavía, pagado, contado o anulado", () => {
+  const base = { dias_credito: 7, fecha: "2026-10-01 10:00" };
+  assert.deepEqual(core.estadoCredito({ ...base, estado: "confirmado" }, new Date("2026-10-02")), { nivel: "sin_entregar", vence: "", dias: 7, texto: "Crédito 7 días · cuenta desde la entrega" });
+  const pag = { ...base, estado: "entregado", entregado_at: "2026-10-02T10:00:00Z" };
+  assert.deepEqual(core.estadoCredito({ ...pag, cobro: "cancelado" }, new Date("2026-12-01")), { nivel: "por_conciliar", vence: "2026-10-09", dias: 0, texto: "Cancelado · por conciliar" });
+  assert.equal(core.estadoCredito({ ...pag, cobro: "conciliado" }, new Date("2026-12-01")).texto, "Conciliado");
+  assert.equal(core.estadoCredito({ ...base, dias_credito: 0, estado: "entregado" }, new Date()), null);
+  assert.equal(core.estadoCredito({ ...base, estado: "cancelado" }, new Date()), null);
+});
+
+/* ---------- Total de carga del despachador ---------- */
+test("totalCarga suma cajas por producto de los pedidos elegidos", () => {
+  const peds = [
+    { id: "A", total_cajas: 3, items: [{ code: "BC-01", producto: "Babosa", cajas: 2, total_unidades: 12, unidad: "unidades" }, { code: "KT-01", producto: "Kit 12 em 1", cajas: 1, total_unidades: 6, unidad: "dúos" }] },
+    { id: "B", total_cajas: 4, items: [{ code: "BC-01", producto: "Babosa", cajas: 4, total_unidades: 24, unidad: "unidades" }] },
+  ];
+  const t = core.totalCarga(peds);
+  assert.equal(t.pedidos, 2);
+  assert.equal(t.cajas, 7);
+  assert.deepEqual(t.productos, [
+    { code: "BC-01", producto: "Babosa", cajas: 6, total_unidades: 36, unidad: "unidades" },
+    { code: "KT-01", producto: "Kit 12 em 1", cajas: 1, total_unidades: 6, unidad: "dúos" },
+  ]);
+  assert.equal(t.unidades, "36 unidades + 6 dúos");
+  assert.equal(core.totalCarga([]).cajas, 0);
+});
+
+test("cobro: vendedor marca cancelado; administración concilia o rechaza", () => {
+  const ent = { id: "X", estado: "entregado", vendedor_id: "U3", despachador_id: "U5", cobro: "" };
+  assert.deepEqual(core.accionesPedido("vendedor", "U3", ent), ["cobrar"]);
+  assert.deepEqual(core.accionesPedido("vendedor", "U4", ent), []);
+  assert.deepEqual(core.accionesPedido("vendedor", "U3", { ...ent, cobro: "cancelado" }), []);
+  assert.deepEqual(core.accionesPedido("admin", "U2", ent), ["conciliar", "reabrir"]);
+  assert.deepEqual(core.accionesPedido("admin", "U2", { ...ent, cobro: "cancelado" }), ["conciliar", "rechazar"]);
+  assert.deepEqual(core.accionesPedido("master", "U1", { ...ent, cobro: "conciliado" }), ["desconciliar"]);
+  assert.deepEqual(core.accionesPedido("despachador", "U5", ent), []);
+});
+
+test("pestañas Por cobrar (todos los que venden) y Por conciliar (solo Administración y Master)", () => {
+  const ids = (r) => core.pestanasPanel(r).map((t) => t.id);
+  assert.ok(core.pestanasPanel("vendedor").some((t) => t.id === "cobrar" && t.filtro === "por_cobrar"));
+  assert.ok(ids("admin").includes("cobrar") && ids("admin").includes("conciliar"));
+  assert.ok(ids("master").includes("conciliar"));
+  assert.ok(!ids("vendedor").includes("conciliar"));
+  assert.ok(!ids("despachador").includes("cobrar"));
+});
+
+test("mensajeGrupo muestra los días de crédito", () => {
+  assert.match(core.mensajeGrupo({ ...PEDIDO, pago: "Divisas · Crédito", dias_credito: 15 }, CLIENTE), /Pago: Divisas · Crédito \(15 días\)/);
+});
+
+/* ---------- Conciliados: totales ---------- */
+test("monedaDePago y formatoMonto", () => {
+  assert.equal(core.monedaDePago("Bolívares · Contado"), "Bs");
+  assert.equal(core.monedaDePago("Divisas · Crédito"), "USD");
+  assert.equal(core.formatoMonto(1234.5, "USD"), "USD 1.234,50");
+  assert.equal(core.formatoMonto(3600, "Bs"), "Bs 3.600,00");
+});
+
+test("resumenConciliados suma dinero por moneda, por vendedor y por método de pago", () => {
+  const peds = [
+    { id: "A", vendedor: "Óscar", pago: "Divisas · Contado", monto: 100, moneda: "USD", total_cajas: 3, items: [{ code: "BC-01", producto: "Babosa", cajas: 3, total_unidades: 18, unidad: "unidades" }] },
+    { id: "B", vendedor: "Kevin", pago: "Bolívares · Contado", monto: 3600, moneda: "Bs", total_cajas: 2, items: [{ code: "BC-01", producto: "Babosa", cajas: 2, total_unidades: 12, unidad: "unidades" }] },
+    { id: "C", vendedor: "Óscar", pago: "Divisas · Crédito", monto: 50.5, moneda: "USD", total_cajas: 1, items: [{ code: "KT-01", producto: "Kit 12 em 1", cajas: 1, total_unidades: 6, unidad: "dúos" }] },
+  ];
+  const r = core.resumenConciliados(peds);
+  assert.equal(r.pedidos, 3);
+  assert.equal(r.cajas, 6);
+  assert.deepEqual(r.montos, { USD: 150.5, Bs: 3600 });
+  assert.deepEqual(r.por_vendedor, [
+    { nombre: "Óscar", pedidos: 2, cajas: 4, USD: 150.5, Bs: 0 },
+    { nombre: "Kevin", pedidos: 1, cajas: 2, USD: 0, Bs: 3600 },
+  ]);
+  assert.deepEqual(r.por_pago.map((x) => [x.nombre, x.pedidos]), [["Divisas · Contado", 1], ["Divisas · Crédito", 1], ["Bolívares · Contado", 1]]);
+  assert.equal(r.productos[0].code, "BC-01");
+  assert.equal(r.productos[0].cajas, 5);
+  assert.deepEqual(core.resumenConciliados([]).montos, { USD: 0, Bs: 0 });
+});
+
+/* ---------- Precios (v3) ---------- */
+const PRECIOS = {
+  "BC-01": { menor: 10, mayor: 8, desc_pronto: 1, desc_efectivo_credito: 3, desc_efectivo_pronto: 4 },
+  "KT-01": { menor: 20, mayor: 18, desc_pronto: 2, desc_efectivo_credito: 6, desc_efectivo_pronto: 8 },
+};
+const ITS = [{ code: "BC-01", producto: "Babosa", cajas: 2 }, { code: "KT-01", producto: "Kit", cajas: 1 }, { code: "BC-09", producto: "Lisos", cajas: 1 }];
+
+test("nivel de precio: menor < 15 cajas, mayor desde 15 o por excepción", () => {
+  assert.equal(core.nivelPrecio(14, false), "menor");
+  assert.equal(core.nivelPrecio(15, false), "mayor");
+  assert.equal(core.nivelPrecio(3, true), "mayor");
+});
+
+test("totales por forma de pago con descuentos (ej. 100 → 90 / 70 / 60)", () => {
+  const its = core.conPrecios(ITS, PRECIOS, "menor");
+  assert.deepEqual(its.map((x) => x.precio), [10, 20, 0]);
+  assert.deepEqual(core.sinPrecio(its), ["BC-09"]);
+  const t = core.totalesPorPago(its);
+  assert.deepEqual(t.map((x) => [x.id, x.total, x.ahorro]), [["credito", 40, 0], ["pronto", 36, 4], ["efectivo_credito", 28, 12], ["efectivo_pronto", 24, 16]]);
+  const may = core.conPrecios(ITS, PRECIOS, "mayor");
+  assert.equal(core.totalPorPago(may, "credito"), 34);
+  assert.equal(core.precioUnitario({ precio: 2, desc_efectivo_pronto: 5 }, "efectivo_pronto"), 0); // nunca negativo
+  // ejemplo del dueño: 10 cajas de 10 $ con descuentos 1 / 3 / 4 por caja
+  const ej = core.conPrecios([{ code: "BC-01", cajas: 10 }], PRECIOS, "menor");
+  assert.deepEqual(core.totalesPorPago(ej).map((x) => x.total), [100, 90, 70, 60]);
+  assert.equal(core.dinero(1234.5), "1.234,50 $");
+});
+
+test("tipo de pago desde texto viejo y pronto pago hasta el día siguiente a la entrega", () => {
+  assert.equal(core.tipoPagoDe("Divisas · Crédito"), "credito");
+  assert.equal(core.tipoPagoDe("Bolívares · Contado"), "pronto");
+  assert.equal(core.tipoPagoDe("Efectivo a crédito"), "efectivo_credito");
+  assert.equal(core.tipoPagoDe("Efectivo pronto pago"), "efectivo_pronto");
+  const ent = new Date(2026, 9, 25, 10, 0).toISOString();
+  assert.equal(core.prontoVigente(ent, new Date(2026, 9, 26, 23, 0)), true);
+  assert.equal(core.prontoVigente(ent, new Date(2026, 9, 27, 0, 1)), false);
+  assert.equal(core.prontoVigente("", new Date()), true);
+});
+
+test("stock para el vendedor", () => {
+  assert.equal(core.textoStock({ controlado: true, disponible: 4 }), "Hay 4");
+  assert.equal(core.textoStock({ controlado: true, disponible: 0 }), "Agotado");
+  assert.equal(core.textoStock({ controlado: false, disponible: null }), "");
+  assert.equal(core.topeStock({ controlado: true, disponible: -2 }), 0);
+  assert.equal(core.topeStock(undefined), Infinity);
+});
+
+test("mensaje al grupo con precios y monto", () => {
+  const ped = { id: "SKL-1", fecha: "2026-10-25 10:00", vendedor: "Óscar", total_cajas: 3, tipo_pago: "efectivo_pronto", pago: "Efectivo pronto pago", nivel_precio: "menor",
+    items: core.conPrecios(ITS.slice(0, 2), PRECIOS, "menor") };
+  const m = core.mensajeGrupo(ped, { nombre: "Bella" });
+  assert.match(m, /2 × Babosa \(BC-01\) · 6,00 \$ c\/u/);
+  assert.match(m, /\*Monto: 24,00 \$\* · precio al por menor/);
+});
+
+test("borrar: vendedor sus pedidos (cualquier estado), Master todos; admin y despachador no", () => {
+  const p = { vendedor_id: "U3", estado: "entregado", cobro: "conciliado" };
+  assert.equal(core.puedeBorrar("vendedor", "U3", p), true);
+  assert.equal(core.puedeBorrar("vendedor", "U4", p), false);
+  assert.equal(core.puedeBorrar("master", "U1", p), true);
+  assert.equal(core.puedeBorrar("admin", "U2", p), false);
+  assert.equal(core.puedeBorrar("despachador", "U5", p), false);
+});
+
+test("pedido web: referencia y mensaje con precios y vendedor", () => {
+  assert.match(core.refWeb(), /^WEB-[A-Z2-9]{6}$/);
+  const items = core.conPrecios([{ code: "BC-01", producto: "Babosa", cajas: 10 }], PRECIOS, "menor");
+  const m = core.mensajeWeb({ ref: "WEB-AAA111", cliente: { negocio: "Salón Luz", telefono: "0414" }, vendedor: "Óscar", items, tipo_pago: "pronto" });
+  assert.match(m, /\(WEB-AAA111\)/);
+  assert.match(m, /Mi vendedor: Óscar/);
+  assert.match(m, /• 10 × Babosa \(BC-01\) · 9,00 \$ c\/u/);
+  assert.match(m, /Monto: 90,00 \$ \(Pronto pago\)/);
+});
+
+/* ---------- Datos en el teléfono (app) ---------- */
+test("actualización automática a las 8, 13 y 16 h", () => {
+  const h = (d, hh, mm = 0) => new Date(2026, 9, d, hh, mm);
+  assert.equal(core.debeSincronizar("", h(26, 9)), true);
+  assert.equal(core.debeSincronizar(h(26, 8, 5).toISOString(), h(26, 12, 59)), false);
+  assert.equal(core.debeSincronizar(h(26, 8, 5).toISOString(), h(26, 13, 1)), true);
+  assert.equal(core.debeSincronizar(h(25, 17).toISOString(), h(26, 7, 59)), false);
+  assert.equal(core.debeSincronizar(h(25, 17).toISOString(), h(26, 8, 0)), true);
+  assert.equal(core.debeSincronizar(h(20, 17).toISOString(), h(26, 7)), true); // más de un día
+  assert.deepEqual(core.proximaSync(h(26, 13, 30)), h(26, 16));
+  assert.deepEqual(core.proximaSync(h(26, 17)), h(27, 8));
+});
+
+test("sin señal: respuestas con los datos guardados (mismos filtros que el servidor)", () => {
+  const hoy = new Date("2026-10-26T15:00:00Z");
+  const local = {
+    fecha: "2026-10-26T12:00:00Z",
+    catalogo: { productos: [{ code: "BC-01", menor: 10 }] },
+    clientes: [{ id: "C1", nombre: "Peluquería Bella", contacto: "María", telefono: "0412-1234567" }, { id: "C2", nombre: "Barbería Max", telefono: "0414-9999999" }],
+    pedidos: [
+      { id: "P1", estado: "pendiente", created_at: "2026-08-01T10:00:00Z", cliente_id: "C1" },
+      { id: "P2", estado: "entregado", created_at: "2026-10-20T10:00:00Z", dias_credito: 15, cobro: "" },
+      { id: "P3", estado: "entregado", created_at: "2026-10-21T10:00:00Z", cobro: "cancelado" },
+      { id: "P4", estado: "entregado", created_at: "2026-10-22T10:00:00Z", cobro: "conciliado", conciliado_at: "2026-10-25T10:00:00Z" },
+      { id: "P5", estado: "cancelado", created_at: "2026-06-01T10:00:00Z" },
+    ],
+    pedidos_web: [{ id: "WEB-1", estado: "nuevo" }, { id: "WEB-2", estado: "tomado" }],
+  };
+  const ids = (r) => r.pedidos.map((p) => p.id);
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { estados: ["pendiente"] }, local, hoy)), ["P1"]); // abierto aunque sea viejo
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { estados: ["cancelado"], dias: 60 }, local, hoy)), []);
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { por_cobrar: true }, local, hoy)), ["P2"]);
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { por_conciliar: true }, local, hoy)), ["P3"]);
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { conciliados: true, dias: 7 }, local, hoy)), ["P4"]);
+  assert.deepEqual(ids(core.respuestaLocal("pedidos", { cliente_id: "C1" }, local, hoy)), ["P1"]);
+  assert.equal(core.respuestaLocal("pedido", { pedido_id: "P3" }, local, hoy).pedido.id, "P3");
+  assert.equal(core.respuestaLocal("pedido", { pedido_id: "X" }, local, hoy), null);
+  assert.deepEqual(core.respuestaLocal("clientes", { q: "bella" }, local, hoy).clientes.map((c) => c.id), ["C1"]);
+  assert.deepEqual(core.respuestaLocal("clientes", { q: "9999" }, local, hoy).clientes.map((c) => c.id), ["C2"]);
+  assert.equal(core.respuestaLocal("pedidosWeb", {}, local, hoy).pedidos.length, 1);
+  assert.equal(core.respuestaLocal("catalogo", {}, local, hoy).productos[0].menor, 10);
+  assert.equal(core.respuestaLocal("resumen", {}, local, hoy), null); // necesita señal
+  assert.equal(core.respuestaLocal("pedidos", {}, null, hoy), null);
+  assert.equal(core.respuestaLocal("pedidos", {}, local, hoy).local, true);
+});
+
+test("app: aviso de versión nueva y versión mínima", () => {
+  const cfg = { version_apk: 3, minima_apk: 2, url_apk: "https://x/skala.apk" };
+  assert.deepEqual(core.estadoApp(3, cfg), { nueva: false, obligatoria: false, version: 3 });
+  assert.deepEqual(core.estadoApp(2, cfg), { nueva: true, obligatoria: false, version: 3 });
+  assert.deepEqual(core.estadoApp(1, cfg), { nueva: true, obligatoria: true, version: 3 });
+  assert.equal(core.estadoApp(1, { version_apk: 3, url_apk: "" }).nueva, false); // sin enlace no avisa
+});
+
+test("varios roles: botones y permisos suman los de cada rol", () => {
+  const p = { estado: "confirmado", vendedor_id: "U3", despachador_id: "U3", cobro: "" };
+  assert.deepEqual(core.accionesPedido(["vendedor", "despachador"], "U3", p), ["en_ruta", "entregado"]);
+  assert.deepEqual(core.accionesPedido(["vendedor", "despachador"], "U3", { ...p, estado: "pendiente" }), ["cancelar"]);
+  assert.deepEqual(core.accionesPedido(["admin", "despachador"], "U3", p), ["en_ruta", "entregado", "cancelar"]);
+  assert.equal(core.puedeTomarPedidos(["despachador", "vendedor"]), true);
+  assert.equal(core.puedeTomarPedidos(["despachador"]), false);
+  assert.equal(core.puedeBorrar(["admin", "vendedor"], "U3", p), true);
+});
+
+/* ---------- Pedidos en 4 pestañas ---------- */
+test("pestañas de Pedidos: 4, con sub-filtros; enlaces viejos siguen funcionando", () => {
+  assert.deepEqual(core.vistasPedidos("vendedor").map((v) => v.id), ["hacer", "curso", "cobros", "historial"]);
+  assert.deepEqual(core.vistasPedidos("vendedor")[2].ver.map((v) => v.id), ["cobrar", "conciliados", "comisiones"]);
+  assert.deepEqual(core.vistasPedidos("admin")[2].ver.map((v) => v.id), ["cobrar", "conciliar", "conciliados", "comisiones"]);
+  const r = (rol, t, v) => { const x = core.resolverVista(rol, t, v); return [x.vista.id, x.sub && x.sub.id]; };
+  assert.deepEqual(r("admin", "conciliar"), ["cobros", "conciliar"]);
+  assert.deepEqual(r("admin", "cobros", "conciliados"), ["cobros", "conciliados"]);
+  assert.deepEqual(r("admin", "cancelado"), ["historial", "cancelado"]);
+  assert.deepEqual(r("admin", "curso"), ["curso", null]);
+  assert.deepEqual(r("vendedor", "web"), ["hacer", null]);
+  assert.deepEqual(r("vendedor", "nada"), ["hacer", null]);
+  assert.deepEqual(r("vendedor", "conciliar"), ["cobros", "cobrar"]); // el vendedor no tiene "por conciliar"
+});
+
+test("Por hacer según el rol; búsqueda; agrupar por día; contadores", () => {
+  const hoy = new Date(2026, 9, 28, 10);
+  const iso = (d) => new Date(2026, 9, d, 10).toISOString();
+  const P = [
+    { id: "A", estado: "pendiente", vendedor_id: "U3", created_at: iso(28), fecha: "2026-10-28 09:00", negocio: "Bella", cliente_datos: { telefono: "0412-1234567" } },
+    { id: "B", estado: "entregado", vendedor_id: "U3", created_at: iso(20), fecha: "2026-10-20 09:00", entregado_at: iso(20), cobro: "", negocio: "Max" },          // contado sin cobrar
+    { id: "C", estado: "entregado", vendedor_id: "U3", created_at: iso(10), fecha: "2026-10-10 09:00", entregado_at: iso(10), dias_credito: 30, cobro: "", negocio: "Luz" }, // crédito al día
+    { id: "D", estado: "entregado", vendedor_id: "U3", created_at: iso(1), fecha: "2026-10-01 09:00", entregado_at: iso(1), dias_credito: 15, cobro: "", negocio: "Sol" },   // vencido
+    { id: "E", estado: "entregado", vendedor_id: "U4", created_at: iso(27), fecha: "2026-10-27 09:00", cobro: "cancelado", negocio: "Mar" },
+    { id: "F", estado: "confirmado", vendedor_id: "U3", created_at: iso(26), fecha: "2026-10-26 09:00", negocio: "Río" },
+  ];
+  const adm = core.porHacer(P, "admin", "U2", hoy);
+  assert.deepEqual(adm.map((s) => [s.id, s.pedidos.map((p) => p.id)]), [["aprobar", ["A"]], ["conciliar", ["E"]]]);
+  const ven = core.porHacer(P, "vendedor", "U3", hoy);
+  assert.deepEqual(ven[0].pedidos.map((p) => p.id), ["D", "B"]); // vencido primero; C está al día
+  assert.deepEqual(core.pedidosDeVista(P, "curso", null, { hoy }).map((p) => p.id), ["A", "F"]);
+  assert.deepEqual(core.pedidosDeVista(P, "cobros", "cobrar", { hoy }).map((p) => p.id), ["B", "C", "D"]);
+  assert.deepEqual(core.pedidosDeVista(P, "historial", "entregado", { hoy }).map((p) => p.id), ["E", "B", "C", "D"]);
+  assert.deepEqual(core.buscarPedidos(P, "bella").map((p) => p.id), ["A"]);
+  assert.deepEqual(core.buscarPedidos(P, "1234567").map((p) => p.id), ["A"]);
+  assert.equal(core.buscarPedidos(P, "").length, 6);
+  assert.deepEqual(core.agruparPorDia(P.slice(0, 2).concat([P[5], P[4]]).sort((a, b) => b.fecha.localeCompare(a.fecha)), hoy).map((g) => [g.titulo, g.pedidos.length]),
+    [["Hoy", 1], ["Ayer", 1], ["Lunes", 1], ["20/10/2026", 1]]);
+  assert.deepEqual(core.contadoresVistas(P, "admin", "U2", hoy), { hacer: 2, curso: 2, cobros: 4 });
+});
+
+test("al mayor usa sus propios precios por forma de pago", () => {
+  const pr = { "BC-02": { menor: 29.5, mayor: 27, desc_pronto: 1.2, desc_efectivo_credito: 5.5, desc_efectivo_pronto: 6.2, mayor_desc_pronto: 1, mayor_desc_efectivo_credito: 5, mayor_desc_efectivo_pronto: 6 } };
+  const its = [{ code: "BC-02", cajas: 15 }];
+  assert.equal(core.totalPorPago(core.conPrecios(its, pr, "mayor"), "efectivo_pronto"), 15 * 21);
+  assert.equal(core.totalPorPago(core.conPrecios(its, pr, "menor"), "efectivo_pronto"), r2(15 * 23.3));
+  const m = core.mensajeWeb({ ref: "WEB-1", cliente: { negocio: "X", telefono: "1", latitud: 8.6, longitud: -71.6 }, items: [], tipo_pago: "credito" });
+  assert.match(m, /Ubicación: https:\/\/maps\.google\.com\/\?q=8\.6,-71\.6/);
+});
+const r2 = (n) => Math.round(n * 100) / 100;
+
+test("sin señal: el cliente se encuentra con el teléfono escrito de cualquier forma", () => {
+  const cl = [{ id: "C1", nombre: "Tienda Sol", telefono: "+58 424 7387202", rif_cedula: "V-28072542-1" }];
+  for (const q of ["04247387202", "+584247387202", "0424-738.72.02", "v-28072542"]) assert.equal(core.buscarClientesLocal(cl, q).length, 1, q);
+  assert.equal(core.telefonoWhatsapp("+58 424 7387202"), "584247387202");
+  assert.equal(core.telefonoWhatsapp("04247387202"), "584247387202");
+});
+
+test("entrega parcial: total de carga y pendientes cuentan solo lo que falta entregar", () => {
+  const p = { estado: "confirmado", items: [
+    { code: "BC-01", producto: "Babosa", cajas: 2, entregadas: 1, unidades_caja: 6, unidad: "unidades", total_unidades: 12 },
+    { code: "KT-01", producto: "Kit", cajas: 1, entregadas: 1, unidades_caja: 6, unidad: "dúos", total_unidades: 6 }] };
+  assert.equal(core.cajasPendientes(p), 1);
+  assert.equal(core.esParcial(p), true);
+  const t = core.totalCarga([p]);
+  assert.deepEqual([t.cajas, t.productos.map((x) => [x.code, x.cajas, x.total_unidades])], [1, [["BC-01", 1, 6]]]);
+  assert.equal(core.esParcial({ items: [{ cajas: 2, entregadas: 0 }] }), false);
+});
+
+/* ---------- Canal de atención y GPS de visitas ---------- */
+test("canales: solo 2 opciones en todo el sistema", () => {
+  assert.deepEqual(core.CANALES_ATENCION.map((c) => c.id), ["en_persona", "online_telefono"]);
+  assert.equal(core.nombreCanal("en_persona"), "📍 En persona (Visitado)");
+  assert.equal(core.nombreCanal("online_telefono"), "📱 Online / Por teléfono");
+  assert.equal(core.canalValido("whatsapp"), false);
+  assert.equal(core.canalValido(""), false);
+});
+
+test("gpsValido rechaza 0,0, vacíos y fuera de rango; haversine en metros", () => {
+  assert.equal(core.gpsValido(0, 0), false);
+  assert.equal(core.gpsValido("", -71), false);
+  assert.equal(core.gpsValido(95, 10), false);
+  assert.equal(core.gpsValido("8.6", "-71.6"), true);
+  const d = core.haversineM(8.6, -71.6, 8.601, -71.6); // ~111 m
+  assert.ok(d > 105 && d < 117, String(d));
+});
+
+test("clientesCercanos: radio 120 m, primero los no visitados hoy, máximo 3", () => {
+  const fix = { lat: 8.6, lng: -71.6 };
+  const cartera = [
+    { id: "A", latitud: 8.6001, longitud: -71.6 },   // ~11 m (visitado hoy)
+    { id: "B", latitud: 8.6005, longitud: -71.6 },   // ~56 m
+    { id: "C", latitud: 8.6009, longitud: -71.6 },   // ~100 m
+    { id: "D", latitud: 8.6002, longitud: -71.6 },   // ~22 m
+    { id: "E", latitud: 8.602, longitud: -71.6 },    // ~222 m (fuera)
+    { id: "F", latitud: 0, longitud: 0 },            // sin GPS
+  ];
+  const r = core.clientesCercanos(cartera, fix, { visitadosHoy: ["A"] });
+  assert.deepEqual(r.map((x) => x.cliente.id), ["D", "B", "C"]);
+  assert.ok(r.every((x) => x.dist <= 120));
+  assert.deepEqual(core.clientesCercanos(cartera, fix, { max: 5 }).map((x) => x.cliente.id), ["A", "D", "B", "C"]);
+  assert.deepEqual(core.clientesCercanos(cartera, { lat: 0, lng: 0 }), []);
+  assert.deepEqual(core.clientesCercanos(cartera, null), []);
+});
+
+test("canalSugerido: sugerencia GPS → en persona; sin clientes a 120 m → online; si hay otros cerca, que elija", () => {
+  const fix = { lat: 8.6, lng: -71.6 };
+  const cartera = [{ id: "A", latitud: 8.6001, longitud: -71.6 }];
+  assert.equal(core.canalSugerido({ id: "X", _canal_atencion: "en_persona" }, null, []), "en_persona");
+  assert.equal(core.canalSugerido({ id: "A", latitud: 8.6001, longitud: -71.6 }, fix, cartera), "en_persona");
+  assert.equal(core.canalSugerido({ id: "Z" }, { lat: 10.5, lng: -66.9 }, cartera), "online_telefono"); // en la casa / oficina
+  assert.equal(core.canalSugerido({ id: "Z" }, fix, cartera), ""); // hay un cliente al lado, pero no es este
+  assert.equal(core.canalSugerido({ id: "Z" }, null, cartera), "");
+});
+
+test("gpsAprendido: solo en persona, cliente sin GPS y lectura válida", () => {
+  const fix = { lat: 8.62012345, lng: -71.65098765 };
+  assert.deepEqual(core.gpsAprendido("en_persona", { latitud: "", longitud: "" }, fix), { latitud: 8.620123, longitud: -71.650988 });
+  assert.equal(core.gpsAprendido("en_persona", { latitud: 8.5, longitud: -71.5 }, fix), null);   // ya tenía
+  assert.equal(core.gpsAprendido("online_telefono", { latitud: "", longitud: "" }, fix), null); // jamás online
+  assert.equal(core.gpsAprendido("en_persona", { latitud: "" }, { lat: 0, lng: 0 }), null);
+});
+
+/* ---------- Resumen Inicio Vendedor (4 Recuadros + 4 Analytics en $) ---------- */
+test("resumenInicioVendedor: calcula los 4 recuadros principales (BCV vs Efectivo) y los 4 bloques de analytics en $", () => {
+  const hoy = new Date("2026-10-28T15:00:00Z");
+  const pedidos = [
+    // Hoy — BCV crédito ($150) · pendiente · en persona
+    {
+      id: "P-HOY-1", estado: "pendiente", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C1", negocio: "Peluquería Bella",
+      created_at: "2026-10-28T10:00:00Z", fecha: "2026-10-28 06:00",
+      tipo_pago: "credito", dias_credito: 15, total: 150, total_cajas: 10,
+      canal_pedido: "en_persona",
+      items: [{ code: "BC-01", producto: "Babosa", cajas: 10, precio: 15 }],
+    },
+    // Hoy — Efectivo pronto ($80) · confirmado (en despacho) · online
+    {
+      id: "P-HOY-2", estado: "confirmado", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C2", negocio: "Barbería Max",
+      created_at: "2026-10-28T12:00:00Z", fecha: "2026-10-28 08:00",
+      tipo_pago: "efectivo_pronto", dias_credito: 0, total: 80, total_cajas: 5,
+      canal_pedido: "online_telefono",
+      items: [{ code: "KT-01", producto: "Kit 12 em 1", cajas: 5, precio: 16 }],
+    },
+    // Hace 5 días (entra en 7d y 30d) — BCV pronto ($200) · entregado con cobro hoy conciliado en Bs
+    {
+      id: "P-5D", estado: "entregado", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C3", negocio: "Salón Luz",
+      created_at: "2026-10-23T10:00:00Z", fecha: "2026-10-23 10:00",
+      entregado_at: "2026-10-24T10:00:00Z",
+      tipo_pago: "pronto", dias_credito: 0, total: 200, total_cajas: 10, cobro: "conciliado",
+      pagos: [{ id: "PG-1", pedido_id: "P-5D", fecha_pago: "2026-10-28", moneda: "Bs", monto: 10000, tasa: 50, monto_usd: 200, estado: "conciliado" }],
+      items: [{ code: "BC-01", producto: "Babosa", cajas: 10, precio: 20 }],
+    },
+    // Hace 20 días (entra solo en 30d) — Efectivo crédito ($120) · entregado y VENCIDO (15 días crédito, entregado el 2026-10-08 → venció el 2026-10-23, hace 5 días)
+    {
+      id: "P-VENC-EF", estado: "entregado", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C4", negocio: "Abasto Sol", cliente_datos: { telefono: "0414-1234567" },
+      created_at: "2026-10-08T10:00:00Z", fecha: "2026-10-08 10:00",
+      entregado_at: "2026-10-08T10:00:00Z",
+      tipo_pago: "efectivo_credito", dias_credito: 15, total: 120, pagado_usd: 20, saldo: 100, total_cajas: 6, cobro: "",
+      pagos: [{ id: "PG-2", pedido_id: "P-VENC-EF", fecha_pago: "2026-10-28", moneda: "USD", monto: 20, monto_usd: 20, estado: "conciliado" }],
+      items: [{ code: "BC-06", producto: "Mais Cachos", cajas: 6, precio: 20 }],
+    },
+    // Hace 25 días — BCV crédito ($300) · entregado y MUY VENCIDO (7 días crédito, entregado el 2026-10-01 → venció el 2026-10-08, hace 20 días)
+    {
+      id: "P-VENC-BCV", estado: "entregado", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C5", negocio: "Supermercado Sur", cliente_datos: { telefono: "0412-9876543" },
+      created_at: "2026-10-01T10:00:00Z", fecha: "2026-10-01 10:00",
+      entregado_at: "2026-10-01T10:00:00Z",
+      tipo_pago: "credito", dias_credito: 7, total: 300, total_cajas: 15, cobro: "",
+      items: [{ code: "KT-01", producto: "Kit 12 em 1", cajas: 15, precio: 20 }],
+    },
+    // Hace 13 días — BCV crédito ($90) · entregado y POR VENCER PRÓXIMO (15 días crédito, entregado el 2026-10-15 → vence el 2026-10-30, en 2 días)
+    {
+      id: "P-PROX-BCV", estado: "entregado", vendedor_id: "U3", vendedor: "Óscar",
+      cliente_id: "C6", negocio: "Perfumería Luna",
+      created_at: "2026-10-15T10:00:00Z", fecha: "2026-10-15 10:00",
+      entregado_at: "2026-10-15T10:00:00Z",
+      tipo_pago: "credito", dias_credito: 15, total: 90, total_cajas: 5, cobro: "",
+      items: [{ code: "BC-01", producto: "Babosa", cajas: 5, precio: 18 }],
+    },
+    // Pedido de otro vendedor (debe ignorarse cuando uid = "U3")
+    {
+      id: "P-OTRO", estado: "pendiente", vendedor_id: "U9", vendedor: "Otro",
+      cliente_id: "C9", negocio: "Tienda Ajena",
+      created_at: "2026-10-28T11:00:00Z", fecha: "2026-10-28 11:00",
+      tipo_pago: "credito", dias_credito: 15, total: 999, total_cajas: 50,
+    },
+  ];
+
+  const r = core.resumenInicioVendedor({
+    pedidos,
+    porCobrar: pedidos.filter((p) => !p.cobro && (p.dias_credito > 0 || p.estado === "entregado")),
+    visitasHoy: [{ cliente_id: "C7", canal: "en_persona", fecha: "2026-10-28", vendedor_id: "U3" }],
+    comisionesCfg: { porcentaje_default: 3 },
+    uid: "U3",
+    hoy,
+    tasaBcv: 50,
+  });
+
+  // Recuadro 1: Ventas Hoy ($150 BCV + $80 Efectivo = $230)
+  assert.deepEqual(r.ventasHoy, {
+    bcvUsd: 150,
+    bcvBs: 7500,
+    efectivoUsd: 80,
+    totalUsd: 230,
+  });
+
+  // Recuadro 2: Pedidos Hoy
+  assert.deepEqual(r.pedidosHoy, {
+    cantidad: 2,
+    clientesUnicos: 2,
+    enProceso: 1,
+    enDespacho: 1,
+  });
+
+  // Recuadro 3: Pendiente por cobrar · Vencido ($300 BCV + $100 Efectivo = $400)
+  assert.equal(r.cobrarVencido.clientesUnicos, 2);
+  assert.equal(r.cobrarVencido.pedidosCount, 2);
+  assert.equal(r.cobrarVencido.totalUsd, 400);
+  assert.equal(r.cobrarVencido.bcvUsd, 300);
+  assert.equal(r.cobrarVencido.bcvBs, 15000);
+  assert.equal(r.cobrarVencido.efectivoUsd, 100);
+  assert.equal(r.topVencidos.length, 2);
+  assert.equal(r.topVencidos[0].id, "P-VENC-BCV");
+  assert.equal(r.topVencidos[0].whatsapp, "584129876543");
+  assert.equal(r.topVencidos[1].id, "P-VENC-EF");
+  assert.equal(r.topVencidos[1].modalidad, "Efectivo");
+
+  // Recuadro 4: Pendiente por cobrar · Por vencer (P-HOY-1 en tránsito $150 BCV + P-PROX-BCV próximo $90 BCV = $240 BCV)
+  assert.equal(r.cobrarPorVencer.clientesUnicos, 2);
+  assert.equal(r.cobrarPorVencer.pedidosCount, 2);
+  assert.equal(r.cobrarPorVencer.proximosCount, 1);
+  assert.equal(r.cobrarPorVencer.totalUsd, 240);
+  assert.equal(r.cobrarPorVencer.bcvUsd, 240);
+  assert.equal(r.cobrarPorVencer.bcvBs, 12000);
+  assert.equal(r.cobrarPorVencer.efectivoUsd, 0);
+
+  // Analytics 1: Cobros de hoy y Comisiones (3% de $200 BCV = $6 / Bs 300; 3% de $20 Efectivo = $0.60)
+  assert.deepEqual(r.cobrosYComision.cobrosHoy, {
+    cantidad: 2,
+    efectivoUsd: 20,
+    bs: 10000,
+    equivalenteUsd: 220,
+    pendientesConciliar: 0,
+  });
+  assert.deepEqual(r.cobrosYComision.comisiones, {
+    pendientesCount: 2,
+    efectivoUsd: 0.6,
+    bcvUsd: 6,
+    bcvBs: 300,
+    totalUsd: 6.6,
+  });
+
+  // Analytics 3: Ritmo comercial en $ (7 días: P-HOY-1 $150 + P-HOY-2 $80 + P-5D $200 = $430, 3 pedidos)
+  assert.equal(r.ritmo.d7.totalUsd, 430);
+  assert.equal(r.ritmo.d7.bcvUsd, 350);
+  assert.equal(r.ritmo.d7.efectivoUsd, 80);
+  assert.equal(r.ritmo.d7.pedidos, 3);
+  assert.equal(r.ritmo.d7.ticketPromedioUsd, 143.33);
+  assert.equal(r.ritmo.d7.pctBcv + r.ritmo.d7.pctEfectivo, 100);
+
+  // 30 días: $430 + P-VENC-EF $120 + P-VENC-BCV $300 + P-PROX-BCV $90 = $940 (6 pedidos)
+  assert.equal(r.ritmo.d30.totalUsd, 940);
+  assert.equal(r.ritmo.d30.bcvUsd, 740);
+  assert.equal(r.ritmo.d30.efectivoUsd, 200);
+  assert.equal(r.ritmo.d30.pedidos, 6);
+
+  // Analytics 4: Cobertura hoy (C1 + C7 en persona = 2; C2 online = 1) y Top 3 productos por $ vendido
+  assert.equal(r.coberturaHoy.en_persona, 2);
+  assert.equal(r.coberturaHoy.online_telefono, 1);
+  assert.equal(r.topProductos.length, 3);
+  assert.equal(r.topProductos[0].code, "BC-01"); // $150 + $200 + $90 = $440
+  assert.equal(r.topProductos[0].totalUsd, 440);
+  assert.equal(r.topProductos[1].code, "KT-01"); // $80 + $300 = $380
+  assert.equal(r.topProductos[1].totalUsd, 380);
+  assert.equal(r.topProductos[2].code, "BC-06"); // $120
+  assert.equal(r.topProductos[2].totalUsd, 120);
+});

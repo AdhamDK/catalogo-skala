@@ -1,1 +1,7 @@
 shots/
+node_modules/
+
+# Secretos locales (Supabase y otros). NUNCA subir a git.
+.env
+.env.*
+!.env.example

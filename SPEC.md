@@ -3,14 +3,16 @@
 > **Documento de Especificación Formal (Spec-Driven Development)**
 > **Repositorio:** `catalogo-skala` (`https://github.com/AdhamDK/catalogo-skala`)
 > **Organización / Negocio:** Distribuidora Ontiveros Only Skala (El Vigía, Mérida, Venezuela)
-> **Versión del Sistema Analizada:** CRM v3 / Panel v4 / Catálogo 2026 / App Android v1.0.0 (`versionCode = 1`, `sw.js = skala-equipo-v23`)
-> **Fecha de Auditoría SDD:** Noviembre 2026
+> **Versión del Sistema Analizada:** CRM v3 / Panel v4 (Beta Producción en Paralelo) / Catálogo 2026 / App Android v1.0.0 (`versionCode = 1`, `sw.js = skala-equipo-v37` / `dist-ontiveros-v41`)
+> **Motor de Base de Datos:** Arquitectura Dual **Google Sheets (GAS)** + **Supabase (PostgreSQL + RPC `SECURITY DEFINER`)**
+> **Gobernanza Multiagente:** Preparación y Especificación por **Argon 4** · Implementación y Certificación QA por **Claude** ([`AGENTS.md`](./AGENTS.md))
+> **Fecha de Actualización SDD:** Noviembre 2026
 
 ---
 
 ## 1. Visión General y Propósito del Sistema
 
-**Skala Venezuela (`catalogo-skala`)** es una plataforma integral **B2B / Mayorista** de exhibición comercial, toma de pedidos omnicanal, gestión de relaciones con clientes (CRM), control de inventario, facturación/despacho y conciliación de cobranzas para el distribuidor autorizado de productos capilares brasileños **Skala** en Venezuela.
+**Skala Venezuela (`catalogo-skala`)** es una plataforma integral **B2B / Mayorista** de exhibición comercial, toma de pedidos omnicanal, gestión de relaciones con clientes (CRM), control de inventario, facturación/despacho, conciliación bimonetaria de cobranzas (con abonos parciales y tasa oficial BCV) y liquidación de comisiones de vendedores para el distribuidor autorizado de productos capilares brasileños **Skala** en Venezuela.
 
 El sistema resuelve la operación completa de distribución mayorista en un entorno con **conectividad móvil intermitente** y **economía bimonetaria (USD / Bs)** mediante cuatro pilares operativos:
 
@@ -20,9 +22,10 @@ El sistema resuelve la operación completa de distribución mayorista en un ento
    - Autogestión para clientes recurrentes (búsqueda por teléfono o RIF), captura de coordenadas GPS de entrega, envío directo al backend (`PedidosWeb`) y canalización inmediata hacia el WhatsApp del vendedor asignado o de la oficina central.
 2. **Panel Operativo del Equipo — PWA Offline-First (`catalogo-skala/panel.html`):**
    - Aplicación web progresiva (SPA por hash `#/...`) para los 4 roles operativos: **Master**, **Administración**, **Vendedor** y **Despachador**.
-   - Permite tomar pedidos en calle (con o sin señal, encolando en `localStorage`), administrar la cartera de clientes geolocalizados, aprobar/facturar pedidos, gestionar entregas totales o parciales con cálculo de carga vehicular y notas de crédito, controlar inventario físico vs. disponible y conciliar cobranzas en Dólares (`USD`) y Bolívares (`Bs`).
-3. **Backend Serverless sobre Google Workspace (`crm/Code.gs`):**
-   - API HTTP JSON (`doGet` / `doPost`) implementada en **Google Apps Script (GAS)** usando una hoja de cálculo de **Google Sheets** en Google Drive como base de datos relacional-tabular de **9 hojas** con bloqueo transaccional (`LockService`), caché de sesiones/rate-limiting (`CacheService`) y firmado criptográfico `HMAC-SHA256`.
+   - Permite tomar pedidos en calle (con o sin señal, encolando en `localStorage`), administrar la cartera de clientes geolocalizados, aprobar/facturar pedidos, gestionar entregas totales o parciales con cálculo de carga vehicular y notas de crédito, controlar inventario físico vs. disponible, registrar cobros totales o abonos parciales en Dólares (`USD`) y Bolívares (`Bs`) con conversión automática por tasa BCV del día del pago, ajustar precios al cobrar por error de facturación y liquidar comisiones de vendedores.
+3. **Backend Dual Serverless: Google Workspace (`crm/Code.gs`) ↔ Supabase PostgreSQL (`supabase/schema.sql`):**
+   - **Motor Primario / Respaldo Histórico (Google Sheets + GAS):** API HTTP JSON (`doGet` / `doPost`) en **Google Apps Script** usando **Google Sheets** como base de datos relacional-tabular de **11 hojas (170 columnas)** con bloqueo transaccional (`LockService`), caché (`CacheService`), consulta automática de tasa BCV (`ve.dolarapi.com`) y firmado criptográfico `HMAC-SHA256`.
+   - **Motor de Alta Velocidad (Supabase PostgreSQL):** Esquema relacional de **11 tablas de dominio + 1 tabla interna de secretos (`skala_secretos`)** con RLS habilitado y 2 funciones RPC en PL/pgSQL (`public.skala_db` y `public.skala_importar`) + cliente JS isomórfico (`apiSupabase` en `catalogo-skala/js/crm-api.js`). Permite migración en vivo con **0% pérdida de datos** dejando Google Sheets intacto como copia espejo de solo lectura.
 4. **Aplicación Nativa Híbrida Android (`android/` — *Skala Equipo*):**
    - Contenedor Android (`minSdk 24`, `targetSdk 34`) basado en `WebViewAssetLoader` + `WorkManager` que empaqueta el panel del equipo, mantiene sesiones de 30 días, sincroniza automáticamente la base de datos en segundo plano a las **08:00, 13:00 y 16:00 h**, y soporta actualizaciones OTA (*Over-The-Air*) tanto del paquete de pantallas (`.zip`) como del binario `.apk` vía GitHub Releases sin depender de Google Play Store.
 
@@ -30,7 +33,7 @@ El sistema resuelve la operación completa de distribución mayorista en un ento
 
 ## 2. Arquitectura y Stack Tecnológico
 
-### 2.1. Topología de Componentes
+### 2.1. Topología de Componentes (Arquitectura Dual Google Sheets + Supabase)
 
 ```mermaid
 flowchart TB
@@ -40,77 +43,68 @@ flowchart TB
     end
 
     subgraph Equipo["Canal Interno (Equipo Skala)"]
-        PWA["Panel PWA (panel.html + sw.js)<br/>SPA Hash Router + Offline Queue"]
+        PWA["Panel PWA (panel.html + sw.js v30)<br/>SPA Hash Router + Offline Queue"]
         APK["App Android (com.skala.equipo)<br/>WebViewAssetLoader + WorkManager"]
         WA_GRP["Grupo WhatsApp Empresa"]
     end
 
-    subgraph Hosting["Distribución Estática y Releases"]
-        NET["Netlify CDN<br/>(publish: catalogo-skala/)"]
-        GHR["GitHub Releases<br/>(APK + pantallas-VERSION.zip)"]
+    subgraph RouterAPI["Capa de Abstracción de Datos (crm-api.js)"]
+        SW_DB{"usaSupabase()<br/>Config activa o fija"}
+        API_SB["Cliente Supabase (apiSupabase)<br/>POST /rest/v1/rpc/skala_db"]
+        API_GS["Cliente Google Sheets<br/>POST text/plain JSON (/exec)"]
     end
 
-    subgraph Backend["Backend Serverless (Google Cloud / Workspace)"]
-        GAS["Google Apps Script (crm/Code.gs)<br/>Web App /exec (text/plain JSON)"]
-        LOCK["LockService & CacheService<br/>(Concurrencia y Rate-Limit)"]
-        PROP["PropertiesService<br/>(CRM_SECRET, SPREADSHEET_ID)"]
-        SHEETS[("Google Sheets (9 Hojas)<br/>Usuarios, Clientes, Pedidos,<br/>PedidoItems, Precios, Inventario,<br/>PedidosWeb, Config, Historial")]
+    subgraph SupabaseCloud["Backend Supabase (PostgreSQL 15+)"]
+        RPC_DB["RPC public.skala_db(payload)<br/>Auth HMAC + Lectura/Escritura JSONB"]
+        RPC_IMP["RPC public.skala_importar(payload)<br/>Upsert Transaccional Sin Pérdida"]
+        PG_TABS[("11 Tablas Dominio + skala_secretos<br/>usuarios, clientes, pedidos, pedido_items,<br/>historial, precios, inventario, pedidos_web,<br/>config, pagos, tasas")]
     end
 
-    NET -->|Sirve estáticos| CAT
-    NET -->|Sirve PWA| PWA
-    GHR -->|Descarga OTA APK / ZIP| APK
+    subgraph GoogleCloud["Backend Google Workspace (Respaldo / Origen)"]
+        GAS["Google Apps Script (crm/Code.gs)<br/>33 Acciones + exportarBackup"]
+        BCV["API DolarApi Venezuela<br/>ve.dolarapi.com (Tasa BCV)"]
+        SHEETS[("Google Sheets (11 Hojas · 170 cols)<br/>Usuarios, Clientes, Pedidos, PedidoItems,<br/>Historial, Precios, Inventario, PedidosWeb,<br/>Config, Pagos, Tasas")]
+    end
+
+    CAT --> SW_DB
+    PWA --> SW_DB
     APK -->|Embebe y ejecuta| PWA
-
-    CAT -->|POST text/plain JSON<br/>catalogo, vendedores, buscarClienteWeb,<br/>pedidoWeb, asignarVendedorWeb| GAS
     CAT -->|wa.me/58...| WA_CLI
-    PWA -->|POST text/plain JSON<br/>25 acciones API + Token HMAC| GAS
-    APK -->|Sync 8h/13h/16h (Red.java)<br/>action: sincronizar| GAS
     PWA -->|Share API / Puente.compartir()| WA_GRP
 
-    GAS --> LOCK
-    GAS --> PROP
-    GAS <-->|Lectura / Escritura Tabular| SHEETS
+    SW_DB -->|Motor Supabase activo| API_SB
+    SW_DB -->|Fallback / Modo Sheets| API_GS
+
+    API_SB --> RPC_DB
+    RPC_DB <--> PG_TABS
+
+    API_GS --> GAS
+    GAS <--> SHEETS
+    GAS -->|Consulta histórica BCV| BCV
+    GAS -->|Menú 4 / migrarDesdeSheetsASupabase| RPC_IMP
+    RPC_IMP --> PG_TABS
 ```
 
 ### 2.2. Stack Tecnológico por Capa
 
 | Capa | Tecnología / Herramienta | Archivos Clave | Características Técnicas |
 | :--- | :--- | :--- | :--- |
-| **Catálogo y Panel Web (Frontend)** | HTML5, CSS3 Custom Properties, Vanilla JavaScript (ES2020+, sin bundler ni frameworks) | [index.html](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/index.html), [panel.html](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/panel.html), [styles.css](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/css/styles.css), [panel.css](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/css/panel.css) | Cero dependencias NPM en producción. Diseño *mobile-first*, temas claro/oscuro/auto ([tema.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/tema.js)), hoja de estilo `@media print` A4. |
-| **Lógica de Dominio Compartida** | JavaScript Isomórfico (Browser + CommonJS para Node.js) | [producto.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/producto.js), [datos.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/datos.js), [crm-core.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/crm-core.js), [crm-api.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/crm-api.js) | Funciones puras exportables vía `module.exports` para pruebas unitarias sin DOM; cliente HTTP con fallback automático a copia local offline (`respuestaLocal`). |
-| **PWA & Offline** | Service Worker API + Web App Manifest + `localStorage` | [sw.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/sw.js), [manifest.webmanifest](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/manifest.webmanifest) | Estrategia *Stale-While-Revalidate* para 12 activos base (`skala-equipo-v23`); cola persistente de pedidos offline (`skala_cola_v1`). |
-| **Backend API & Persistencia** | Google Apps Script (V8 Runtime) + Google Sheets | [crm/Code.gs](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/Code.gs) | Endpoint único `/exec` que recibe `POST` con `Content-Type: text/plain;charset=utf-8` (evita preflight CORS). Sanitización anti-fórmulas con prefijo `'`. |
-| **App Móvil Nativa** | Java 17 + Android SDK 34 + Gradle Kotlin DSL | [MainActivity.java](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/app/src/main/java/com/skala/equipo/MainActivity.java), [Sincronizador.java](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/app/src/main/java/com/skala/equipo/Sincronizador.java), [Actualizador.java](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/app/src/main/java/com/skala/equipo/Actualizador.java), [Puente.java](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/app/src/main/java/com/skala/equipo/Puente.java) | `androidx.core:1.12.0`, `androidx.webkit:1.9.0`, `androidx.work:work-runtime:2.9.0`. Puente JS `window.SkalaApp`. |
-| **Testing & QA** | `node:test`, `node:assert`, `vm` (Fake GAS), Playwright | [producto.test.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/tests/producto.test.js), [crm-core.test.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/tests/crm-core.test.js), [code.test.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/tests/code.test.js), [fake-gas.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/tests/fake-gas.js), [e2e.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/tests/e2e.js), [e2e-panel.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/tests/e2e-panel.js), [e2e-app.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/tests/e2e-app.js) | Emulador en memoria de Google Apps Script ([fake-gas.js](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/tests/fake-gas.js)) y pruebas E2E multi-viewport y multi-rol. |
-| **Despliegue** | Netlify + Scripts `.bat` Windows | [netlify.toml](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/netlify.toml), [compilar_apk.bat](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/compilar_apk.bat), [hacer_pantallas.bat](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/hacer_pantallas.bat) | Publicación continua desde rama `main` (`publish = "catalogo-skala"`). |
+| **Catálogo y Panel Web (Frontend)** | HTML5, CSS3 Custom Properties, Vanilla JavaScript (ES2020+, sin bundler ni frameworks) | [index.html](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/index.html), [panel.html](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/panel.html), [styles.css](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/css/styles.css), [panel.css](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/css/panel.css), [panel.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/panel.js) | Cero dependencias NPM en producción. Diseño *mobile-first*, temas claro/oscuro/auto ([tema.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/tema.js)), hoja de estilo `@media print` A4. |
+| **Lógica de Dominio y Adaptador Dual DB** | JavaScript Isomórfico (Browser + CommonJS para Node.js) | [producto.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/producto.js), [datos.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/datos.js), [crm-core.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/crm-core.js), [crm-api.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/crm-api.js) | Enrutador transparente Google Sheets ↔ Supabase (`usaSupabase`, `apiSupabase`, `migrarDesdeSheetsASupabase`) con fallback automático a copia local offline (`respuestaLocal`). |
+| **PWA & Offline** | Service Worker API + Web App Manifest + `localStorage` | [sw.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/sw.js), [manifest.webmanifest](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/manifest.webmanifest) | Estrategia *Stale-While-Revalidate* para 12 activos base (`skala-equipo-v30`); cola persistente de pedidos offline (`skala_cola_v1`). |
+| **Backend Supabase (PostgreSQL)** | PostgreSQL 15+ + `pgcrypto` + PL/pgSQL RPC (`SECURITY DEFINER`) | [supabase/schema.sql](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/supabase/schema.sql), [supabase/MIGRACION.md](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/supabase/MIGRACION.md) | 11 tablas con RLS activo (bloqueo de acceso directo PostgREST) + funciones `skala_db` y `skala_importar`. Misma firma `HMAC-SHA256` y `pin_hash` que GAS. |
+| **Backend Google Workspace** | Google Apps Script (V8 Runtime) + Google Sheets | [crm/Code.gs](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/Code.gs) | Endpoint único `/exec` (`POST text/plain;charset=utf-8`), 33 acciones en `ACCIONES`, sanitización anti-fórmulas con prefijo `'` y exportador de snapshot completo (`exportarBackup`). |
+| **App Móvil Nativa** | Java 17 + Android SDK 34 + Gradle Kotlin DSL | [MainActivity.java](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/app/src/main/java/com/skala/equipo/MainActivity.java), [Sincronizador.java](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/app/src/main/java/com/skala/equipo/Sincronizador.java), [Actualizador.java](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/app/src/main/java/com/skala/equipo/Actualizador.java), [Puente.java](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/app/src/main/java/com/skala/equipo/Puente.java) | `androidx.core:1.12.0`, `androidx.webkit:1.9.0`, `androidx.work:work-runtime:2.9.0`. Puente JS `window.SkalaApp`. |
+| **Testing & QA** | `node:test`, `node:assert`, `vm` (Fake GAS), Playwright | [producto.test.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/tests/producto.test.js), [crm-core.test.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/tests/crm-core.test.js), [code.test.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/tests/code.test.js), [fake-gas.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/tests/fake-gas.js), [e2e.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/tests/e2e.js), [e2e-panel.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/tests/e2e-panel.js), [e2e-app.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/tests/e2e-app.js) | Emulador en memoria de Google Apps Script ([fake-gas.js](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/tests/fake-gas.js)) y pruebas E2E multi-viewport y multi-rol. |
+| **Despliegue** | Netlify + Scripts `.bat` Windows | [netlify.toml](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/netlify.toml), [compilar_apk.bat](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/compilar_apk.bat), [hacer_pantallas.bat](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/android/hacer_pantallas.bat) | Publicación continua desde rama `main` (`publish = "catalogo-skala"`). |
 
 ---
 
 ## 3. Especificación de Datos y Modelos de Dominio
 
-### 3.1. Inventario Cuantitativo de Archivos y Activos del Repositorio
+### 3.1. Catálogo Estático de Productos Base ([`catalogo-skala/js/datos.js`](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/datos.js))
 
-El repositorio consta de **115 archivos** (excluyendo `.git`), totalizando **24.64 MB (25,839,507 bytes)**:
-
-| Subsistema / Categoría | Cantidad de Archivos | Tamaño Total | Detalle de Contenido |
-| :--- | :---: | :---: | :--- |
-| **Imágenes PNG Originales (`assets/img/*.png`)** | 20 | 14.59 MB (15,312,345 B) | 11 Baños (`BC-01`..`BC-11`), 8 Kits (`KT-01`..`KT-08`) y `logo.png`. |
-| **Imágenes WebP Optimizadas (`assets/img/web/*.webp`)** | 38 | 847.7 KB (868,070 B) | Pares `-400.webp` y `-800.webp` para los 19 productos base (**reducción de peso del 94.2%** respecto a PNG). |
-| **Logos y Activos PWA/Android (`*.png`, `*.jpg`)** | 15 | 661.2 KB (677,090 B) | 4 iconos PWA (`logo-96`, `192`, `512`, `maskable-512`), 1 `Skala logo.jpg` y 10 iconos Android `mipmap-*`. |
-| **Catálogo Imprimible PDF (`Catalogo-Skala-2026.pdf`)** | 1 | 7.89 MB (8,275,320 B) | Exportación PDF lista para distribución offline. |
-| **Capturas Residuales en Raíz Publicada (`elegido.png`, `form.png`)** | 2 | 318.3 KB (325,894 B) | Capturas de prueba en `catalogo-skala/` no referenciadas por el código. |
-| **Código Fuente Frontend (`catalogo-skala/js/`, `css/`, `*.html`)** | 14 | 401.9 KB (411,558 B) | `panel.js` (189.2 KB / 2,723 líneas), `styles.css` (58.7 KB), `panel.css` (45.5 KB), `main.js` (33.9 KB), `crm-core.js` (29.0 KB), etc. |
-| **Código Fuente Backend (`crm/Code.gs`)** | 1 | 94.5 KB (96,749 B) | 1,730 líneas de Google Apps Script. |
-| **Código Fuente Android (`android/`)** | 21 | 88.2 KB (90,347 B) | 7 clases Java (27.4 KB), scripts `.bat`, configuración Gradle y recursos XML + `gradle-wrapper.jar` (43.5 KB). |
-| **Suite de Pruebas (`tests/`)** | 7 | 209.3 KB (214,298 B) | `code.test.js` (78.2 KB), `e2e-panel.js` (65.4 KB), `crm-core.test.js` (29.5 KB), `e2e.js` (25.5 KB), `e2e-app.js` (8.0 KB), `fake-gas.js` (4.8 KB), `producto.test.js` (2.9 KB). |
-| **Documentación y Configuración** | 6 | 33.7 KB (34,538 B) | `README.md` (raíz y catálogo), `crm/INSTALAR.md`, `android/LEEME.md`, `docs/specs/modo-vendedor-crm.md`, `netlify.toml`. |
-
----
-
-### 3.2. Catálogo Estático de Productos Base ([`catalogo-skala/js/datos.js`](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/datos.js))
-
-El sistema define **19 productos base** divididos en 2 categorías (`BANOS` con 11 ítems y `KITS` con 8 ítems), sincronizados con `PRODUCTOS_BASE` en [`crm/Code.gs`](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/Code.gs#L66-L72). Además, permite agregar productos dinámicos desde la hoja `Precios` mediante [`sumarProductosNuevos()`](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/datos.js#L54-L71).
+El sistema define **19 productos base** divididos en 2 categorías (`BANOS` con 11 ítems y `KITS` con 8 ítems), sincronizados tanto con `PRODUCTOS_BASE` en [`crm/Code.gs`](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/Code.gs#L66-L75) como con la semilla inicial de `public.precios` en [`supabase/schema.sql`](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/supabase/schema.sql#L472-L492). Además, permite agregar productos dinámicos desde la tabla `Precios` mediante [`sumarProductosNuevos()`](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/datos.js#L54-L71).
 
 #### A. Estructura de Entidad de Producto en Cliente (`BANOS` / `KITS`)
 
@@ -120,12 +114,12 @@ El sistema define **19 productos base** divididos en 2 categorías (`BANOS` con 
 | `name` | `string` | Estático / CRM | Nombre comercial del producto (máx. 80 caracteres en alta dinámica). |
 | `line` | `string` | Estático / CRM | Línea o beneficio principal: `Hidratación`, `Nutrición`, `Definición`, `Reconstrucción`, `Kids`, `Completo`. |
 | `benefit` | `string` | Estático / CRM | Descripción corta del beneficio capilar (máx. 200 caracteres). |
-| `hair` | `string` | Estático / CRM | Rango de curvatura objetivo en formato `[1-4][A-C]–[1-4][A-C]` (ej. `1A–4C`, `3A–4C`). Parseado por [`tiposDeCabello()`](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/producto.js#L22-L30). |
-| `stock` | `number` | Estático (Legacy) | Valor numérico estático en `datos.js` (no utilizado en el render actual; reemplazado por stock dinámico del CRM). |
+| `hair` | `string` | Estático / CRM | Rango de curvatura objetivo en formato `[1-4][A-C]–[1-4][A-C]` (ej. `1A–4C`, `3A–4C`). Parseado por [`tiposDeCabello()`](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/producto.js#L22-L30). |
+| `stock` | `number` | Estático (Legacy) | Valor numérico estático en `datos.js` (reemplazado en la UI por el stock dinámico del CRM). |
 | `unidades` | `number` | Derivado / CRM | Cantidad de piezas por caja: `6` por defecto (`UNIDADES_POR_CAJA_BANO = 6`, `DUOS_POR_CAJA_KIT = 6`). |
 | `unidad` | `string` | Derivado | `"unidades"` para Baños de crema (potes de 1 kg) y `"dúos"` para Kits (shampoo + acondicionador). |
 | `nuevo` | `boolean?` | Dinámico CRM | `true` si el producto fue creado desde el panel administrativo y no pertenece a los 19 productos base. |
-| `foto` | `string?` | Dinámico CRM | URL `https://...` de imagen externa para productos nuevos (si falta, [`fotoVacia()`](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/datos.js#L74-L80) genera un SVG data-URI). |
+| `foto` | `string?` | Dinámico CRM | URL `https://...` de imagen externa para productos nuevos (si falta, [`fotoVacia()`](file:///c:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/datos.js#L74-L80) genera un SVG data-URI). |
 
 #### B. Matriz Completa de los 19 Productos Base y sus Activos
 
@@ -151,30 +145,28 @@ El sistema define **19 productos base** divididos en 2 categorías (`BANOS` con 
 | `KT-07` | Kit | Kit Mais Crespinhos | Definición | `3A–4C` | Cacheado, Crespo | 6 dúos (Sh+Ac) | 10 | 749.8 KB | 11.5 KB / 27.7 KB |
 | `KT-08` | Kit | Kit Mais Cachos | Definición | `3A–4C` | Cacheado, Crespo | 6 dúos (Sh+Ac) | 10 | 703.0 KB | 11.0 KB / 25.8 KB |
 
-**Estadísticas Agregadas del Catálogo Base:**
-- **Total de SKUs Base:** 19 (11 Baños de crema = 57.9%; 8 Kits = 42.1%).
-- **Distribución por Línea (`line`):**
-  - `Definición`: 6 productos (3 Baños: `BC-06`, `BC-07`, `BC-08` + 3 Kits: `KT-06`, `KT-07`, `KT-08`).
-  - `Hidratación`: 5 productos (4 Baños: `BC-01`, `BC-03`, `BC-05`, `BC-09` + 1 Kit: `KT-03`).
-  - `Nutrición`: 4 productos (3 Baños: `BC-02`, `BC-10`, `BC-11` + 1 Kit: `KT-02`).
-  - `Reconstrucción`: 2 productos (0 Baños + 2 Kits: `KT-04`, `KT-05`).
-  - `Kids`: 1 producto (`BC-04`).
-  - `Completo`: 1 producto (`KT-01`).
-- **Distribución por Curvatura (`hair`):**
-  - `1A–4C` (Todo tipo de cabello): 11 productos (6 Baños + 5 Kits).
-  - `3A–4C` (Cacheado y Crespo): 5 productos (2 Baños + 3 Kits).
-  - `1A–3C` (Liso, Ondulado, Cacheado): 1 producto (`BC-04`).
-  - `1A–2C` (Liso y Ondulado): 1 producto (`BC-09`).
-  - `4A–4C` (Solo Crespo): 1 producto (`BC-08`).
-- **Suma de Stock Estático (`datos.js`):** 2,500 cajas (2,250 cajas de Baños = 13,500 unidades de 1 kg; 250 cajas de Kits = 1,500 dúos).
-
 ---
 
-### 3.3. Esquema de Base de Datos en Google Sheets ([`crm/Code.gs`](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/Code.gs#L77-L113))
+### 3.2. Esquema Unificado de Base de Datos: Google Sheets (`crm/Code.gs`) ↔ Supabase (`supabase/schema.sql`)
 
-El backend define en el objeto `HOJAS` exactamente **9 hojas (tablas)** que suman **128 columnas**. Todos los strings no vacíos se escriben anteponiendo un apóstrofo (`'`) mediante [`celda_(v)`](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/Code.gs#L225-L229) para forzar formato texto en Google Sheets, evitando la pérdida de ceros a la izquierda en teléfonos (`0412...`), mutación de fechas y ataques de inyección de fórmulas (`=`, `+`, `-`, `@`).
+El modelo de persistencia consta de **11 hojas/tablas de dominio** que suman **170 columnas de negocio**, más **1 tabla interna (`public.skala_secretos`)** en PostgreSQL para almacenar el secreto criptográfico `CRM_SECRET` y mantener compatibilidad transparente de claves (`pin_hash`) y sesiones (`token`) entre ambos motores.
 
-#### Diagrama Entidad-Relación (Mermaid ER)
+| # | Hoja en Google Sheets (`HOJAS`) | Tabla en PostgreSQL (`public.*`) | Columnas | Clave Primaria (PK) | Índices / Restricciones en PostgreSQL |
+| :-: | :--- | :--- | :---: | :--- | :--- |
+| 1 | `Usuarios` | `public.usuarios` | 9 | `id` (`TEXT`) | `usuarios_usuario_idx` (`lower(usuario)`) |
+| 2 | `Clientes` | `public.clientes` | 14 | `id` (`TEXT` UUID) | `clientes_deleted_idx`, `clientes_vendedor_idx`, `clientes_telefono_idx` |
+| 3 | `Pedidos` | `public.pedidos` | 53 | `id` (`SKL-yyMMdd-NNN`) | `pedidos_estado_idx`, `pedidos_vendedor_idx`, `pedidos_cliente_idx`, `pedidos_created_idx`, `pedidos_client_ref_idx` |
+| 4 | `PedidoItems` | `public.pedido_items` | 13 (+`row_id`) | `row_id` (`BIGSERIAL`) | `pedido_items_pedido_idx` (`pedido_id`), `pedido_items_code_idx` (`code`) |
+| 5 | `Historial` | `public.historial` | 5 (+`row_id`) | `row_id` (`BIGSERIAL`) | `historial_pedido_idx` (`pedido_id`), `historial_fecha_idx` (`fecha DESC`) |
+| 6 | `Precios` | `public.precios` | 18 | `code` (`TEXT`) | PK sobre `code` (`BC-01`..`KT-08` y nuevos) |
+| 7 | `Inventario` | `public.inventario` | 7 (+`row_id`) | `row_id` (`BIGSERIAL`) | `inventario_code_idx` (`code`), `inventario_fecha_idx` (`fecha DESC`) |
+| 8 | `PedidosWeb` | `public.pedidos_web` | 23 | `id` (`WEB-XXXXXX`) | `pedidos_web_estado_idx` (`estado`), `pedidos_web_created_idx` (`created_at DESC`) |
+| 9 | `Config` | `public.config` | 3 | `clave` (`TEXT`) | Semilla OTA + `comision_pct_default` |
+| 10 | `Pagos` | `public.pagos` | 26 | `id` (`PAG-XXXXXXXX`) | `pagos_pedido_idx` (`pedido_id`), `pagos_estado_idx` (`estado`), `pagos_fecha_idx` (`fecha_pago DESC`) |
+| 11 | `Tasas` | `public.tasas` | 4 | `fecha` (`yyyy-MM-dd`) | PK por día calendario |
+| 12* | `ScriptProperties` | `public.skala_secretos` | 3 | `clave` (`TEXT`) | Almacena `CRM_SECRET` (bloqueado a `anon`/`authenticated` vía `REVOKE ALL`) |
+
+#### Diagrama Entidad-Relación Completo (11 Tablas de Dominio)
 
 ```mermaid
 erDiagram
@@ -182,364 +174,332 @@ erDiagram
     USUARIOS ||--o{ PEDIDOS : "vende (vendedor_id)"
     USUARIOS ||--o{ PEDIDOS : "despacha (despachador_id)"
     USUARIOS ||--o{ PEDIDOS_WEB : "asignado (vendedor_id)"
+    USUARIOS ||--o{ PAGOS : "registra cobro (registrado_por_id)"
     CLIENTES ||--o{ PEDIDOS : "solicita (cliente_id)"
     CLIENTES ||--o{ PEDIDOS_WEB : "identifica (cliente_id)"
     PEDIDOS ||--|{ PEDIDO_ITEMS : "contiene (pedido_id)"
+    PEDIDOS ||--o{ PAGOS : "recibe abonos/cobros (pedido_id)"
     PEDIDOS ||--o{ HISTORIAL : "audita (pedido_id)"
     PEDIDOS_WEB ||--o| PEDIDOS : "se convierte en (web_id / pedido_id)"
     PRECIOS ||--o{ PEDIDO_ITEMS : "define SKU y precios (code)"
     PRECIOS ||--o{ INVENTARIO : "controla stock (code)"
+    TASAS ||--o{ PAGOS : "convierte Bs a USD (fecha_pago -> fecha)"
 
     USUARIOS {
-        string id PK "Ej: U1, U2 o V1 (migrado)"
-        string usuario UK "Minúsculas sin acentos (3-30 chars)"
+        string id PK "U1, U2 o V1"
+        string usuario UK "Minúsculas (3-30 chars)"
         string nombre "Nombre visible"
         string rol "CSV: master, admin, vendedor, despachador"
         string pin_hash "SHA-256(CRM_SECRET|id|clave)"
         boolean activo "true / false"
         string created_at "ISO-8601 UTC"
         string telefono "WhatsApp del vendedor"
+        number comision_pct "% comisión individual (def 3%)"
     }
 
     CLIENTES {
         string id PK "UUID v4"
-        string nombre "Nombre del negocio o cliente"
-        string rif_cedula "RIF o Cédula en mayúsculas"
-        string direccion "Dirección física (máx 250 chars)"
+        string nombre "Negocio o cliente"
+        string rif_cedula "RIF o Cédula"
+        string direccion "Dirección física"
         number latitud "Grados decimales [-90, 90]"
         number longitud "Grados decimales [-180, 180]"
-        string telefono "Teléfono principal (>= 7 dígitos)"
+        string telefono "Teléfono principal"
         string updated_at "ISO-8601 UTC"
         number sync_status "1 (compatibilidad GPS_CLIENTES)"
         number deleted "0 activo, 1 borrado"
         string contacto "Persona de contacto"
         string telefono2 "Teléfono secundario"
-        string vendedor_id FK "ID del usuario creador"
+        string vendedor_id FK "ID usuario creador"
         string created_at "ISO-8601 UTC"
     }
 
     PEDIDOS {
         string id PK "SKL-AAMMDD-NNN"
-        string fecha "yyyy-MM-dd HH:mm (America/Caracas)"
-        string vendedor_id FK "ID usuario vendedor"
-        string vendedor "Nombre vendedor (desnormalizado)"
+        string fecha "yyyy-MM-dd HH:mm (Caracas)"
+        string vendedor_id FK "ID vendedor"
+        string vendedor "Nombre vendedor"
         string cliente_id FK "UUID cliente"
-        string cliente "Contacto/Nombre cliente"
-        string negocio "Nombre negocio"
-        number total_cajas "Suma de cajas activas"
+        string cliente "Contacto"
+        string negocio "Negocio"
+        number total_cajas "Suma cajas activas"
         string detalle_unidades "Ej: 12 unidades + 6 dúos"
-        string pago "Nombre modalidad de pago"
-        string nota "Observaciones (máx 300 chars)"
+        string pago "Etiqueta modalidad pago"
+        string nota "Observaciones"
         string estado "pendiente|confirmado|en_ruta|entregado|cancelado"
-        string estado_at "ISO-8601 último cambio estado"
-        string estado_por "Nombre usuario cambio estado"
-        string motivo "Motivo de anulación"
-        string client_ref UK "UUID idempotencia cliente"
+        string estado_at "ISO-8601 cambio estado"
+        string estado_por "Usuario cambio estado"
+        string motivo "Motivo anulación"
+        string client_ref UK "UUID idempotencia"
         string created_at "ISO-8601 UTC"
         string updated_at "ISO-8601 UTC"
-        string despachador_id FK "ID usuario despachador (opcional)"
+        string despachador_id FK "ID despachador"
         string despachador "Nombre despachador"
-        string confirmado_por "Usuario que aprobó/facturó"
+        string confirmado_por "Usuario aprobó"
         string confirmado_at "ISO-8601 aprobación"
-        string entregado_por "Usuario que entregó"
-        string entregado_at "ISO-8601 entrega efectiva"
+        string entregado_por "Usuario entregó"
+        string entregado_at "ISO-8601 entrega"
         string documento "Nota de entrega | Factura"
-        number dias_credito "0 o 1..180 días"
+        number dias_credito "0 o 1..180"
         string cobro "vacío | cancelado | conciliado"
-        string cobrado_at "ISO-8601 reporte cobro"
-        string cobrado_por "Usuario que reportó cobro"
+        string cobrado_at "ISO-8601 último cobro"
+        string cobrado_por "Usuario último cobro"
         string conciliado_at "ISO-8601 conciliación"
-        string conciliado_por "Usuario que concilió"
-        number monto "Monto cobrado (>0, 2 dec)"
+        string conciliado_por "Usuario concilió"
+        number monto "Último monto cobrado"
         string moneda "USD | Bs"
-        string nivel_precio "menor | mayor"
+        string nivel_precio "menor | mayor | personalizado"
         boolean excepcion_precio "true si mayor con <15 cajas"
         string tipo_pago "credito|pronto|efectivo_credito|efectivo_pronto"
-        number total "Total acordado en USD"
+        number total "Total acordado USD"
         string tipo_pago_real "Modalidad real al cobrar"
-        number total_final "Total recalculado al cobrar en USD"
-        string web_id FK "ID PedidosWeb origen (WEB-XXXXXX)"
-        boolean borrado "Soft-delete (true/vacío)"
-        string borrado_motivo "Motivo de borrado"
-        string borrado_por "Usuario que borró"
+        number total_final "Total recalculado USD"
+        string web_id FK "WEB-XXXXXX"
+        boolean borrado "Soft-delete"
+        string borrado_motivo "Motivo borrado"
+        string borrado_por "Usuario borró"
         string borrado_at "ISO-8601 borrado"
-        string factura "Número de factura fiscal"
-        number nota_credito "Monto USD nota de crédito por devolución"
+        string factura "N° factura fiscal"
+        number nota_credito "USD nota de crédito por devolución"
+        number pagado_usd "Suma USD de pagos no rechazados"
+        number saldo "Saldo pendiente USD (totalCobrar - pagado_usd)"
+        number pagos_pend "Cantidad de abonos en estado reportado"
+        string ajuste_estado "propuesto | aprobado | revertido"
+        string ajuste_motivo "Motivo cambio de precios al cobrar"
+        string ajuste_por "Usuario que ajustó precios"
+        string ajuste_at "ISO-8601 ajuste"
+        string ajuste_previo "JSON snapshot precios originales"
+    }
+
+    PAGOS {
+        string id PK "PAG-XXXXXXXX"
+        string pedido_id FK "SKL-AAMMDD-NNN"
+        string fecha_pago "yyyy-MM-dd"
+        string created_at "ISO-8601 UTC"
+        string registrado_por "Nombre usuario"
+        string registrado_por_id FK "ID usuario"
+        string moneda "USD | Bs"
+        number monto "Monto en moneda original"
+        number tasa "Tasa BCV aplicada (si Bs)"
+        number monto_usd "Equivalente en USD"
+        string referencia "N° ref bancaria / recibo"
+        string tipo_pago_real "Modalidad aplicada"
+        string estado "reportado | conciliado | rechazado"
+        string conciliado_at "ISO-8601 conciliación/rechazo"
+        string conciliado_por "Usuario conciliador"
+        string motivo "Motivo de rechazo"
+        string comision_estado "vacío | pagada"
+        number comision_pct "% comisión liquidado"
+        number comision_usd "Comisión en USD"
+        string comision_moneda "Bs | USD (Efectivo)"
+        number comision_monto "Monto pagado al vendedor"
+        number comision_tasa "Tasa BCV liquidación"
+        string comision_fecha "yyyy-MM-dd liquidación"
+        string comision_ref "Referencia pago comisión"
+        string comision_pagada_at "ISO-8601 liquidación"
+        string comision_pagada_por "Usuario que liquidó"
+    }
+
+    TASAS {
+        string fecha PK "yyyy-MM-dd"
+        number tasa "Bs por 1 USD (4 decimales)"
+        string fuente "bcv | manual"
+        string updated_at "ISO-8601 UTC"
     }
 
     PEDIDO_ITEMS {
         string pedido_id FK "SKL-AAMMDD-NNN"
-        string code FK "Código SKU (BC-01, KT-01...)"
-        string producto "Nombre producto"
-        number cajas "Cantidad de cajas facturadas"
-        number unidades_caja "Unidades o dúos por caja (6)"
+        string code FK "SKU"
+        string producto "Nombre"
+        number cajas "Cajas activas"
+        number unidades_caja "6"
         string unidad "unidades | dúos"
         number total_unidades "cajas * unidades_caja"
-        number precio "Precio base unitario USD congelado"
-        number desc_pronto "Rebaja USD por caja pronto pago"
-        number desc_efectivo_credito "Rebaja USD por caja ef. crédito"
-        number desc_efectivo_pronto "Rebaja USD por caja ef. pronto"
+        number precio "Precio base USD congelado"
+        number desc_pronto "Rebaja pronto"
+        number desc_efectivo_credito "Rebaja ef. crédito"
+        number desc_efectivo_pronto "Rebaja ef. pronto"
         number entregadas "Cajas entregadas acumuladas"
         number devueltas "Cajas devueltas al depósito"
     }
 
     PRECIOS {
-        string code PK "SKU (BC-01..KT-08 o nuevos)"
-        string producto "Nombre del producto"
-        number menor "Precio final USD Menor Crédito"
-        number mayor "Precio final USD Mayor Crédito"
-        number pronto "Precio final USD Menor Pronto"
-        number efectivo_credito "Precio final USD Menor Ef. Crédito"
-        number efectivo_pronto "Precio final USD Menor Ef. Pronto"
-        string updated_at "ISO-8601 UTC"
-        string updated_por "Usuario que actualizó"
-        string tipo "banos | kits (productos nuevos)"
-        string linea "Línea capilar (productos nuevos)"
-        string beneficio "Beneficio (productos nuevos)"
-        string cabello "Curvatura ej. 1A–4C"
-        number unidades_caja "Unidades por caja (def. 6)"
-        string imagen "URL https:// foto (productos nuevos)"
-        number mayor_pronto "Precio final USD Mayor Pronto"
-        number mayor_efectivo_credito "Precio final USD Mayor Ef. Crédito"
-        number mayor_efectivo_pronto "Precio final USD Mayor Ef. Pronto"
+        string code PK "SKU"
+        string producto "Nombre"
+        number menor "USD Menor Crédito"
+        number mayor "USD Mayor Crédito"
+        number pronto "USD Menor Pronto"
+        number efectivo_credito "USD Menor Ef. Crédito"
+        number efectivo_pronto "USD Menor Ef. Pronto"
+        string updated_at "ISO-8601"
+        string updated_por "Usuario"
+        string tipo "banos | kits"
+        string linea "Línea"
+        string beneficio "Beneficio"
+        string cabello "Curvatura"
+        number unidades_caja "6"
+        string imagen "URL foto"
+        number mayor_pronto "USD Mayor Pronto"
+        number mayor_efectivo_credito "USD Mayor Ef. Crédito"
+        number mayor_efectivo_pronto "USD Mayor Ef. Pronto"
     }
 
     INVENTARIO {
-        string fecha "ISO-8601 UTC"
-        string code FK "SKU producto"
-        string producto "Nombre producto"
-        number cajas "Delta de cajas (+entrada, +/-ajuste, +/-conteo, 0 alta/sobrante)"
-        string tipo "entrada | conteo | ajuste | alta | sobrante"
-        string nota "Observación o detalle automático"
-        string usuario "Nombre usuario ejecutor"
+        string fecha "ISO-8601"
+        string code FK "SKU"
+        string producto "Nombre"
+        number cajas "Delta cajas"
+        string tipo "entrada|conteo|ajuste|alta|sobrante"
+        string nota "Observación"
+        string usuario "Usuario"
     }
 
     PEDIDOS_WEB {
         string id PK "WEB-XXXXXX"
         string fecha "yyyy-MM-dd HH:mm"
-        string created_at "ISO-8601 UTC"
-        string vendedor_id FK "ID vendedor elegido (opcional)"
-        string vendedor "Nombre vendedor elegido"
-        string negocio "Nombre negocio cliente"
-        string contacto "Persona contacto"
-        string rif_cedula "RIF / Cédula"
-        string telefono "Teléfono cliente"
-        string direccion "Dirección entrega"
-        string items "JSON Array de ítems"
-        string tipo_pago "credito|pronto|efectivo_credito|efectivo_pronto"
+        string created_at "ISO-8601"
+        string vendedor_id FK "ID vendedor"
+        string vendedor "Nombre vendedor"
+        string negocio "Negocio"
+        string contacto "Contacto"
+        string rif_cedula "RIF/Cédula"
+        string telefono "Teléfono"
+        string direccion "Dirección"
+        string items "JSON Array"
+        string tipo_pago "Modalidad"
         number total_cajas "Suma cajas"
         number total "Total estimado USD"
-        string nota "Nota del cliente"
+        string nota "Nota"
         string estado "nuevo | tomado | descartado"
-        string pedido_id FK "ID Pedido SKL generado al tomar"
-        string atendido_por "Nombre usuario que tomó/descartó"
-        string atendido_at "ISO-8601 atención"
-        string motivo "Motivo de descarte"
-        string cliente_id FK "UUID si se buscó en Clientes"
-        number latitud "Latitud GPS"
-        number longitud "Longitud GPS"
+        string pedido_id FK "SKL-..."
+        string atendido_por "Usuario"
+        string atendido_at "ISO-8601"
+        string motivo "Motivo descarte"
+        string cliente_id FK "UUID cliente"
+        number latitud "Latitud"
+        number longitud "Longitud"
     }
 
     HISTORIAL {
-        string fecha "ISO-8601 UTC"
-        string pedido_id FK "SKL-AAMMDD-NNN"
+        string fecha "ISO-8601"
+        string pedido_id FK "SKL-..."
         string usuario "Nombre (Roles)"
-        string accion "Evento auditado"
-        string detalle "Descripción del cambio"
+        string accion "Evento"
+        string detalle "Detalle"
     }
 
     CONFIG {
-        string clave PK "version_apk, url_apk, minima_apk, version_pantallas, url_pantallas, notas"
-        string valor "Valor de configuración"
-        string nota "Descripción de ayuda"
+        string clave PK "version_apk, comision_pct_default, etc."
+        string valor "Valor"
+        string nota "Descripción"
     }
 ```
 
 ---
 
-### 3.4. Diccionario Exhaustivo de Datos (Google Sheets)
+### 3.3. Diccionario Exhaustivo de las 11 Tablas de Dominio
 
-#### 3.4.1. Hoja `Usuarios` (8 columnas)
-Almacena las credenciales y permisos del personal de Skala.
-1. `id` (`string`, PK): Identificador secuencial (`U1`, `U2`, ...) o heredado de la migración v1 (`V1`, `V2`).
+#### 3.3.1. Tabla `Usuarios` / `public.usuarios` (9 columnas)
+1. `id` (`string`, PK): Identificador secuencial (`U1`, `U2`, ...) o heredado (`V1`, `V2`).
 2. `usuario` (`string`, UK): Nombre de usuario normalizado en minúsculas sin tildes (`[a-z0-9._-]{3,30}`).
 3. `nombre` (`string`): Nombre visible del miembro del equipo (máx. 60 caracteres).
-4. `rol` (`string`): Uno o varios roles separados por coma (`master`, `admin`, `vendedor`, `despachador`). El orden de jerarquía es `master > admin > vendedor > despachador`.
+4. `rol` (`string`): Uno o varios roles separados por coma (`master`, `admin`, `vendedor`, `despachador`). Jerarquía: `master > admin > vendedor > despachador`.
 5. `pin_hash` (`string`): Hash hexadecimal SHA-256 de `CRM_SECRET + "|" + id + "|" + clave`.
-6. `activo` (`boolean`): Indica si el usuario puede iniciar sesión y operar (`true`, `1`, `si`, `sí`).
+6. `activo` (`boolean`): Indica si el usuario puede iniciar sesión y operar.
 7. `created_at` (`string`): Timestamp ISO-8601 de creación.
-8. `telefono` (`string`): Número telefónico de WhatsApp del vendedor (opcional, mín. 7 dígitos si se indica) para recibir pedidos desde el catálogo público.
+8. `telefono` (`string`): Número de WhatsApp del vendedor para recibir pedidos desde el catálogo público.
+9. `comision_pct` (`number | ""`): Porcentaje de comisión individual sobre cobros conciliados (por defecto hereda `comision_pct_default = 3%` de `Config`).
 
-#### 3.4.2. Hoja `Clientes` (14 columnas)
-Las primeras 10 columnas mantienen compatibilidad posicional estricta con el sistema externo `GPS_CLIENTES`.
-1. `id` (`string`, PK): UUID v4 generado por `Utilities.getUuid()`.
-2. `nombre` (`string`): Nombre comercial del negocio (o nombre del contacto si no se especificó negocio; máx. 120 chars).
-3. `rif_cedula` (`string`): RIF o cédula en mayúsculas (máx. 30 chars; obligatorio ≥ 6 dígitos si solicita `Factura`).
-4. `direccion` (`string`): Dirección física de entrega (máx. 250 chars).
-5. `latitud` (`number | ""`): Coordenada GPS redondeada a 6 decimales (`[-90, 90]`).
-6. `longitud` (`number | ""`): Coordenada GPS redondeada a 6 decimales (`[-180, 180]`).
-7. `telefono` (`string`): Teléfono principal (obligatorio en pedidos, mín. 7 dígitos; opcional en alta manual de traspaso).
-8. `updated_at` (`string`): Timestamp ISO-8601 de última modificación.
-9. `sync_status` (`number`): Fijado a `1` en cada alta o edición para sincronización con `GPS_CLIENTES`.
-10. `deleted` (`number`): Borrado lógico (`0` activo, `1` eliminado).
-11. `contacto` (`string`): Nombre de la persona de contacto (máx. 120 chars).
-12. `telefono2` (`string`): Teléfono secundario. Si un cliente existente es actualizado mediante pedido con un número distinto al principal, el número antiguo se preserva en `telefono` y el nuevo se guarda automáticamente en `telefono2`.
-13. `vendedor_id` (`string`, FK): `id` del usuario que registró originalmente al cliente.
-14. `created_at` (`string`): Timestamp ISO-8601 de alta inicial.
+#### 3.3.2. Tabla `Clientes` / `public.clientes` (14 columnas)
+Las primeras 10 columnas mantienen compatibilidad posicional estricta con `GPS_CLIENTES`:
+`id` (PK UUID), `nombre`, `rif_cedula`, `direccion`, `latitud`, `longitud`, `telefono`, `updated_at`, `sync_status` (`1`), `deleted` (`0` activo, `1` eliminado), `contacto`, `telefono2`, `vendedor_id` (FK), `created_at`.
 
-#### 3.4.3. Hoja `Pedidos` (45 columnas)
-Tabla central transaccional del ciclo de vida de ventas, despacho y cobranza.
-1. `id` (`string`, PK): Código correlativo diario en zona `America/Caracas` con formato `SKL-yyMMdd-NNN` (ej. `SKL-261025-001`).
-2. `fecha` (`string`): Fecha/hora local legible `yyyy-MM-dd HH:mm` (`America/Caracas`).
-3. `vendedor_id` (`string`, FK): `id` del usuario que creó el pedido.
-4. `vendedor` (`string`): Nombre del vendedor en el momento de creación.
-5. `cliente_id` (`string`, FK): UUID del cliente en la hoja `Clientes`.
-6. `cliente` (`string`): Nombre de la persona de contacto o cliente.
-7. `negocio` (`string`): Nombre del establecimiento comercial.
-8. `total_cajas` (`number`): Suma total de cajas del pedido (se recalcula si se edita o si hay devoluciones al entregar).
-9. `detalle_unidades` (`string`): Resumen agregado por tipo de unidad (ej. `"12 unidades + 6 dúos"`).
-10. `pago` (`string`): Etiqueta legible de la forma de pago (`"Crédito"`, `"Pronto pago"`, `"Efectivo a crédito"`, `"Efectivo pronto pago"` o texto libre legacy).
-11. `nota` (`string`): Observaciones del pedido (máx. 300 chars).
-12. `estado` (`string`): Estado operativo (`pendiente`, `confirmado`, `en_ruta`, `entregado`, `cancelado`).
-13. `estado_at` (`string`): Timestamp ISO-8601 del último cambio de estado.
-14. `estado_por` (`string`): Nombre del usuario que ejecutó el último cambio de estado.
-15. `motivo` (`string`): Motivo obligatorio cuando `estado === "cancelado"` (máx. 200 chars).
-16. `client_ref` (`string`, UK): UUID generado en el cliente para garantizar idempotencia ante reintentos de red o subida de cola offline.
-17. `created_at` (`string`): Timestamp ISO-8601 de creación.
-18. `updated_at` (`string`): Timestamp ISO-8601 de última actualización.
-19. `despachador_id` (`string`, FK): `id` del despachador asignado (opcional; si queda vacío, despacha Administración).
-20. `despachador` (`string`): Nombre del despachador asignado.
-21. `confirmado_por` (`string`): Nombre del usuario de Administración/Master que aprobó el pedido.
-22. `confirmado_at` (`string`): Timestamp ISO-8601 de aprobación.
-23. `entregado_por` (`string`): Nombre del usuario que registró la entrega final.
-24. `entregado_at` (`string`): Timestamp ISO-8601 de entrega (puede ser la hora actual o las `16:00:00Z` / `12:00 Caracas` de una fecha retroactiva elegida entre la fecha del pedido y hoy).
-25. `documento` (`string`): Tipo de documento fiscal requerido (`"Nota de entrega"` o `"Factura"`).
-26. `dias_credito` (`number`): Plazo de crédito en días (`1` a `180` si la modalidad de pago es a crédito; `0` si es pronto pago/contado).
-27. `cobro` (`string`): Estado de cobranza (`""` = por cobrar, `"cancelado"` = cobrado por vendedor pendiente de conciliar, `"conciliado"` = dinero verificado por Administración).
-28. `cobrado_at` (`string`): Timestamp ISO-8601 de reporte de cobro.
-29. `cobrado_por` (`string`): Nombre del usuario que reportó el cobro.
-30. `conciliado_at` (`string`): Timestamp ISO-8601 de conciliación administrativa.
-31. `conciliado_por` (`string`): Nombre del usuario que concilió el cobro.
-32. `monto` (`number | ""`): Monto numérico efectivamente cobrado/recibido (`> 0`, hasta 2 decimales).
-33. `moneda` (`string`): Moneda del monto cobrado (`"USD"` o `"Bs"`).
-34. `nivel_precio` (`string`): Nivel tarifario aplicado (`"menor"` o `"mayor"`).
-35. `excepcion_precio` (`boolean`): `true` si el vendedor otorgó precio `"mayor"` en un pedido de menos de 15 cajas.
-36. `tipo_pago` (`string`): Clave normalizada de modalidad de pago acordada (`credito`, `pronto`, `efectivo_credito`, `efectivo_pronto`).
-37. `total` (`number | ""`): Monto total acordado en USD según `tipo_pago` y precios congelados de los ítems.
-38. `tipo_pago_real` (`string`): Modalidad real con la que pagó el cliente al momento del cobro (permite recalcular descuentos si acordó crédito y pagó en efectivo, o viceversa).
-39. `total_final` (`number | ""`): Monto total recalculado en USD según `tipo_pago_real`.
-40. `web_id` (`string`, FK): Referencia `WEB-XXXXXX` si el pedido se originó desde `PedidosWeb`.
-41. `borrado` (`boolean | ""`): Flag de borrado lógico (`true` oculta el pedido de listas, métricas y reservas de stock).
-42. `borrado_motivo` (`string`): Motivo obligatorio al borrar un pedido (máx. 200 chars).
-43. `borrado_por` (`string`): Nombre del usuario que borró el pedido.
-44. `borrado_at` (`string`): Timestamp ISO-8601 del borrado.
-45. `factura` (`string`): Número de factura fiscal cargado opcionalmente al aprobar o editar (máx. 40 chars).
-46. *(Nota: `factura` es la col. 44 y `nota_credito` la col. 45)* `nota_credito` (`number | ""`): Monto acumulado en USD de nota de crédito generada cuando el cliente devuelve cajas al depósito durante una entrega con diferencias.
+#### 3.3.3. Tabla `Pedidos` / `public.pedidos` (53 columnas)
+- **Columnas 1 a 45 (Core de Venta, Despacho, Cobranza y Auditoría):**
+  `id` (`SKL-yyMMdd-NNN`), `fecha`, `vendedor_id`, `vendedor`, `cliente_id`, `cliente`, `negocio`, `total_cajas`, `detalle_unidades`, `pago`, `nota`, `estado` (`pendiente|confirmado|en_ruta|entregado|cancelado`), `estado_at`, `estado_por`, `motivo`, `client_ref` (UUID idempotencia), `created_at`, `updated_at`, `despachador_id`, `despachador`, `confirmado_por`, `confirmado_at`, `entregado_por`, `entregado_at`, `documento` (`Nota de entrega|Factura`), `dias_credito`, `cobro` (`""|cancelado|conciliado`), `cobrado_at`, `cobrado_por`, `conciliado_at`, `conciliado_por`, `monto`, `moneda` (`USD|Bs`), `nivel_precio` (`menor|mayor|personalizado`), `excepcion_precio`, `tipo_pago`, `total`, `tipo_pago_real`, `total_final`, `web_id`, `borrado`, `borrado_motivo`, `borrado_por`, `borrado_at`, `factura`, `nota_credito`.
+- **Columnas 46 a 48 (Abonos Parciales y Saldo Bimonetario):**
+  46. `pagado_usd` (`number`): Suma acumulada en USD de todos los registros en `Pagos` asociados al pedido cuyo `estado !== "rechazado"`.
+  47. `saldo` (`number`): Saldo pendiente por cobrar en USD (`max(0, totalCobrar - pagado_usd)`).
+  48. `pagos_pend` (`number`): Cantidad de abonos/pagos en estado `"reportado"` pendientes de conciliación por Administración.
+- **Columnas 49 a 53 (Corrección de Precios al Cobrar por Error de Facturación):**
+  49. `ajuste_estado` (`string`): `""`, `"propuesto"` (si lo cargó un vendedor al cobrar), `"aprobado"` (si lo cargó o concilió Administración/Master) o `"revertido"`.
+  50. `ajuste_motivo` (`string`): Motivo obligatorio del cambio de precios en el cobro (máx. 200 chars).
+  51. `ajuste_por` (`string`): Nombre del usuario que registró el ajuste de precios.
+  52. `ajuste_at` (`string`): Timestamp ISO-8601 del ajuste.
+  53. `ajuste_previo` (`string`): Snapshot JSON (`{ nivel_precio, excepcion_precio, total, items: [{ code, precio, desc_* }] }`) que preserva los precios originales de facturación para permitir reversión exacta con 1 clic (`accion: "revertir_ajuste"`).
 
-#### 3.4.4. Hoja `PedidoItems` (13 columnas)
-Detalle de líneas de producto por pedido. Congela precios y descuentos al momento de creación.
-1. `pedido_id` (`string`, FK): Referencia a `Pedidos.id` (si un pedido se edita y reduce líneas, las filas sobrantes se limpian con `pedido_id: ""`).
-2. `code` (`string`, FK): Código SKU del producto (`BC-01`, etc.).
-3. `producto` (`string`): Nombre del producto.
-4. `cajas` (`number`): Cantidad de cajas activas en el pedido (`1..10000`).
-5. `unidades_caja` (`number | ""`): Unidades o dúos por caja (`6`).
-6. `unidad` (`string`): `"unidades"` o `"dúos"`.
-7. `total_unidades` (`number | ""`): `cajas * unidades_caja`.
-8. `precio` (`number`): Precio base por caja en USD (modalidad `credito`) según el `nivel_precio` del pedido.
-9. `desc_pronto` (`number`): Descuento en USD por caja para modalidad `pronto`.
-10. `desc_efectivo_credito` (`number`): Descuento en USD por caja para modalidad `efectivo_credito`.
-11. `desc_efectivo_pronto` (`number`): Descuento en USD por caja para modalidad `efectivo_pronto`.
-12. `entregadas` (`number`): Cantidad acumulada de cajas ya recibidas por el cliente (soporte de entregas parciales).
-13. `devueltas` (`number`): Cantidad acumulada de cajas no recibidas que retornaron al depósito (`destino: "devuelve"`).
+#### 3.3.4. Tabla `PedidoItems` / `public.pedido_items` (13 columnas)
+`pedido_id` (FK), `code` (FK), `producto`, `cajas`, `unidades_caja`, `unidad`, `total_unidades`, `precio`, `desc_pronto`, `desc_efectivo_credito`, `desc_efectivo_pronto`, `entregadas`, `devueltas`.
 
-#### 3.4.5. Hoja `Precios` (18 columnas)
- Almacena la matriz de **8 precios finales en USD por caja** para cada producto, además de los metadatos de catálogo para productos nuevos.
-1. `code` (`string`, PK): Código SKU (`BC-01`..`KT-08`, o nuevos `BC-12+`, `KT-09+`).
-2. `producto` (`string`): Nombre del producto.
-3. `menor` (`number`): Precio final USD al por menor (< 15 cajas) en modalidad **Crédito (Base)**.
-4. `mayor` (`number`): Precio final USD al mayor (≥ 15 cajas) en modalidad **Crédito (Base)**.
-5. `pronto` (`number`): Precio final USD al por menor en modalidad **Pronto pago (1★)**.
-6. `efectivo_credito` (`number`): Precio final USD al por menor en modalidad **Efectivo a crédito (2★)**.
-7. `efectivo_pronto` (`number`): Precio final USD al por menor en modalidad **Efectivo pronto pago (3★ Premium)**.
-8. `updated_at` (`string`): Timestamp ISO-8601 de última actualización de precio/producto.
-9. `updated_por` (`string`): Nombre del usuario que modificó el registro.
-10. `tipo` (`string`): `"banos"` o `"kits"` (usado en productos nuevos).
-11. `linea` (`string`): Línea capilar (máx. 40 chars).
-12. `beneficio` (`string`): Texto descriptivo del beneficio (máx. 200 chars).
-13. `cabello` (`string`): Curvatura objetivo (por defecto `"1A–4C"`).
-14. `unidades_caja` (`number`): Unidades por caja (`1..200`, por defecto `6`).
-15. `imagen` (`string`): URL `https://` de la foto del producto nuevo (máx. 400 chars).
-16. `mayor_pronto` (`number`): Precio final USD al mayor en modalidad **Pronto pago**. (Si está vacío o es `0`, se aplica la misma rebaja en USD que al por menor: `menor - pronto`).
-17. `mayor_efectivo_credito` (`number`): Precio final USD al mayor en modalidad **Efectivo a crédito**.
-18. `mayor_efectivo_pronto` (`number`): Precio final USD al mayor en modalidad **Efectivo pronto pago**.
+#### 3.3.5. Tabla `Precios` / `public.precios` (18 columnas)
+`code` (PK), `producto`, `menor`, `mayor`, `pronto`, `efectivo_credito`, `efectivo_pronto`, `updated_at`, `updated_por`, `tipo`, `linea`, `beneficio`, `cabello`, `unidades_caja`, `imagen`, `mayor_pronto`, `mayor_efectivo_credito`, `mayor_efectivo_pronto`.
 
-#### 3.4.6. Hoja `Inventario` (7 columnas)
-Libro mayor (*ledger*) de movimientos de stock en cajas.
-1. `fecha` (`string`): Timestamp ISO-8601 del movimiento.
-2. `code` (`string`, FK): Código SKU del producto.
-3. `producto` (`string`): Nombre del producto.
-4. `cajas` (`number`): Delta entero de cajas (`> 0` en `entrada`; `+ / - / 0` en `conteo` según diferencia contra stock físico del sistema; `+ / -` en `ajuste`; `0` en `alta` de producto nuevo y en `sobrante`).
-5. `tipo` (`string`): `"entrada"`, `"conteo"`, `"ajuste"`, `"alta"`, `"sobrante"`.
-6. `nota` (`string`): Motivo o descripción automática del conteo/sobrante.
-7. `usuario` (`string`): Nombre del usuario de Administración/Master que registró el movimiento.
+#### 3.3.6. Tabla `Inventario` / `public.inventario` (7 columnas)
+`fecha`, `code`, `producto`, `cajas`, `tipo` (`entrada|conteo|ajuste|alta|sobrante`), `nota`, `usuario`.
 
-#### 3.4.7. Hoja `PedidosWeb` (23 columnas)
-Bandeja de entrada de pedidos armados por clientes en el catálogo público.
-1. `id` (`string`, PK): Código `WEB-XXXXXX` (6 caracteres alfanuméricos sin caracteres ambiguos `I, O, 0, 1`).
-2. `fecha` (`string`): Fecha local `yyyy-MM-dd HH:mm`.
-3. `created_at` (`string`): Timestamp ISO-8601 UTC.
-4. `vendedor_id` (`string`, FK): `id` del vendedor elegido (vacío si aún no eligió vendedor).
-5. `vendedor` (`string`): Nombre del vendedor elegido.
-6. `negocio` (`string`): Nombre del negocio del cliente.
-7. `contacto` (`string`): Nombre de contacto.
-8. `rif_cedula` (`string`): RIF o cédula.
-9. `telefono` (`string`): Teléfono de contacto (mín. 7 dígitos).
-10. `direccion` (`string`): Dirección de entrega.
-11. `items` (`string`): JSON serializado de los ítems `[{code, producto, cajas, unidades_caja, unidad}]`.
-12. `tipo_pago` (`string`): Modalidad seleccionada (`credito`, `pronto`, `efectivo_credito`, `efectivo_pronto`).
-13. `total_cajas` (`number`): Suma de cajas solicitadas.
-14. `total` (`number`): Monto estimado en USD.
-15. `nota` (`string`): Nota opcional.
-16. `estado` (`string`): `"nuevo"`, `"tomado"`, `"descartado"`.
-17. `pedido_id` (`string`, FK): `Pedidos.id` (`SKL-...`) generado cuando el vendedor toma el pedido web.
-18. `atendido_por` (`string`): Nombre del usuario que tomó o descartó el pedido web.
-19. `atendido_at` (`string`): Timestamp ISO-8601 de atención.
-20. `motivo` (`string`): Motivo obligatorio cuando `estado === "descartado"`.
-21. `cliente_id` (`string`, FK): UUID del cliente si se autocompletó mediante `buscarClienteWeb`.
-22. `latitud` (`number | ""`): Coordenada GPS capturada en el catálogo.
-23. `longitud` (`number | ""`): Coordenada GPS capturada en el catálogo.
+#### 3.3.7. Tabla `PedidosWeb` / `public.pedidos_web` (23 columnas)
+`id` (`WEB-XXXXXX`), `fecha`, `created_at`, `vendedor_id`, `vendedor`, `negocio`, `contacto`, `rif_cedula`, `telefono`, `direccion`, `items` (JSON), `tipo_pago`, `total_cajas`, `total`, `nota`, `estado` (`nuevo|tomado|descartado`), `pedido_id`, `atendido_por`, `atendido_at`, `motivo`, `cliente_id`, `latitud`, `longitud`.
 
-#### 3.4.8. Hoja `Historial` (5 columnas)
-Registro inmutable de auditoría de eventos sobre pedidos.
-1. `fecha` (`string`): Timestamp ISO-8601 UTC.
-2. `pedido_id` (`string`, FK): ID del pedido (`SKL-...`).
-3. `usuario` (`string`): `"Nombre (Rol1 · Rol2)"`.
-4. `accion` (`string`): Clave del evento (`creado`, `confirmado`, `en_ruta`, `entregado`, `entrega_parcial`, `cancelado`, `pendiente`, `reasignado`, `editado`, `cobrado`, `conciliado`, `pago_rechazado`, `conciliacion_deshecha`, `borrado`).
-5. `detalle` (`string`): Descripción legible del cambio (cajas, montos, número de factura, diferencias de entrega, motivo de anulación/borrado).
+#### 3.3.8. Tabla `Historial` / `public.historial` (5 columnas)
+`fecha`, `pedido_id`, `usuario`, `accion` (`creado`, `confirmado`, `en_ruta`, `entregado`, `entrega_parcial`, `cancelado`, `pendiente`, `reasignado`, `editado`, `cobrado`, `abono`, `conciliado`, `abono_conciliado`, `pago_rechazado`, `conciliacion_deshecha`, `ajuste_revertido`, `borrado`), `detalle`.
 
-#### 3.4.9. Hoja `Config` (3 columnas)
-Parámetros de control de versiones OTA de la aplicación Android.
-1. `clave` (`string`, PK): `version_apk` (default `1`), `url_apk` (`""`), `minima_apk` (`1`), `version_pantallas` (`""`), `url_pantallas` (`""`), `notas` (`""`).
-2. `valor` (`string | number`): Valor configurado.
-3. `nota` (`string`): Instrucción de uso para el administrador en la hoja.
+#### 3.3.9. Tabla `Config` / `public.config` (3 columnas)
+`clave` (PK: `version_apk`, `url_apk`, `minima_apk`, `version_pantallas`, `url_pantallas`, `notas`, `comision_pct_default`), `valor`, `nota`.
+
+#### 3.3.10. Tabla `Pagos` / `public.pagos` (26 columnas)
+Registra cada pago total o abono parcial de un pedido, su conversión BCV y la liquidación de su comisión de venta:
+1. `id` (`string`, PK): `PAG-XXXXXXXX` (8 caracteres hexadecimales en mayúsculas).
+2. `pedido_id` (`string`, FK): Referencia a `Pedidos.id` (`SKL-...`).
+3. `fecha_pago` (`string`): Fecha real del pago o transferencia (`yyyy-MM-dd`).
+4. `created_at` (`string`): Timestamp ISO-8601 de registro.
+5. `registrado_por` (`string`): Nombre del usuario que reportó el pago.
+6. `registrado_por_id` (`string`, FK): `id` del usuario que reportó el pago.
+7. `moneda` (`string`): `"USD"` o `"Bs"`.
+8. `monto` (`number`): Monto en la moneda original (`> 0`, hasta 2 decimales).
+9. `tasa` (`number | ""`): Tasa oficial BCV (`Bs/USD`) aplicada en `fecha_pago` (vacío o `0` si `moneda === "USD"`).
+10. `monto_usd` (`number`): Equivalente en dólares (`monto` si es USD, o `round(monto / tasa, 2)` si es Bs).
+11. `referencia` (`string`): Número de referencia bancaria o comprobante (máx. 60 chars).
+12. `tipo_pago_real` (`string`): Modalidad de pago aplicada (`credito`, `pronto`, `efectivo_credito`, `efectivo_pronto`).
+13. `estado` (`string`): `"reportado"` (cargado por vendedor), `"conciliado"` (verificado por Administración) o `"rechazado"`.
+14. `conciliado_at` (`string`): Timestamp ISO-8601 de conciliación o rechazo.
+15. `conciliado_por` (`string`): Nombre del administrador que concilió o rechazó.
+16. `motivo` (`string`): Motivo obligatorio en caso de rechazo.
+17. `comision_estado` (`string`): `""` (pendiente de liquidar) o `"pagada"` (comisión ya pagada al vendedor).
+18. `comision_pct` (`number | ""`): Porcentaje de comisión aplicado al liquidar (ej. `3`).
+19. `comision_usd` (`number | ""`): Monto de la comisión en USD (`round(monto_usd * comision_pct / 100, 2)`).
+20. `comision_moneda` (`string`): Moneda en que se pagó la comisión al vendedor (`"Bs"` o `"USD"`).
+21. `comision_monto` (`number | ""`): Monto desembolsado en `comision_moneda` (`comision_usd * comision_tasa` si se pagó en `Bs`, o `comision_usd` si se pagó en `USD` efectivo).
+22. `comision_tasa` (`number | ""`): Tasa BCV utilizada para liquidar la comisión en Bolívares.
+23. `comision_fecha` (`string`): Fecha de pago de la comisión (`yyyy-MM-dd`).
+24. `comision_ref` (`string`): Referencia o nota del pago de comisión.
+25. `comision_pagada_at` (`string`): Timestamp ISO-8601 de liquidación de la comisión.
+26. `comision_pagada_por` (`string`): Nombre del usuario de Administración/Master que liquidó la comisión.
+
+#### 3.3.11. Tabla `Tasas` / `public.tasas` (4 columnas)
+Histórico diario de tasas de cambio oficial del Banco Central de Venezuela (`BCV`):
+1. `fecha` (`string`, PK): Día calendario `yyyy-MM-dd`.
+2. `tasa` (`number`): Bolívares por 1 Dólar estadounidense (redondeado a 4 decimales).
+3. `fuente` (`string`): `"bcv"` (descargada automáticamente desde `https://ve.dolarapi.com/v1/historicos/dolares/oficial`) o `"manual"` (cargada por Administración; tiene prioridad sobre `"bcv"` para una misma fecha).
+4. `updated_at` (`string`): Timestamp ISO-8601 de actualización.
 
 ---
 
-### 3.5. Almacenamiento Local en el Dispositivo (`localStorage`, `sessionStorage`, `SharedPreferences`)
+### 3.4. Almacenamiento Local en el Dispositivo (`localStorage`, `sessionStorage`, `SharedPreferences`)
 
 | Clave | Almacén | Módulo | Estructura / Propósito |
 | :--- | :--- | :--- | :--- |
+| `skala_supabase_cfg_v1` | `localStorage` | Catálogo y Panel (`crm-api.js`) | `{ url, anonKey, activo: boolean, ultima_migracion: ISO8601, ultimo_resumen: object }` — Configuración dinámica del motor Supabase y estado de migración. |
 | `skala_pedido_v1` | `localStorage` | Catálogo y Panel | `{ [code]: cajas }` — Carrito compartido entre `index.html` y `panel.html`. |
-| `skala_cliente_v1` | `localStorage` | Catálogo (`main.js`) | `{ cliente_id, negocio, contacto, rif_cedula, telefono, direccion, tipo_pago, latitud, longitud }` — Datos del cliente en el catálogo público. |
+| `skala_cliente_v1` | `localStorage` | Catálogo (`main.js`) | `{ cliente_id, negocio, contacto, rif_cedula, telefono, direccion, tipo_pago, latitud, longitud }`. |
 | `skala_ref_web` | `localStorage` | Catálogo (`main.js`) | `{ ref: "WEB-XXXXXX", enviado: boolean }` — Control de idempotencia del pedido web actual. |
 | `skala_vendedores_v1` | `localStorage` | Catálogo (`main.js`) | `[{ id, nombre, whatsapp }]` — Caché de vendedores activos para envío por WhatsApp. |
 | `skala_sesion_v2` | `localStorage` | Panel (`crm-api.js`) | `{ token: "uid.exp.hmac", usuario: { id, usuario, nombre, rol, roles, rol_nombre } }`. |
 | `skala_cola_v1` | `localStorage` | Panel (`crm-api.js`) | `[{ client_ref, cliente, items, documento, tipo_pago, pago, precio_mayor, dias_credito, nota, guardado }]` — Cola de pedidos creados sin conexión. |
-| `skala_local_v1` | `localStorage` | Panel (`crm-api.js`) | Snapshot completo descargado por `sincronizar` (`{ fecha, usuario, catalogo, clientes, pedidos, pedidos_web, despachadores, config }`). |
+| `skala_local_v1` | `localStorage` | Panel (`crm-api.js`) | Snapshot completo descargado por `sincronizar` (`{ fecha, usuario, catalogo, clientes, pedidos, pedidos_web, despachadores, config, comisiones }`). |
 | `skala_catalogo_v1` | `localStorage` | Catálogo y Panel | `{ t: timestamp_ms, s: conSesion_bool, d: respuestaCatalogo }` — Caché de precios y stock con TTL de 10 minutos. |
 | `skala_vcliente_v1` | `localStorage` | Panel (`panel.js`) | Borrador del cliente seleccionado/creado en el paso 1 de "Nuevo pedido" (`_listo: true`). |
 | `skala_precio_mayor` | `localStorage` | Panel (`panel.js`) | `boolean` — Flag de excepción de precio al mayor en el pedido en curso. |
-| `skala_tomando_web` | `localStorage` | Panel (`panel.js`) | `{ id, vendedor, cliente, tipo_pago, nota }` — Contexto del pedido web que el vendedor está convirtiendo en pedido formal. |
+| `skala_tomando_web` | `localStorage` | Panel (`panel.js`) | `{ id, vendedor, cliente, tipo_pago, nota }` — Contexto del pedido web en conversión. |
 | `skala_inv_borrador` | `localStorage` | Panel (`panel.js`) | `{ entrada: { [code]: cajas }, conteo: { [code]: cajas } }` — Borrador persistente de carga o conteo de inventario. |
 | `skala_ultimo_usuario` | `localStorage` | Panel (`panel.js`) | `string` — Último username ingresado en login. |
 | `skala_tema` | `localStorage` | Catálogo y Panel | `"claro"` \| `"oscuro"` (ausente = `"auto"`). |
@@ -554,217 +514,141 @@ Parámetros de control de versiones OTA de la aplicación Android.
 
 ### 4.1. Matriz de Roles y Permisos (RBAC Multi-Rol)
 
-Un usuario puede poseer múltiples roles simultáneamente (ej. `vendedor, despachador`). El sistema evalúa la **unión de permisos** (`tieneAlguno_` en backend y `listaRoles` en frontend). El servidor valida el rol y el estado activo del usuario en **cada llamada HTTP** leyendo la hoja `Usuarios` en tiempo real.
+Un usuario puede poseer múltiples roles simultáneamente (ej. `vendedor, despachador`). El sistema evalúa la **unión de permisos** (`tieneAlguno_` en backend y `listaRoles` en frontend).
 
 | Capacidad / Caso de Uso | Master (`master`) | Administración (`admin`) | Vendedor (`vendedor`) | Despachador (`despachador`) |
 | :--- | :---: | :---: | :---: | :---: |
 | **Autenticación:** Longitud mínima de clave alfanumérica | **8 caracteres** | 6 caracteres | 6 caracteres | 6 caracteres |
 | **Tomar nuevos pedidos** (`guardarPedido`) | ✔ | ✔ | ✔ | — |
 | **Ver pedidos** (`pedidos`, `pedido`) | Todos | Todos | Solo los suyos (`vendedor_id`) | Solo asignados en `confirmado`, `en_ruta`, `entregado` |
-| **Recibir y tomar Pedidos Web** (`pedidosWeb`) | Ve todos y puede tomar/descartar cualquiera | Ve todos (solo lectura, no toma ni descarta) | Ve y toma/descarta los suyos o los sin vendedor asignado | — |
+| **Recibir y tomar Pedidos Web** (`pedidosWeb`) | Ve todos y puede tomar/descartar cualquiera | Ve todos (solo lectura) | Ve y toma/descarta los suyos o sin vendedor | — |
 | **Aprobar pedido = Facturar** (`pendiente` → `confirmado`) | ✔ | ✔ | — | — |
 | **Editar pedido** (`pendiente`, `confirmado`, `en_ruta`) | ✔ | ✔ | — | — |
 | **Despachar y Entregar** (`en_ruta`, `entregado`, diferencias) | ✔ (todos) | ✔ (todos) | — | ✔ (solo asignados a su `despachador_id`) |
 | **Anular pedido con motivo** (`cancelado`) | ✔ (no entregados) | ✔ (no entregados) | ✔ (solo suyos en `pendiente`) | — |
 | **Reabrir pedido** (volver a `pendiente`) | ✔ | ✔ | — | — |
-| **Borrar pedido (soft-delete con motivo)** (`borrarPedido`) | ✔ (cualquiera) | — | ✔ (solo los suyos, cualquier estado) | — |
-| **Reportar cobro** (`cobro: cancelar`) | ✔ | ✔ | ✔ (solo los suyos entregados) | — |
-| **Conciliar / Rechazar / Desconciliar pago** | ✔ | ✔ | — | — |
-| **Inventario y Precios** (entradas, conteos, ajustes, precios, productos nuevos) | ✔ | ✔ | Solo ve stock disponible y precios | — |
-| **Clientes** (buscar, crear, editar, traspaso manual) | ✔ | ✔ | ✔ | Solo ve datos de entrega dentro de sus pedidos |
+| **Borrar pedido (soft-delete con motivo)** (`borrarPedido`) | ✔ (cualquiera) | — | ✔ (solo los suyos) | — |
+| **Reportar cobro o abono parcial** (`cobro: cancelar`, `tasa`) | ✔ | ✔ | ✔ (solo los suyos entregados) | — |
+| **Proponer ajuste de precio al cobrar por error de facturación** | ✔ (queda `aprobado`) | ✔ (queda `aprobado`) | ✔ (queda `propuesto`) | — |
+| **Conciliar / Rechazar / Desconciliar pago / Revertir ajuste precio** | ✔ | ✔ | — | — |
+| **Comisiones:** Ver sus comisiones (`comisiones`) | ✔ (todas) | ✔ (todas) | ✔ (solo las suyas) | — |
+| **Comisiones:** Configurar % y liquidar (`guardarComisionConfig`, `pagarComision`) | ✔ | ✔ | — | — |
+| **Inventario y Precios** (`inventario`, `movimiento`, `cargarInventario`, `guardarPrecio`, `guardarProducto`) | ✔ | ✔ | Solo ve stock disponible y precios | — |
+| **Clientes** (`clientes`, `guardarCliente`) | ✔ | ✔ | ✔ | Solo ve datos de entrega dentro de sus pedidos |
 | **Resumen estadístico** (`resumen`) | Global (con tabla por vendedor) | Global (con tabla por vendedor) | Solo sus propias ventas | — |
-| **Gestión de Usuarios** (`usuarios`, `guardarUsuario`) | ✔ (Exclusivo; prohibido dejar 0 Masters activos) | — | — | — |
+| **Gestión de Usuarios y Migración DB** (`usuarios`, `guardarUsuario`, `exportarBackup`) | ✔ (Exclusivo; prohibido dejar 0 Masters activos) | — | — | — |
 
 ---
 
-### 4.2. Máquinas de Estado del Dominio
+### 4.2. Reglas de Negocio de Cobranzas Bimonetarias, Abonos, Ajustes y Comisiones
 
-#### A. Ciclo de Vida Operativo del Pedido (`Pedidos.estado`)
+1. **Tasa Oficial BCV por Fecha de Pago (`tasaBcv_` / `buscarTasa_`):**
+   - Todo pago o abono en Bolívares (`moneda === "Bs"`) requiere una fecha (`fecha_pago <= hoy`, en zona `America/Caracas`) y se convierte a dólares (`monto_usd = round(monto / tasa, 2)`) usando la tasa BCV de esa fecha.
+   - Si en la tabla `Tasas` no existe tasa para `fecha_pago` (ej. sábado, domingo o feriado bancario), `buscarTasa_` toma la tasa de la fecha anterior más cercana (`f <= fecha_pago`), dando prioridad a registros con `fuente === "manual"` sobre `"bcv"`.
+   - Si la fecha es reciente y aún no figura en `Tasas`, el backend consulta automáticamente `https://ve.dolarapi.com/v1/historicos/dolares/oficial` y persiste los días nuevos en `Tasas`.
 
-```mermaid
-stateDiagram-v2
-    [*] --> NuevoWeb : Cliente envía desde index.html (con datos)
-    NuevoWeb --> TomadoWeb : Vendedor/Master toma y envía (guardarPedido con web_id)
-    NuevoWeb --> DescartadoWeb : Vendedor/Master descarta con motivo
+2. **Abonos Parciales y Tolerancia de Cancelación (`recalcularCobro_` / `toleranciaCobro_`):**
+   - Un pedido entregado puede recibir múltiples pagos parciales (abonos) en `Pagos` combinando `USD` y `Bs`.
+   - $\text{pagado\_usd} = \sum \text{Pagos.monto\_usd}$ (excluyendo pagos con `estado === "rechazado"`).
+   - $\text{saldo} = \max(0, \text{totalCobrar} - \text{pagado\_usd})$, donde $\text{totalCobrar} = \text{total\_final} \text{ (si existe)} \text{ o } \text{total}$.
+   - **Tolerancia de cierre:** Se considera cubierto el total cuando $\text{pagado\_usd} + \max(1\text{ USD}, 0.01 \times \text{totalCobrar}) \ge \text{totalCobrar}$.
+   - Si un abono no cubre el total, `Pedidos.cobro` permanece en `""` (*Por cobrar* por el saldo restante) pero incrementa `Pedidos.pagos_pend` para que aparezca simultáneamente en la bandeja *Por conciliar* de Administración.
 
-    [*] --> pendiente : Vendedor/Admin/Master crea pedido (SKL-yyMMdd-NNN)
-    TomadoWeb --> pendiente : Genera pedido SKL-yyMMdd-NNN
+3. **Ajuste de Precios al Cobrar por Error de Facturación (`ajuste_precios` / `revertir_ajuste`):**
+   - Si al momento de cobrar se detecta un error en los precios facturados, el usuario puede enviar `ajuste_precios: { [code]: nuevoPrecioUnitario }` junto con `ajuste_motivo` obligatorio.
+   - Antes de sobrescribir `PedidoItems.precio`, el sistema guarda por única vez los precios y descuentos originales en `Pedidos.ajuste_previo` (JSON), cambia `Pedidos.nivel_precio = "personalizado"` y marca `ajuste_estado = "propuesto"` (si fue vendedor) o `"aprobado"` (si fue Administración/Master).
+   - Cuando Administración concilia el pago, cualquier ajuste `"propuesto"` pasa a `"aprobado"`. Si el ajuste no corresponde, Administración puede ejecutar `accion: "revertir_ajuste"` para restaurar exactamente los precios originales desde `ajuste_previo`.
 
-    pendiente --> confirmado : Admin/Master aprueba (= Facturado, aparta stock, N° factura opc.)
-    pendiente --> cancelado : Vendedor (suyo) o Admin/Master anula con motivo
-
-    confirmado --> en_ruta : Despachador asignado o Admin/Master marca "Salió en ruta"
-    confirmado --> confirmado : Entrega parcial ("Se entrega después" -> quedan cajas pendientes)
-    confirmado --> entregado : Entrega directa completa o parcial con devolución a depósito
-    confirmado --> cancelado : Admin/Master anula con motivo (libera stock apartado)
-    confirmado --> pendiente : Admin/Master reabre
-
-    en_ruta --> confirmado : Entrega parcial ("Se entrega después" -> vuelve a Por despachar)
-    en_ruta --> entregado : Despachador o Admin/Master confirma entrega (Hoy/Ayer/Fecha)
-    en_ruta --> cancelado : Admin/Master anula con motivo (libera stock)
-    en_ruta --> pendiente : Admin/Master reabre
-
-    cancelado --> pendiente : Admin/Master reabre
-
-    entregado --> pendiente : Admin/Master reabre (solo si cobro == "")
-```
-
-#### B. Ciclo de Vida de Cobranza y Conciliación (`Pedidos.cobro`, requiere `estado === "entregado"`)
-
-```mermaid
-stateDiagram-v2
-    [*] --> PorCobrar : Pedido pasa a estado "entregado" (cobro = "")
-    PorCobrar --> CanceladoPorConciliar : Vendedor/Admin/Master reporta pago\n(accion: cancelar -> monto, moneda USD/Bs, tipo_pago_real)
-    PorCobrar --> Conciliado : Admin/Master concilia directo\n(accion: conciliar -> monto, moneda, tipo_pago_real)
-    CanceladoPorConciliar --> Conciliado : Admin/Master verifica dinero recibido\n(accion: conciliar -> confirma o corrige monto/moneda)
-    CanceladoPorConciliar --> PorCobrar : Admin/Master rechaza pago con motivo\n(accion: rechazar -> limpia monto, moneda y cobro)
-    Conciliado --> CanceladoPorConciliar : Admin/Master deshace conciliación\n(accion: desconciliar)
-```
+4. **Comisiones de Vendedores (`accionComisiones_`, `accionGuardarComisionConfig_`, `accionPagarComision_`):**
+   - Cada vendedor tiene un porcentaje de comisión configurable en `Usuarios.comision_pct` (o el valor global `comision_pct_default = 3%` en `Config`).
+   - Las comisiones se calculan exclusivamente sobre pagos en estado `estado === "conciliado"`:
+     $$\text{comision\_usd} = \text{round}\left(\text{monto\_usd} \times \frac{\text{comision\_pct}}{100},\ 2\right)$$
+   - Administración/Master puede liquidar en lote (`modo: "pagar"`) uno o varios pagos conciliados en **Bolívares (`Bs`)** (calculando `comision_monto = round(comision_usd * tasa, 2)` según la tasa BCV de `fecha_pago`) o en **Efectivo (`USD`)**, marcando `comision_estado = "pagada"`, o revertir una liquidación (`modo: "deshacer"`).
 
 ---
 
-### 4.3. Reglas de Negocio Críticas y Fórmulas de Cálculo
+### 4.3. Catálogo Completo de Contratos de la API (`33 Acciones` + `2 RPCs Supabase`)
 
-1. **Reglas de Precios y Niveles (`CAJAS_MAYOR = 15`):**
-   - **Nivel de precio:** Si `total_cajas >= 15` o `excepcion_precio === true`, se aplica tarifa `mayor`; en caso contrario, tarifa `menor`.
-   - **4 Modalidades de Pago (`PAGOS`):**
-     1. `credito` (0★, requiere `dias_credito` entre 1 y 180): Precio base (`menor` o `mayor`).
-     2. `pronto` (1★, vence a las 23:59:59 del día siguiente a `entregado_at`): Aplica rebaja `desc_pronto`.
-     3. `efectivo_credito` (2★, requiere `dias_credito` entre 1 y 180): Aplica rebaja `desc_efectivo_credito`.
-     4. `efectivo_pronto` (3★ Premium, vence al final del día siguiente a `entregado_at`): Aplica rebaja `desc_efectivo_pronto`.
-   - **Herencia de rebaja al mayor:** En la hoja `Precios`, el administrador introduce precios finales. Para el nivel `menor`, la rebaja de cada modalidad es `rebaja_k = max(0, menor - precio_k)`. Para el nivel `mayor`, si el precio específico `mayor_k` fue cargado, se usa `max(0, mayor - mayor_k)`; si `mayor_k` está vacío, hereda automáticamente la misma rebaja en dólares del nivel menor (`rebaja_k`).
-   - **Inmutabilidad histórica y recálculo al cobro:** Al crear un pedido, `precio`, `desc_pronto`, `desc_efectivo_credito` y `desc_efectivo_pronto` se copian en cada fila de `PedidoItems`. Si al cobrar (`accionCobro_`) el cliente paga con una modalidad distinta (`tipo_pago_real`), el sistema recalcula `total_final` usando los descuentos congelados de ese pedido sin alterar `total` (el monto original acordado).
-
-2. **Fórmulas de Inventario y Reserva de Stock (`existencias_`):**
-   - Un producto se considera `controlado = true` si tiene al menos 1 fila en la hoja `Inventario` (los productos nuevos se crean con una fila `tipo: "alta", cajas: 0`, por lo que nacen controlados y agotados hasta su primera entrada).
-   - $\text{Cargado} = \sum \text{Inventario.cajas}$ (incluye entradas, ajustes y diferencias de conteo).
-   - $\text{En Proceso} = \sum \text{cajas de pedidos en estado } \texttt{pendiente}$ (no bloquea stock aún).
-   - $\text{Aprobado} = \sum \text{cajas de pedidos no borrados en estados } \{\texttt{confirmado}, \texttt{en\_ruta}, \texttt{entregado}\}$.
-   - $\text{Salido} = \sum \text{cajas de pedidos en } \{\texttt{en\_ruta}, \texttt{entregado}\} + \sum \text{entregadas de pedidos en } \texttt{confirmado}$ (entregas parciales previas).
-   - $\text{Disponible (para vender/aprobar)} = \text{Cargado} - \text{Aprobado}$.
-   - $\text{Físico en Depósito (para conteos)} = \text{Cargado} - \text{Salido}$.
-   - $\text{Por Salir} = \text{Aprobado} - \text{Salido}$.
-   - **Validación doble de stock:** Se valida que `cajas <= disponible` tanto al crear el pedido (`guardarPedido`) como al aprobarlo (`estado -> confirmado`) y al editarlo (`editarPedido`).
-
-3. **Entregas con Diferencias y Notas de Crédito (`entregar_`):**
-   - Cuando se reporta una entrega con diferencias (`diferencias: [{ code, entregadas, destino }]` + `motivo_entrega` obligatorio), para cada ítem donde `entregadas < (cajas - entregadas_previas)`:
-     - Si `destino === "despues"`: `PedidoItems.entregadas` suma lo entregado hoy, y el pedido completo regresa a estado `confirmado` (*"Aprobado · Por despachar"*) mostrando el chip `"Entrega parcial · faltan N"`. La cuenta por cobrar y el plazo de crédito **no inician** hasta que se entregue la totalidad del pedido.
-     - Si `destino === "devuelve"`: `PedidoItems.devueltas` suma el faltante, `PedidoItems.cajas` se reduce en esa cantidad (liberando automáticamente el stock disponible), se recalcula `Pedidos.total` y la diferencia monetaria se acumula en `Pedidos.nota_credito`.
-
-4. **Semáforo de Vencimiento de Crédito (`estadoCredito`):**
-   - El plazo `dias_credito` comienza a correr a partir de la fecha de `entregado_at` (truncada a medianoche local):
-     - **Sin entregar (`sin_entregar`):** Pedido aún no entregado.
-     - **Al día (`al_dia` — Verde):** Faltan $> 3$ días para el vencimiento.
-     - **Próximo a vencer (`proximo` — Amarilla):** Faltan entre $0$ y $3$ días (`CREDITO_PROXIMO = 3`).
-     - **Vencido (`vencido` — Roja):** Vencido hace entre $1$ y $15$ días.
-     - **Muy vencido (`muy_vencido` — Morada):** Vencido hace $> 15$ días (`CREDITO_MUY_VENCIDO = 15`).
-
-5. **Deduplicación Inteligente de Clientes (`guardarCliente_`):**
-   - Normalización de teléfonos venezolanos (`telClave_`): extrae dígitos y compara los **últimos 10 dígitos** (haciendo equivalentes `+58 424-7387202`, `04247387202` y `4247387202`).
-   - Normalización de RIF/Cédula (`mismoRif_`): compara dígitos puros y considera equivalentes una cédula y un RIF con dígito verificador adicional al final (ej. `V-28072542` $\equiv$ `V-28072542-1`).
-   - Si no hay `id`, busca coincidencia por `telefono`/`telefono2`, luego por `rif_cedula`, y si carece de ambos (alta manual sin teléfono), busca coincidencia exacta por nombre de negocio.
-
----
-
-### 4.4. Catálogo Completo de Contratos de la API (`crm/Code.gs` — 25 Acciones)
-
-Todas las peticiones se envían mediante `POST` a `CRM_API_URL` con cuerpo JSON (`Content-Type: text/plain;charset=utf-8`). Toda respuesta incluye `{ ok: boolean }` o `{ ok: false, error: string, code: string }`.
+Tanto `crm/Code.gs` como `apiSupabase` en `catalogo-skala/js/crm-api.js` implementan el mismo contrato de **33 acciones**:
 
 | # | `action` | Roles Permitidos | Parámetros de Entrada | Respuesta Exitosa (`ok: true`) |
 | :-: | :--- | :--- | :--- | :--- |
-| 1 | `login` | Público | `usuario`, `clave` (o `pin`), `dispositivo?` (bool) | `{ token, usuario: { id, usuario, nombre, rol, roles, rol_nombre } }` (bloqueo 10 min tras 5 fallos) |
+| 1 | `login` | Público | `usuario`, `clave` (o `pin`), `dispositivo?` | `{ token, usuario: { id, usuario, nombre, rol, roles, rol_nombre } }` |
 | 2 | `yo` | `M, A, V, D` | `token` | `{ usuario }` |
-| 3 | `catalogo` | Público / Sesión | `token?` | `{ actualizado, cajas_mayor, pagos[], productos[{ code, menor, mayor, desc_*, mayor_desc_*, agotado, info?, controlado?, disponible?, en_proceso? }] }` |
+| 3 | `catalogo` | Público / Sesión | `token?` | `{ actualizado, cajas_mayor, pagos[], productos[] }` |
 | 4 | `vendedores` | Público | — | `{ vendedores: [{ id, nombre, whatsapp }] }` |
-| 5 | `buscarClienteWeb` | Público | `q` (teléfono o RIF, mín. 6 dígitos; máx. 30/min global) | `{ cliente: { id, negocio, contacto, direccion, rif_cedula, telefono, ubicacion } \| null }` |
-| 6 | `pedidoWeb` | Público | `ref`, `cliente{...}`, `items[]`, `tipo_pago`, `vendedor_id?`, `nota?` (máx. 5/hora por teléfono) | `{ id, duplicado? }` |
+| 5 | `buscarClienteWeb` | Público | `q` (teléfono o RIF, mín. 6 dígitos) | `{ cliente \| null }` |
+| 6 | `pedidoWeb` | Público | `ref`, `cliente`, `items[]`, `tipo_pago`, `vendedor_id?`, `nota?` | `{ id, duplicado? }` |
 | 7 | `asignarVendedorWeb` | Público | `id` (`WEB-...`), `vendedor_id` | `{ ok: true, sin_cambios? }` |
-| 8 | `pedidosWeb` | `M, A, V` | `token`, `estado?` (`"nuevo"` \| `"todos"`) | `{ pedidos: [{ id, fecha, cliente, items, tipo_pago, total_cajas, estado, puede_tomar, ... }] }` |
+| 8 | `pedidosWeb` | `M, A, V` | `token`, `estado?` (`"nuevo"` \| `"todos"`) | `{ pedidos: [...] }` |
 | 9 | `descartarWeb` | `M, A, V` | `token`, `id`, `motivo` | `{ ok: true }` |
-| 10 | `clientes` | `M, A, V` | `token`, `q?`, `limite?` (1..200, def 20) | `{ clientes: [...] }` |
-| 11 | `guardarCliente` | `M, A, V` | `token`, `cliente{ id?, negocio, contacto, rif_cedula, telefono?, telefono2, direccion, latitud, longitud }` | `{ cliente, existia }` |
+| 10 | `clientes` | `M, A, V` | `token`, `q?`, `limite?` | `{ clientes: [...] }` |
+| 11 | `guardarCliente` | `M, A, V` | `token`, `cliente{...}` | `{ cliente, existia }` |
 | 12 | `guardarPedido` | `M, A, V` | `token`, `client_ref`, `cliente`, `items[]`, `documento`, `tipo_pago`, `pago`, `precio_mayor?`, `dias_credito?`, `nota?`, `web_id?` | `{ pedido, cliente_id, cliente, duplicado? }` |
-| 13 | `pedidos` | `M, A, V, D` | `token`, `dias?`, `estados[]?`, `cliente_id?`, `por_cobrar?`, `por_conciliar?`, `conciliados?` | `{ pedidos: [...] }` (máx. 300) |
-| 14 | `pedido` | `M, A, V, D` | `token`, `pedido_id` | `{ pedido: { ...ped, items[], cliente_datos, historial[] } }` |
+| 13 | `pedidos` | `M, A, V, D` | `token`, `dias?`, `estados[]?`, `cliente_id?`, `por_cobrar?`, `por_conciliar?`, `conciliados?` | `{ pedidos: [...] }` (incluye `pagos[]`, `pagado_usd`, `saldo`, `pagos_pend`) |
+| 14 | `pedido` | `M, A, V, D` | `token`, `pedido_id` | `{ pedido: { ...ped, items[], pagos[], cliente_datos, historial[] } }` |
 | 15 | `editarPedido` | `M, A` | `token`, `pedido_id`, `items[]`, `documento`, `tipo_pago`, `dias_credito`, `nota`, `precio_mayor`, `factura?` | `{ pedido, facturado }` |
 | 16 | `estado` | `M, A, V, D` | `token`, `pedido_id`, `estado`, `motivo?`, `despachador_id?`, `factura?`, `fecha_entrega?`, `diferencias[]?`, `motivo_entrega?` | `{ pedido }` |
-| 17 | `cobro` | `M, A, V` | `token`, `pedido_id`, `accion` (`cancelar`\|`conciliar`\|`rechazar`\|`desconciliar`), `monto?`, `moneda?`, `tipo_pago_real?`, `motivo?` | `{ pedido }` |
-| 18 | `borrarPedido` | `M, V` | `token`, `pedido_id`, `motivo` | `{ ok: true }` |
-| 19 | `despachadores` | `M, A` | `token` | `{ despachadores: [{ id, nombre }] }` |
-| 20 | `inventario` | `M, A` | `token`, `limite?` | `{ productos: [...], movimientos: [...] }` |
-| 21 | `movimiento` | `M, A` | `token`, `tipo` (`entrada`\|`ajuste`\|`conteo`\|`sobrante`), `code`, `cajas`, `nota?` | `{ disponible, fisico?, diferencia? }` |
-| 22 | `cargarInventario` | `M, A` | `token`, `tipo` (`entrada`\|`conteo`), `items: [{ code, cajas }]`, `nota?` | `{ guardados, productos: [{ code, diferencia, disponible, fisico }] }` |
-| 23 | `guardarPrecio` | `M, A` | `token`, `code` o `codes[]`, 8 campos de precio | `{ precio, guardados }` |
-| 24 | `guardarProducto` | `M, A` | `token`, `code?`, `editar?`, `nombre`, `tipo`, `linea`, `beneficio`, `cabello`, `unidades_caja`, `imagen`, precios? | `{ producto: { code, info } }` |
-| 25 | `sincronizar` | `M, A, V, D` | `token` | `{ fecha, usuario, catalogo, clientes, pedidos, pedidos_web, despachadores, config }` |
-| 26* | `config` / `resumen` / `usuarios` / `guardarUsuario` | Público / `M,A,V` / `M` | *(Acciones adicionales: total **28 entradas** en `ACCIONES`)* | Config OTA, métricas de período y ABM de usuarios. |
+| 17 | `cobro` | `M, A, V` | `token`, `pedido_id`, `accion` (`cancelar`\|`conciliar`\|`rechazar`\|`desconciliar`\|`revertir_ajuste`), `monto?`, `moneda?`, `fecha_pago?`, `tasa?`, `referencia?`, `tipo_pago_real?`, `ajuste_precios?`, `ajuste_motivo?`, `motivo?`, `nuevo_abono?` | `{ pedido, es_abono }` |
+| 18 | `tasa` | `M, A, V` | `token`, `fecha?` (`yyyy-MM-dd`) | `{ fecha, fecha_tasa, tasa, fuente }` |
+| 19 | `comisiones` | `M, A, V` | `token` | `{ config: { porcentaje_default, por_vendedor, vendedores[] } }` |
+| 20 | `guardarComisionConfig` | `M, A` | `token`, `porcentaje_default`, `porcentajes: { [uid]: pct }` | `{ config }` |
+| 21 | `pagarComision` | `M, A` | `token`, `modo` (`pagar`\|`deshacer`), `items: [{ pago_id, pct? }]`, `moneda` (`Bs`\|`USD`), `fecha_pago?`, `tasa?`, `referencia?` | `{ pagados \| deshechos, moneda, tasa, total_usd, total_monto }` |
+| 22 | `borrarPedido` | `M, V` | `token`, `pedido_id`, `motivo` | `{ ok: true }` |
+| 23 | `despachadores` | `M, A` | `token` | `{ despachadores: [{ id, nombre }] }` |
+| 24 | `inventario` | `M, A` | `token`, `limite?` | `{ productos: [...], movimientos: [...] }` |
+| 25 | `movimiento` | `M, A` | `token`, `tipo` (`entrada`\|`ajuste`\|`conteo`\|`sobrante`), `code`, `cajas`, `nota?` | `{ disponible, fisico?, diferencia? }` |
+| 26 | `cargarInventario` | `M, A` | `token`, `tipo` (`entrada`\|`conteo`), `items: [{ code, cajas }]`, `nota?` | `{ guardados, productos: [...] }` |
+| 27 | `guardarPrecio` | `M, A` | `token`, `code` o `codes[]`, 8 campos de precio | `{ precio, guardados }` |
+| 28 | `guardarProducto` | `M, A` | `token`, `code?`, `editar?`, `nombre`, `tipo`, `linea`, `beneficio`, `cabello`, `unidades_caja`, `imagen`, precios? | `{ producto: { code, info } }` |
+| 29 | `sincronizar` | `M, A, V, D` | `token` | `{ fecha, usuario, catalogo, clientes, pedidos, pedidos_web, despachadores, config, comisiones }` |
+| 30 | `config` | Público | — | `{ version_apk, url_apk, minima_apk, version_pantallas, url_pantallas, notas, comision_pct_default }` |
+| 31 | `resumen` | `M, A, V` | `token`, `desde?`, `hasta?`, `vendedor_id?` | `{ total_pedidos, entregados, cajas_*, usd_*, bs_*, por_vendedor[], ... }` |
+| 32 | `usuarios` | `M` | `token` | `{ usuarios: [{ id, usuario, nombre, rol, roles, activo, telefono, comision_pct }] }` |
+| 33 | `guardarUsuario` | `M` | `token`, `id?`, `usuario?`, `nombre`, `rol`, `pin?`, `activo?`, `telefono?`, `comision_pct?` | `{ id }` |
+| 34* | `exportarBackup` | `M` (Solo GAS) | `token` | `{ exportado_at, secreto, tablas: { Usuarios, Clientes, Pedidos, PedidoItems, Historial, Precios, Inventario, PedidosWeb, Config, Pagos, Tasas } }` |
 
-*(Nota: El mapa `ACCIONES` en [`crm/Code.gs`](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/crm/Code.gs#L135-L165) declara exactamente **28 acciones**).*
-
----
-
-## 5. Análisis de Brechas (Gap Analysis), Calidad de Datos y Hoja de Ruta SDD
-
-### 5.1. Brechas de Especificación y Documentación (Spec Drift)
-
-1. **Desfase entre `docs/specs/modo-vendedor-crm.md` y la implementación real (`crm/Code.gs` / `panel.js`):**
-   - **Acciones de la API:** El documento `docs/specs/modo-vendedor-crm.md` solo documenta **12 acciones** en su tabla de API, mientras que `crm/Code.gs` implementa **28 acciones** (faltan en la spec previa: `catalogo`, `vendedores`, `pedidoWeb`, `buscarClienteWeb`, `asignarVendedorWeb`, `pedidosWeb`, `descartarWeb`, `borrarPedido`, `sincronizar`, `config`, `inventario`, `movimiento`, `cargarInventario`, `editarPedido`, `guardarPrecio`, `guardarProducto`).
-   - **Esquema de `Precios`:** La spec previa indica que la hoja `Precios` tiene 9 columnas y guarda descuentos (`desc_pronto`, `desc_efectivo_credito`, `desc_efectivo_pronto`). En realidad, `HOJAS.Precios` tiene **18 columnas**, guarda **precios finales** (`pronto`, `efectivo_credito`, `efectivo_pronto`, `mayor_pronto`, `mayor_efectivo_credito`, `mayor_efectivo_pronto`) y almacena además la definición de productos nuevos (`tipo`, `linea`, `beneficio`, `cabello`, `unidades_caja`, `imagen`).
-   - **Columnas faltantes en otras hojas de la spec previa:**
-     - `Usuarios`: falta `telefono` (col. 8).
-     - `Pedidos`: faltan `factura` (col. 44) y `nota_credito` (col. 45).
-     - `PedidoItems`: faltan `entregadas` (col. 12) y `devueltas` (col. 13).
-     - `PedidosWeb`: faltan `cliente_id` (col. 21), `latitud` (col. 22) y `longitud` (col. 23).
-2. **Desfase en `catalogo-skala/README.md` e `index.html`:**
-   - **Imágenes (`KT-03`):** `catalogo-skala/README.md` afirma: *"Estado: 18 de 19 productos con foto. Falta KT-03 (Kit Babosa)"*. Sin embargo, los archivos `assets/img/KT-03.png` (738.5 KB), `assets/img/web/KT-03-400.webp` y `KT-03-800.webp` **ya existen y están completos** (19 de 19 productos tienen foto).
-   - **Texto "Sin precios":** Tanto `catalogo-skala/README.md` como la sección `#como-comprar` de `index.html` dicen *"Sin precios: los precios se informan por cotización"*, cuando el catálogo actual muestra precios en vivo por caja (al menor y al mayor) y calcula totales con descuentos en el modal de pedido.
-   - **Ubicación de `BANOS` y `KITS`:** `catalogo-skala/README.md` indica que los arreglos `BANOS` y `KITS` están en `js/main.js`, pero fueron extraídos a `js/datos.js`.
+*(Nota: `exportarBackup` es la acción #34 en el objeto `ACCIONES` de `crm/Code.gs`, utilizada como puente para migrar el snapshot íntegro de Google Sheets hacia `public.skala_importar` en Supabase).*
 
 ---
 
-### 5.2. Hallazgos de Calidad de Datos, UX y Activos
+## 5. Auditoría de Migración a Supabase y Especificación de Cambios para Claude (Fase B)
 
-1. **Filtro Huérfano en Baños de Crema (`index.html`):**
-   - En `#filterBanos` ([`index.html:143`](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/index.html#L143)) existe el botón `<button class="filter" data-filter="Reconstrucción">Reconstrucción</button>`. Ninguno de los 11 productos en `BANOS` tiene `line: "Reconstrucción"` (solo existen en `KITS`: `KT-04` y `KT-05`, cuya sección `#kits` no tiene barra de filtros). Al pulsar "Reconstrucción" en Baños de crema, la grilla queda completamente vacía (`0` tarjetas).
-2. **Erratas Ortográficas en Nombres de Productos (`datos.js` y `Code.gs`):**
-   - `BC-02`: Escrito como `"Banana e Macuri"` (el nombre oficial de Skala Brasil es **Banana e Bacuri**).
-   - `BC-11`: Escrito como `"Potao Despaiado"` (el nombre oficial de Skala Brasil es **Potão Desmaiado**).
-3. **Atributo `stock` Obsoleto en `datos.js`:**
-   - Los 19 objetos de `BANOS` y `KITS` en `datos.js` mantienen el campo `stock` (`50` a `600`) con el comentario *"solo para el badge Alto/Medio/Bajo"*, pero el código actual nunca lee `p.stock`; utiliza exclusivamente el estado `agotado` / `disponible` proveniente de la acción `catalogo` del CRM.
-4. **Archivos Residuales y Duplicados en el Directorio de Publicación (`catalogo-skala/`):**
-   - `catalogo-skala/elegido.png` (179.7 KB) y `catalogo-skala/form.png` (146.2 KB) son capturas de desarrollo ubicadas en la raíz publicada a Netlify que no se usan en ninguna vista.
-   - `catalogo-skala/assets/img/logo.png` (328,471 bytes) y `catalogo-skala/assets/logo/Skala logo.jpg` (328,471 bytes) son exactamente el mismo archivo binario de 320 KB duplicado con distinta extensión, y ninguno de los dos se usa en el HTML (que consume `assets/img/web/logo-96.png` y `logo-192.png`).
-5. **Configuración `CATALOGO_URL` Vacía en `crm-api.js`:**
-   - En [`catalogo-skala/js/crm-api.js:12`](file:///C:/Users/DELL/Documents/Kevin%20Trabajo%20Personal/catalogo-skala/catalogo-skala/js/crm-api.js#L12), `const CATALOGO_URL = "";` está vacía, lo que desactiva el enlace al catálogo público desde la barra superior de la app Android.
+Durante la revisión profunda de los cambios de migración a Supabase (`supabase/schema.sql`, `catalogo-skala/js/crm-api.js`, `catalogo-skala/js/panel.js`, `crm/Code.gs` y `android/`), **Argon 4** identificó **4 brechas críticas de seguridad, concurrencia y sincronización** que deben ser corregidas y certificadas por **Claude** antes de activar Supabase en producción:
 
----
+### 5.1. Brecha Crítica 1 — Bypass de Lectura Anónima y RBAC Incompleto en `public.skala_db` (`supabase/schema.sql`)
+- **Diagnóstico:**
+  1. En `supabase/schema.sql:836-840`, la operación `op = 'leer'` confía en el booleano enviado por el cliente `(payload->>'requiere_sesion')::boolean`. Como `SUPABASE_URL` y `SUPABASE_ANON_KEY` son públicas en el navegador, cualquier tercero puede invocar `/rest/v1/rpc/skala_db` con `{"op":"leer","requiere_sesion":false,"tablas":["Usuarios","Clientes","Pedidos","Pagos"]}` y descargar toda la base de datos sin token.
+  2. Incluso sin trucos, la llamada pública `catalogo` en `crm-api.js:511` pide `['Precios', 'Inventario', 'Pedidos', 'PedidoItems']` sin sesión, exponiendo todos los pedidos del negocio al navegador de cualquier visitante del catálogo público.
+  3. En `op = 'escribir'` (`schema.sql:901-1163`), solo se verifica rol `master`/`admin` para la tabla `Usuarios`, permitiendo que un token válido de cualquier rol menor modifique `Precios`, `Inventario`, `Config` o `Pagos`, o que una llamada anónima sobrescriba filas existentes de `PedidosWeb` (`ON CONFLICT (id) DO UPDATE`).
+- **Especificación de Corrección (para Claude):**
+  - En `op = 'leer'`, **ignorar `requiere_sesion` del cliente** cuando se solicite cualquiera de las tablas privadas (`Usuarios`, `Clientes`, `Pedidos`, `PedidoItems`, `Historial`, `Inventario`, `PedidosWeb`, `Pagos`) y exigir `v_ses IS NOT NULL`.
+  - Crear una operación pública dedicada `op = 'catalogo_publico'` en `public.skala_db` (y usarla en `crm-api.js` cuando `catalogo` se llame sin sesión válida) que calcule dentro de PostgreSQL únicamente el booleano `agotado` por SKU sin devolver filas de `Pedidos`, `PedidoItems` ni `Inventario`.
+  - Crear operaciones públicas acotadas `op = 'vendedores_publico'` y `op = 'buscar_cliente_web'` para que el catálogo público jamás lea las tablas `Usuarios` ni `Clientes` completas.
+  - En `op = 'escribir'`, imponer RBAC por tabla en el servidor:
+    - Sin sesión (`v_ses IS NULL`): solo permitir `INSERT` en `pedidos_web` (`ON CONFLICT (id) DO NOTHING`) o asignar `vendedor_id` cuando `pedidos_web.estado = 'nuevo'`.
+    - `Usuarios`: exclusivo `master`.
+    - `Precios`, `Inventario`, `Config`: exclusivo `master` o `admin`.
+    - `Clientes`, `Pedidos`, `PedidoItems`, `PedidosWeb`, `Pagos`, `Tasas`, `Historial`: requerir sesión activa (`v_ses IS NOT NULL`).
 
-### 5.3. Riesgos Técnicos, de Seguridad y Escalabilidad
+### 5.2. Brecha Crítica 2 — Sincronización de Fondo en Android (`Sincronizador.java`) Sigue Apuntando a Google Sheets
+- **Diagnóstico:**
+  - `Sincronizador.java:72-80` envía `{"action":"sincronizar"}` exclusivamente a `BuildConfig.API_URL` (Google Apps Script) a las 08:00, 13:00 y 16:00 h y guarda la respuesta en `files/datos.json`.
+  - Cuando el equipo migre a Supabase, Google Sheets quedará congelado en el pasado, pero `Sincronizador.java` seguirá descargando datos viejos de Google Sheets con un `fecha` (timestamp) nuevo, y `datosLocales()` en `crm-api.js:73-74` sobrescribirá `skala_local_v1` con los datos obsoletos de `datos.json`.
+- **Especificación de Corrección (para Claude):**
+  - En `crm-api.js` (`datosLocales()`), cuando `usaSupabase()` sea `true`, no permitir que un snapshot `nativo` proveniente de Google Sheets (`!nativo._supabase`) pise la caché local `skala_local_v1` sincronizada desde Supabase, y persistir la copia de `sincronizar` de Supabase también en `SkalaApp.guardarDatos(...)` marcando `_supabase: true`.
 
-1. **Límite de Cuota y Rate-Limiting Global en `buscarClienteWeb` (`Code.gs:1373`):**
-   - La acción pública `buscarClienteWeb` usa una única clave de caché global (`cache.get('busq_web')`) con tope de `30` búsquedas por minuto para **todos** los visitantes combinados. Un pico de tráfico o un usuario haciendo búsquedas rápidas bloqueará temporalmente la búsqueda de clientes para todos los demás visitantes del catálogo.
-2. **Degradación de Rendimiento en Google Sheets al Crecer el Histórico (`leer_`):**
-   - Cada llamada a `guardarPedido`, `pedidos`, `catalogo` o `inventario` ejecuta `leer_('Pedidos')` y `leer_('PedidoItems')`, leyendo **todas las filas históricas** de la hoja en memoria. Al superar los ~3,000–5,000 pedidos (~15,000–25,000 filas en `PedidoItems`), el tiempo de respuesta de Apps Script se acercará a los límites de latencia (30s) y el archivo `datos.json` sincronizado en los teléfonos crecerá considerablemente.
-3. **Ausencia de `package.json` en la Raíz del Proyecto:**
-   - Aunque el repositorio cuenta con una excelente suite de pruebas automatizadas (`producto.test.js`, `crm-core.test.js`, `code.test.js`, `e2e.js`, `e2e-panel.js`, `e2e-app.js`), no existe un archivo `package.json` que declare la versión de `playwright` ni scripts estándar (`npm test`, `npm run test:e2e`) para integración continua (CI/CD).
-4. **Inexistencia de Tasa de Cambio Referencial Bs/USD:**
-   - Los montos conciliados en Bolívares (`Bs`) se suman de forma separada a los Dólares (`USD`) sin almacenar la tasa de cambio vigente al día del cobro (`tasa_bcv` / `tasa_cambio`), lo que impide consolidar el flujo de caja histórico en una moneda única de referencia o auditar si un monto en `Bs` correspondió exactamente al `total_final` en `USD`.
+### 5.3. Brecha Crítica 3 — Condición de Carrera en IDs Correlativos de Pedidos (`SKL-AAMMDD-NNN`)
+- **Diagnóstico:**
+  - En `crm-api.js:882-890`, `apiSupabase` calcula el correlativo `SKL-AAMMDD-NNN` en el navegador del teléfono leyendo `Pedidos` y sumando `1`. Si dos vendedores crean un pedido al mismo tiempo, ambos generarán el mismo `id` y el segundo sobrescribirá el pedido e ítems del primero debido al `ON CONFLICT (id) DO UPDATE` en `schema.sql:995` y `DELETE FROM public.pedido_items WHERE pedido_id = ...`.
+- **Especificación de Corrección (para Claude):**
+  - En `public.skala_db` (`op = 'escribir'`), adquirir `PERFORM pg_advisory_xact_lock(hashtext('skala_pedidos_write'));` y, cuando un pedido entrante sea una creación nueva (`es_nuevo: true`) cuyo `id` ya exista con distinto `client_ref`, recalcular atómicamente el siguiente correlativo `SKL-AAMMDD-NNN` disponible en el servidor y reasignar el `pedido_id` en sus `PedidoItems` e `Historial` antes de insertar.
 
----
-
-### 5.4. Hoja de Ruta Recomendada (Próximos Pasos SDD)
-
-#### Fase 1: Higiene de Datos, Documentación y Activos (Corto Plazo)
-- [ ] Sincronizar `docs/specs/modo-vendedor-crm.md` y `catalogo-skala/README.md` con este documento `SPEC.md`.
-- [ ] Corregir en `index.html` el filtro `"Reconstrucción"` de Baños de crema (ocultarlo dinámicamente si no hay baños de esa línea o agregar barra de filtros a `#kits`).
-- [ ] Corregir los nombres `"Banana e Bacuri"` (`BC-02`) y `"Potão Desmaiado"` (`BC-11`) en `js/datos.js` y `crm/Code.gs`.
-- [ ] Eliminar las capturas huérfanas `catalogo-skala/elegido.png` y `catalogo-skala/form.png`, y limpiar los logos duplicados no referenciados (`assets/img/logo.png`, `assets/logo/Skala logo.jpg`).
-- [ ] Definir `CATALOGO_URL` en `js/crm-api.js` con el dominio oficial de producción en Netlify.
-
-#### Fase 2: Automatización CI/CD y Calidad (Mediano Plazo)
-- [ ] Crear `package.json` en la raíz con scripts `test:unit` (`node --test ...`) y `test:e2e` (`playwright`), e integrar un workflow de GitHub Actions que ejecute los tests en cada Pull Request.
-- [ ] Parametrizar en `sw.js` o en un script de pre-commit el incremento automático de `VERSION` (`skala-equipo-vXX`) cuando cambien archivos en `catalogo-skala/`.
-
-#### Fase 3: Escalabilidad de Datos y Finanzas Bimonetarias (Mediano/Largo Plazo)
-- [ ] Agregar columna opcional `tasa_cambio` en `Pedidos` (y campo en `Config` para la tasa del día) para auditar equivalencias `Bs <-> USD` al reportar y conciliar cobros.
-- [ ] Implementar una función de **Archivado Trimestral/Anual** en el menú `Skala CRM` de Google Sheets que mueva pedidos `entregado` + `conciliado` (o `cancelado` / `borrado`) de más de 180 días a una hoja `PedidosArchivo`, consolidando su impacto en `Inventario` mediante un movimiento de corte inicial para mantener baja la latencia de `Code.gs`.
+### 5.4. Brecha Crítica 4 — Bloqueo Brute-Force en Login y `DELETE WHERE true` en `public.skala_importar`
+- **Diagnóstico:**
+  - `supabase/schema.sql:610, 680, 698` ejecuta `DELETE FROM public.pedido_items;`, `DELETE FROM public.inventario;` y `DELETE FROM public.historial;` sin cláusula `WHERE`, lo cual falla en proyectos Supabase con `pg_safeupdate` activo (`DELETE requires a WHERE clause`).
+  - Además, `v_op = 'login'` en `schema.sql:801-821` no implementa el bloqueo de 10 minutos tras 5 intentos fallidos (`code: 'locked'`) ni protege `public.skala_importar` cuando ya existe un `CRM_SECRET` configurado.
+- **Especificación de Corrección (para Claude):**
+  - Cambiar los `DELETE` sin condición en `skala_importar` por `DELETE FROM ... WHERE true;`.
+  - Si `public.skala_secretos` ya posee `CRM_SECRET`, exigir en `skala_importar` que el payload incluya el mismo `secreto` o un `token` válido de rol `master`.
+  - Implementar el control de intentos fallidos de login en `public.skala_db` (5 fallos en 10 minutos → `code: 'locked'`).

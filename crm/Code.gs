@@ -79,11 +79,11 @@ var TOMAN_PEDIDOS = ['master', 'admin', 'vendedor'];
 
 var HOJAS = {
   Usuarios: ['id', 'usuario', 'nombre', 'rol', 'pin_hash', 'activo', 'created_at',
-             'telefono', 'comision_pct'],   // WhatsApp del vendedor y % de comisión (por defecto 3%)
+             'telefono', 'comision_pct', 'catalogo', 'rutas'],   // WhatsApp del vendedor, % de comisión, catálogo ('skala'|'distribuidora'|'ambos') y rutas asignadas
   // 10 primeras = GPS_CLIENTES (backend/Code.gs). No cambiar el orden.
   Clientes: ['id', 'nombre', 'rif_cedula', 'direccion', 'latitud', 'longitud', 'telefono',
              'updated_at', 'sync_status', 'deleted',
-             'contacto', 'telefono2', 'vendedor_id', 'created_at'],
+             'contacto', 'telefono2', 'vendedor_id', 'created_at', 'ruta'],
   Pedidos: ['id', 'fecha', 'vendedor_id', 'vendedor', 'cliente_id', 'cliente', 'negocio',
             'total_cajas', 'detalle_unidades', 'pago', 'nota', 'estado', 'estado_at',
             'estado_por', 'motivo', 'client_ref', 'created_at', 'updated_at',
@@ -97,7 +97,9 @@ var HOJAS = {
             // Pagos parciales (abonos): lo pagado en $ (sin rechazados), lo que falta y abonos sin conciliar
             'pagado_usd', 'saldo', 'pagos_pend',
             // Corrección de precios al cobrar (error de facturación): propuesto · aprobado · revertido
-            'ajuste_estado', 'ajuste_motivo', 'ajuste_por', 'ajuste_at', 'ajuste_previo'],
+            'ajuste_estado', 'ajuste_motivo', 'ajuste_por', 'ajuste_at', 'ajuste_previo',
+            // Canal de atención (solo 2: en_persona · online_telefono) y lectura GPS del vendedor al tomarlo
+            'canal_pedido', 'gps_lat', 'gps_lng', 'gps_dist_m'],
   PedidoItems: ['pedido_id', 'code', 'producto', 'cajas', 'unidades_caja', 'unidad', 'total_unidades',
                 'precio', 'desc_pronto', 'desc_efectivo_credito', 'desc_efectivo_pronto',
                 'entregadas', 'devueltas'],  // entrega con diferencias: lo que ya recibió el cliente y lo que volvió al depósito
@@ -120,9 +122,16 @@ var HOJAS = {
   // Cada pago (o abono) de un pedido. estado: reportado (lo cargó el vendedor) · conciliado · rechazado
   Pagos: ['id', 'pedido_id', 'fecha_pago', 'created_at', 'registrado_por', 'registrado_por_id', 'moneda', 'monto', 'tasa',
           'monto_usd', 'referencia', 'tipo_pago_real', 'estado', 'conciliado_at', 'conciliado_por', 'motivo',
-          'comision_estado', 'comision_pct', 'comision_usd', 'comision_moneda', 'comision_monto', 'comision_tasa', 'comision_fecha', 'comision_ref', 'comision_pagada_at', 'comision_pagada_por'],
+          'comision_estado', 'comision_pct', 'comision_usd', 'comision_moneda', 'comision_monto', 'comision_tasa', 'comision_fecha', 'comision_ref', 'comision_pagada_at', 'comision_pagada_por',
+          'canal_cobro'],  // en_persona · online_telefono
   // Tasa oficial BCV (Bs por $) por día. Se llena sola desde internet; Administración puede escribirla a mano (fuente: manual).
-  Tasas: ['fecha', 'tasa', 'fuente', 'updated_at']
+  Tasas: ['fecha', 'tasa', 'fuente', 'updated_at'],
+  // Control de visitas / atenciones a clientes. canal: en_persona · online_telefono
+  // tipo: pedido · cobro · visita_ruta · no_disponible · no_visitado · alta_cliente
+  // gps_aprendido: esta visita le puso al cliente sus primeras coordenadas (se revierte si fue el cliente equivocado)
+  Visitas: ['id', 'fecha', 'cliente_id', 'negocio', 'vendedor_id', 'vendedor', 'canal', 'tipo', 'submotivo', 'nota',
+            'pedido_id', 'pago_id', 'mision_id', 'latitud', 'longitud', 'distancia_m', 'en_sitio', 'gps_aprendido',
+            'anulada', 'anulada_motivo', 'created_at', 'updated_at']
 };
 
 /* -------------------- Cobros: tasa BCV y abonos -------------------- */
@@ -216,7 +225,8 @@ function pagoPublico_(x) {
     comision_estado: String(x.comision_estado || ''), comision_pct: Number(x.comision_pct) || 0, comision_usd: Number(x.comision_usd) || 0,
     comision_moneda: String(x.comision_moneda || ''), comision_monto: Number(x.comision_monto) || 0, comision_tasa: Number(x.comision_tasa) || 0,
     comision_fecha: fechaIso_(x.comision_fecha), comision_ref: String(x.comision_ref || ''),
-    comision_pagada_at: String(x.comision_pagada_at || ''), comision_pagada_por: String(x.comision_pagada_por || '') };
+    comision_pagada_at: String(x.comision_pagada_at || ''), comision_pagada_por: String(x.comision_pagada_por || ''),
+    canal_cobro: String(x.canal_cobro || '') };
 }
 
 /* -------------------- Entradas HTTP -------------------- */
@@ -271,8 +281,13 @@ var ACCIONES = {
   guardarProducto: [accionGuardarProducto_, GESTION],
   despachadores: [accionDespachadores_, GESTION],
   resumen: [accionResumen_, TOMAN_PEDIDOS],
+  registrarVisita: [accionRegistrarVisita_, TOMAN_PEDIDOS],     // visita / atención (en persona u online)
+  visitas: [accionVisitas_, TOMAN_PEDIDOS],                     // control de visitas
+  cambiarClientePedido: [accionCambiarClientePedido_, TOMAN_PEDIDOS], // se equivocó de cliente
   usuarios: [accionUsuarios_, ['master']],
-  guardarUsuario: [accionGuardarUsuario_, ['master']]
+  guardarUsuario: [accionGuardarUsuario_, ['master']],
+  guardarMisRutas: [accionGuardarMisRutas_, TOMAN_PEDIDOS],
+  exportarBackup: [accionExportarBackup_, ['master']]
 };
 
 function manejar_(p) {
@@ -400,9 +415,53 @@ function activo_(u) {
   return u.activo === true || a === 'true' || a === '1' || a === 'si' || a === 'sí';
 }
 
+function catalogoUsuario_(c) {
+  var v = String(c === undefined || c === null ? '' : c).trim().toLowerCase();
+  return (v === 'skala' || v === 'distribuidora' || v === 'ambos') ? v : 'ambos';
+}
+
+var RUTAS_CARTERA = ['Chivo', 'Vigía', 'Mérida', 'Mocotíes', 'Caja Seca', 'Táchira'];
+function rutaCanon_(raw) {
+  var k = String(raw === undefined || raw === null ? '' : raw).trim().toLowerCase()
+    .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i').replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u');
+  if (!k) return '';
+  if (k === 'chivo') return 'Chivo';
+  if (k === 'vigia' || k === 'el vigia') return 'Vigía';
+  if (k === 'merida') return 'Mérida';
+  if (k === 'mocoties') return 'Mocotíes';
+  if (k === 'caja seca' || k === 'caja-seca') return 'Caja Seca';
+  if (k === 'tachira') return 'Táchira';
+  return '';
+}
+function normalizarRuta_(r, nombre, direccion) {
+  var dir = rutaCanon_(r);
+  if (dir) return dir;
+  var txt = (String(nombre || '') + ' ' + String(direccion || '')).toLowerCase()
+    .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i').replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u');
+  if (/tachira|san\s*cristobal|la\s*fria|coloncito|pinal|rubio|tariba/.test(txt)) return 'Táchira';
+  if (/caja\s*seca|panamericana|nueva\s*bolivia|arenales|zancudo|bobures|arapuey/.test(txt)) return 'Caja Seca';
+  if (/mocoties|santa\s*cruz\s*de\s*mora|tovar|bailadores|zea/.test(txt)) return 'Mocotíes';
+  if (/chivo|pueblo\s*nuevo|rurale|cuatro\s*esquinas/.test(txt)) return 'Chivo';
+  if (/vigia|cano\s*seco/.test(txt)) return 'Vigía';
+  if (/merida|llano|milla|lora|independencia|pinto\s*salina|ejido/.test(txt)) return 'Mérida';
+  return 'Vigía';
+}
+function rutasUsuario_(raw) {
+  var arr = Array.isArray(raw) ? raw : String(raw === undefined || raw === null ? '' : raw).split(/[,;|\/]+/);
+  var vistas = {};
+  arr.forEach(function (x) {
+    var c = rutaCanon_(x);
+    if (c) vistas[c] = 1;
+  });
+  return RUTAS_CARTERA.filter(function (r) { return vistas[r]; });
+}
+
 function usuarioPublico_(u) {
   var roles = rolesDe_(u.rol);
-  return { id: String(u.id), usuario: String(u.usuario), nombre: String(u.nombre), rol: roles[0] || String(u.rol), roles: roles, rol_nombre: nombreRoles_(roles) || String(u.rol) };
+  return {
+    id: String(u.id), usuario: String(u.usuario), nombre: String(u.nombre),
+    rol: roles[0] || String(u.rol), roles: roles, rol_nombre: nombreRoles_(roles) || String(u.rol)
+  };
 }
 
 /* El rol se lee de la hoja en cada llamada: cambios aplican al instante. */
@@ -463,6 +522,8 @@ function clientePublico_(c) {
     id: String(c.id), nombre: String(c.nombre), contacto: String(c.contacto),
     rif_cedula: String(c.rif_cedula), direccion: String(c.direccion),
     telefono: String(c.telefono), telefono2: String(c.telefono2),
+    ruta: normalizarRuta_(c.ruta || c.zona, c.nombre, c.direccion),
+    vendedor_id: String(c.vendedor_id || ''),
     latitud: c.latitud === '' ? '' : Number(c.latitud),
     longitud: c.longitud === '' ? '' : Number(c.longitud)
   };
@@ -486,10 +547,13 @@ function mismoRif_(a, b) {
 function accionClientes_(p) {
   var q = txt_(p.q, 60).toLowerCase();
   var qd = soloDigitos_(q);
+  var rutaFiltro = rutaCanon_(p.ruta || p.zona);
   var lista = leer_('Clientes').filter(function (c) {
     if (String(c.deleted) === '1' || c.deleted === true) return false;
+    var rutaC = normalizarRuta_(c.ruta || c.zona, c.nombre, c.direccion);
+    if (rutaFiltro && rutaC !== rutaFiltro) return false;
     if (!q) return true;
-    var texto = [c.nombre, c.contacto, c.rif_cedula, c.direccion].join(' ').toLowerCase();
+    var texto = [c.nombre, c.contacto, c.rif_cedula, c.direccion, rutaC].join(' ').toLowerCase();
     if (texto.indexOf(q) !== -1) return true;
     if (qd.length >= 4) {
       // teléfono con o sin +58 / 0 adelante: se busca por sus últimos números
@@ -515,6 +579,7 @@ function numeroGps_(v, min, max) {
 function guardarCliente_(c, ses, opciones) {
   opciones = opciones || {};
   var exigirTelefono = opciones.exigirTelefono !== false;
+  var rutaExplicit = rutaCanon_(c.ruta || c.zona);
   var datos = {
     nombre: txt_(c.negocio || c.nombre, 120),
     contacto: txt_(c.contacto, 120),
@@ -523,7 +588,8 @@ function guardarCliente_(c, ses, opciones) {
     telefono: txt_(c.telefono, 30),
     telefono2: txt_(c.telefono2, 30),
     latitud: numeroGps_(c.latitud, -90, 90),
-    longitud: numeroGps_(c.longitud, -180, 180)
+    longitud: numeroGps_(c.longitud, -180, 180),
+    ruta: rutaExplicit
   };
   if (!datos.nombre && datos.contacto) datos.nombre = datos.contacto;
   if (!datos.nombre) throw new Error('Falta el nombre del cliente o del negocio.');
@@ -557,13 +623,17 @@ function guardarCliente_(c, ses, opciones) {
     }
     // Al editar se guarda todo lo del formulario; si no, solo se pisan los campos con dato
     Object.keys(datos).forEach(function (k) { if (opciones.reemplazar || datos[k] !== '') actualizado[k] = datos[k]; });
+    actualizado.ruta = rutaExplicit || normalizarRuta_(existente.ruta, actualizado.nombre, actualizado.direccion);
+    if (esGestion_(ses) && c.vendedor_id !== undefined) actualizado.vendedor_id = txt_(c.vendedor_id, 40);
     actualizado.updated_at = t;
     actualizado.sync_status = 1;
     actualizar_('Clientes', existente._fila, actualizado);
     actualizado._existia = true;
     return actualizado;
   }
-  var nuevo = { id: uuid_(), updated_at: t, created_at: t, sync_status: 1, deleted: 0, vendedor_id: ses.id };
+  var vendIdNuevo = (esGestion_(ses) && c.vendedor_id !== undefined) ? txt_(c.vendedor_id, 40) : ses.id;
+  datos.ruta = rutaExplicit || normalizarRuta_('', datos.nombre, datos.direccion);
+  var nuevo = { id: uuid_(), updated_at: t, created_at: t, sync_status: 1, deleted: 0, vendedor_id: vendIdNuevo };
   Object.keys(datos).forEach(function (k) { nuevo[k] = datos[k]; });
   agregar_('Clientes', nuevo);
   return nuevo;
@@ -1054,8 +1124,12 @@ function accionGuardarPedido_(p, ses) {
     var sinStock = faltaStock_(items, existencias_(pedidos, pItems));
     if (sinStock) return { ok: false, error: sinStock, code: 'stock' };
     var cliente;
-    try { cliente = guardarCliente_(p.cliente || {}, ses); }
+    // Canal de atención + GPS del vendedor: en persona aprende el GPS si el cliente no lo tenía;
+    // online / teléfono JAMÁS guarda la ubicación del vendedor como la del cliente.
+    var atencion = prepararAtencion_(p.canal_pedido, p.gps_lat, p.gps_lng, p.cliente || {});
+    try { cliente = guardarCliente_(atencion.cliente, ses); }
     catch (err) { return { ok: false, error: err.message, code: 'cliente' }; }
+    var gpsAprendido = atencion.canal === 'en_persona' && atencion.fix ? aprenderGpsCliente_(cliente, atencion.fix) : false;
 
     var totalCajas = items.reduce(function (a, it) { return a + it.cajas; }, 0);
     var personalizado = items.some(function (it) { return Number(it.precio_manual) > 0; });
@@ -1075,9 +1149,16 @@ function accionGuardarPedido_(p, ses) {
       nota: txt_(p.nota, 300), documento: documento,
       dias_credito: diasCredito, cobro: '',
       estado: 'pendiente', estado_at: t, estado_por: ses.nombre, motivo: '',
-      client_ref: ref, created_at: t, updated_at: t, web_id: web ? String(web.id) : ''
+      client_ref: ref, created_at: t, updated_at: t, web_id: web ? String(web.id) : '',
+      canal_pedido: atencion.canal, gps_lat: atencion.fix ? atencion.fix.lat : '', gps_lng: atencion.fix ? atencion.fix.lng : '',
+      gps_dist_m: atencion.canal && numeroGps_(p.gps_dist_m, 0, 1e7) !== '' ? Math.round(Number(p.gps_dist_m)) : ''
     };
     agregar_('Pedidos', ped);
+    if (atencion.canal) {
+      agregarVisita_({ cliente: cliente, ses: ses, canal: atencion.canal, tipo: 'pedido', pedido_id: ped.id,
+        fix: atencion.canal === 'en_persona' ? atencion.fix : null,
+        distancia_m: ped.gps_dist_m, gps_aprendido: gpsAprendido });
+    }
     if (web) {
       web.estado = 'tomado'; web.pedido_id = ped.id; web.atendido_por = ses.nombre; web.atendido_at = t;
       actualizar_('PedidosWeb', web._fila, web);
@@ -1087,6 +1168,153 @@ function accionGuardarPedido_(p, ses) {
     hItems.getRange(hItems.getLastRow() + 1, 1, filas.length, HOJAS.PedidoItems.length).setValues(filas);
     historial_(ped.id, ses, 'creado', ped.total_cajas + ' cajas · ' + ped.negocio + (ped.total ? ' · ' + ped.total + ' $ (' + pagoTexto + ')' : '') + (personalizado ? ' · precio personalizado' : (excepcion ? ' · precio mayor por excepción' : '')) + (web ? ' · desde pedido web ' + web.id : ''));
     return { ok: true, pedido: pedidoConItems_(ped, items), cliente_id: cliente.id, cliente: clientePublico_(cliente) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* -------------------- Canal de atención, GPS y control de visitas -------------------- */
+/* Solo 2 canales en todo el sistema (pedidos, cobros, altas y rutas GPS) */
+var CANALES = ['en_persona', 'online_telefono'];
+var TIPOS_VISITA = ['pedido', 'cobro', 'visita_ruta', 'no_disponible', 'no_visitado', 'alta_cliente'];
+function canalValido_(c) { return CANALES.indexOf(String(c || '')) !== -1; }
+/* Coordenada usable: en rango y NO 0,0 (GPS vacío) */
+function gpsValido_(lat, lng) {
+  if (lat === '' || lng === '' || lat === null || lng === null || lat === undefined || lng === undefined) return false;
+  var a = Number(lat), b = Number(lng);
+  if (!isFinite(a) || !isFinite(b) || Math.abs(a) > 90 || Math.abs(b) > 180) return false;
+  return !(a === 0 && b === 0);
+}
+function mismaCoord_(lat1, lng1, lat2, lng2) {
+  return gpsValido_(lat1, lng1) && gpsValido_(lat2, lng2) && Math.abs(Number(lat1) - Number(lat2)) < 1e-5 && Math.abs(Number(lng1) - Number(lng2)) < 1e-5;
+}
+/* Prepara canal + lectura GPS del vendedor. Las coordenadas que llegan iguales a la lectura del vendedor se quitan
+   del cliente: el servidor es quien decide si se aprenden (solo en persona y si el cliente no tenía GPS). */
+function prepararAtencion_(canalRaw, lat, lng, c) {
+  var canal = canalValido_(canalRaw) ? String(canalRaw) : '';
+  var fix = canal && gpsValido_(lat, lng) ? { lat: numeroGps_(lat, -90, 90), lng: numeroGps_(lng, -180, 180) } : null;
+  var copia = {};
+  Object.keys(c || {}).forEach(function (k) { copia[k] = c[k]; });
+  if (fix && mismaCoord_(copia.latitud, copia.longitud, fix.lat, fix.lng)) { copia.latitud = ''; copia.longitud = ''; }
+  return { canal: canal, fix: fix, cliente: copia };
+}
+/* Le pone al cliente su primera ubicación (si no tenía). Devuelve true si la aprendió. */
+function aprenderGpsCliente_(cliente, fix) {
+  if (!cliente || !cliente.id || !fix || !gpsValido_(fix.lat, fix.lng)) return false;
+  var x = leer_('Clientes').filter(function (y) { return String(y.id) === String(cliente.id); })[0];
+  if (!x || gpsValido_(x.latitud, x.longitud)) return false;
+  x.latitud = fix.lat; x.longitud = fix.lng; x.updated_at = ahora_(); x.sync_status = 1;
+  actualizar_('Clientes', x._fila, x);
+  cliente.latitud = fix.lat; cliente.longitud = fix.lng;
+  return true;
+}
+/* d = { cliente, ses, canal, tipo, pedido_id, pago_id, mision_id, fix, distancia_m, gps_aprendido, submotivo, nota } */
+function agregarVisita_(d) {
+  var t = ahora_();
+  var v = {
+    id: 'VIS-' + uuid_().replace(/-/g, '').slice(0, 10).toUpperCase(),
+    fecha: hoyIso_(), cliente_id: String(d.cliente.id || ''), negocio: String(d.cliente.nombre || d.cliente.negocio || ''),
+    vendedor_id: d.ses ? d.ses.id : '', vendedor: d.ses ? d.ses.nombre : '',
+    canal: d.canal, tipo: TIPOS_VISITA.indexOf(d.tipo) !== -1 ? d.tipo : 'visita_ruta',
+    submotivo: txt_(d.submotivo, 60), nota: txt_(d.nota, 300),
+    pedido_id: d.pedido_id || '', pago_id: d.pago_id || '', mision_id: txt_(d.mision_id, 60),
+    latitud: d.fix ? d.fix.lat : '', longitud: d.fix ? d.fix.lng : '',
+    distancia_m: d.distancia_m === '' || d.distancia_m === undefined || d.distancia_m === null ? '' : Math.round(Number(d.distancia_m)) || 0,
+    en_sitio: d.canal === 'en_persona', gps_aprendido: !!d.gps_aprendido,
+    anulada: false, anulada_motivo: '', created_at: t, updated_at: t
+  };
+  agregar_('Visitas', v);
+  return v;
+}
+function visitaPublica_(v) {
+  var o = {};
+  HOJAS.Visitas.forEach(function (k) { o[k] = v[k] === undefined || v[k] === null ? '' : v[k]; });
+  o.en_sitio = v.en_sitio === true || String(v.en_sitio) === 'true';
+  o.gps_aprendido = v.gps_aprendido === true || String(v.gps_aprendido) === 'true';
+  o.anulada = v.anulada === true || String(v.anulada) === 'true';
+  return o;
+}
+
+/* Registra una visita / atención suelta (alta de cliente, visita de ruta, no disponible, ...) */
+function accionRegistrarVisita_(p, ses) {
+  var canal = String(p.canal || '');
+  if (!canalValido_(canal)) return { ok: false, error: 'Indicá cómo atendiste al cliente: en persona u online / por teléfono.', code: 'canal' };
+  var tipo = TIPOS_VISITA.indexOf(String(p.tipo)) !== -1 ? String(p.tipo) : 'visita_ruta';
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var c = leer_('Clientes').filter(function (x) { return String(x.id) === String(p.cliente_id); })[0];
+    if (!c) return { ok: false, error: 'Cliente no encontrado.', code: 'not_found' };
+    var fix = gpsValido_(p.latitud, p.longitud) ? { lat: numeroGps_(p.latitud, -90, 90), lng: numeroGps_(p.longitud, -180, 180) } : null;
+    var aprendio = canal === 'en_persona' && fix && tipo !== 'no_visitado' ? aprenderGpsCliente_(c, fix) : false;
+    var v = agregarVisita_({ cliente: c, ses: ses, canal: canal, tipo: tipo, fix: canal === 'en_persona' ? fix : null,
+      distancia_m: p.distancia_m, gps_aprendido: aprendio, submotivo: p.submotivo, nota: p.nota, mision_id: p.mision_id,
+      pedido_id: txt_(p.pedido_id, 40), pago_id: txt_(p.pago_id, 40) });
+    return { ok: true, visita: visitaPublica_(v), gps_aprendido: aprendio, cliente: clientePublico_(c) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* Control de visitas: las del vendedor (gestión ve todas). dias (1 = hoy), cliente_id opcional */
+function accionVisitas_(p, ses) {
+  var dias = Math.min(Math.max(Number(p.dias) || 1, 1), 365);
+  var desde = Utilities.formatDate(new Date(Date.now() - (dias - 1) * 86400000), TZ_COBRO, 'yyyy-MM-dd');
+  var lista = leer_('Visitas').filter(function (v) {
+    if (String(v.fecha) < desde) return false;
+    if (p.cliente_id && String(v.cliente_id) !== String(p.cliente_id)) return false;
+    return esGestion_(ses) || String(v.vendedor_id) === ses.id;
+  }).map(visitaPublica_).sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
+  if (!p.incluir_anuladas) lista = lista.filter(function (v) { return !v.anulada; });
+  return { ok: true, visitas: lista.slice(0, 500) };
+}
+
+/* ¿Se equivocó de cliente? Pasa el pedido al cliente correcto, anula la visita (y el GPS aprendido)
+   del cliente equivocado y, si fue en persona, registra la visita en el correcto. */
+function accionCambiarClientePedido_(p, ses) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ped = leer_('Pedidos').filter(function (x) { return String(x.id) === String(p.pedido_id); })[0];
+    if (!ped || !puedeVer_(ses, ped)) return { ok: false, error: 'Pedido no encontrado.', code: 'not_found' };
+    if (!esGestion_(ses) && String(ped.vendedor_id) !== ses.id) return { ok: false, error: 'Solo su vendedor (o Administración) puede cambiar el cliente.', code: 'forbidden' };
+    if (String(ped.estado) !== 'pendiente') return { ok: false, error: 'Solo se cambia el cliente de un pedido pendiente.', code: 'estado' };
+    var clientes = leer_('Clientes');
+    var nuevo = clientes.filter(function (x) { return String(x.id) === String(p.cliente_id); })[0];
+    if (!nuevo || String(nuevo.deleted) === '1') return { ok: false, error: 'Cliente no encontrado.', code: 'not_found' };
+    var anteriorId = String(ped.cliente_id);
+    if (anteriorId === String(nuevo.id)) return { ok: false, error: 'El pedido ya es de ese cliente.', code: 'mismo' };
+    var anterior = clientes.filter(function (x) { return String(x.id) === anteriorId; })[0] || null;
+    var t = ahora_();
+    // 1) anular las visitas de este pedido y revertir el GPS que se le aprendió por error al cliente equivocado
+    var revertidas = 0, gpsRevertido = false;
+    leer_('Visitas').forEach(function (v) {
+      if (String(v.pedido_id) !== String(ped.id) || String(v.tipo) !== 'pedido' || v.anulada === true || String(v.anulada) === 'true') return;
+      v.anulada = true; v.anulada_motivo = 'cliente_equivocado'; v.updated_at = t;
+      actualizar_('Visitas', v._fila, v);
+      revertidas++;
+      var aprend = v.gps_aprendido === true || String(v.gps_aprendido) === 'true';
+      if (aprend && anterior && String(v.cliente_id) === anteriorId && mismaCoord_(anterior.latitud, anterior.longitud, v.latitud, v.longitud)) {
+        anterior.latitud = ''; anterior.longitud = ''; anterior.updated_at = t; anterior.sync_status = 1;
+        actualizar_('Clientes', anterior._fila, anterior);
+        gpsRevertido = true;
+      }
+    });
+    // 2) el pedido pasa al cliente correcto
+    ped.cliente_id = nuevo.id; ped.cliente = nuevo.contacto || nuevo.nombre; ped.negocio = nuevo.nombre; ped.updated_at = t;
+    actualizar_('Pedidos', ped._fila, ped);
+    // 3) en persona: visita (y GPS si no tenía) en el cliente correcto
+    var visita = null, aprendio = false;
+    if (canalValido_(ped.canal_pedido)) {
+      var fix = gpsValido_(ped.gps_lat, ped.gps_lng) ? { lat: Number(ped.gps_lat), lng: Number(ped.gps_lng) } : null;
+      if (ped.canal_pedido === 'en_persona' && fix) aprendio = aprenderGpsCliente_(nuevo, fix);
+      visita = visitaPublica_(agregarVisita_({ cliente: nuevo, ses: ses, canal: String(ped.canal_pedido), tipo: 'pedido', pedido_id: ped.id,
+        fix: ped.canal_pedido === 'en_persona' ? fix : null, distancia_m: ped.gps_dist_m, gps_aprendido: aprendio }));
+    }
+    historial_(ped.id, ses, 'cliente_cambiado', 'De ' + (anterior ? anterior.nombre : anteriorId) + ' a ' + nuevo.nombre +
+      (revertidas ? ' · visita anulada en el cliente equivocado' : '') + (gpsRevertido ? ' · GPS aprendido revertido' : ''));
+    return { ok: true, pedido: pedidoConItems_(ped, leer_('PedidoItems'), leer_('Pagos')), cliente: clientePublico_(nuevo),
+      visitas_anuladas: revertidas, gps_revertido: gpsRevertido, gps_aprendido: aprendio, visita: visita };
   } finally {
     lock.releaseLock();
   }
@@ -1123,7 +1351,7 @@ function accionPedidos_(p, ses) {
     if (p.conciliados) {
       if (String(x.cobro) === 'conciliado' && String(x.conciliado_at) >= desde) return true;
       return pagos.some(function (pg) {
-        return String(pg.pedido_id) === String(x.id) && String(pg.estado) === 'conciliado' && (String(pg.conciliado_at) >= desde || String(pg.comision_estado) !== 'pagada');
+        return String(pg.pedido_id) === String(x.id) && String(pg.estado) === 'conciliado' && (String(pg.conciliado_at) >= desde || (dias >= 180 && String(pg.comision_estado) !== 'pagada'));
       });
     }
     if (estados.length && estados.indexOf(String(x.estado)) === -1) return false;
@@ -1275,10 +1503,12 @@ function accionCobro_(p, ses) {
         registrado_por: ses.nombre, registrado_por_id: ses.id,
         moneda: moneda, monto: monto, tasa: conv.tasa || '', monto_usd: conv.usd,
         referencia: referencia, tipo_pago_real: String(ped.tipo_pago_real || ''),
-        estado: 'reportado', conciliado_at: '', conciliado_por: '', motivo: ''
+        estado: 'reportado', conciliado_at: '', conciliado_por: '', motivo: '',
+        canal_cobro: canalValido_(p.canal_cobro) ? String(p.canal_cobro) : ''
       };
       agregar_('Pagos', nuevoPago);
       todosPagos.push(nuevoPago);
+      visitaDeCobro_(ped, nuevoPago, p, ses);
       recalcularCobro_(ped, todosPagos);
       var totalReq = totalCobrar_(ped);
       var completo = totalReq <= 0 || (ped.pagado_usd + toleranciaCobro_(totalReq) >= totalReq);
@@ -1327,10 +1557,12 @@ function accionCobro_(p, ses) {
           registrado_por: ped.cobrado_por || ses.nombre, registrado_por_id: ses.id,
           moneda: String(ped.moneda), monto: Number(ped.monto), tasa: convD.tasa || '', monto_usd: convD.usd,
           referencia: referencia, tipo_pago_real: String(ped.tipo_pago_real || ''),
-          estado: 'conciliado', conciliado_at: t, conciliado_por: ses.nombre, motivo: ''
+          estado: 'conciliado', conciliado_at: t, conciliado_por: ses.nombre, motivo: '',
+          canal_cobro: canalValido_(p.canal_cobro) ? String(p.canal_cobro) : ''
         };
         agregar_('Pagos', pagoDir);
         todosPagos.push(pagoDir);
+        visitaDeCobro_(ped, pagoDir, p, ses);
         if (!cobro) { ped.cobrado_at = t; ped.cobrado_por = ses.nombre; }
       }
       if (String(ped.ajuste_estado) === 'propuesto') ped.ajuste_estado = 'aprobado';
@@ -1374,6 +1606,18 @@ function accionCobro_(p, ses) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/* Cobro con canal: queda la visita (en persona aprende el GPS si el cliente no tenía; online no lo toca) */
+function visitaDeCobro_(ped, pago, p, ses) {
+  if (!canalValido_(pago.canal_cobro)) return null;
+  var c = leer_('Clientes').filter(function (x) { return String(x.id) === String(ped.cliente_id); })[0];
+  if (!c) return null;
+  var enPersona = pago.canal_cobro === 'en_persona';
+  var fix = enPersona && gpsValido_(p.gps_lat, p.gps_lng) ? { lat: numeroGps_(p.gps_lat, -90, 90), lng: numeroGps_(p.gps_lng, -180, 180) } : null;
+  var aprendio = fix ? aprenderGpsCliente_(c, fix) : false;
+  return agregarVisita_({ cliente: c, ses: ses, canal: pago.canal_cobro, tipo: 'cobro', pedido_id: ped.id, pago_id: pago.id,
+    fix: fix, distancia_m: enPersona ? p.gps_dist_m : '', gps_aprendido: aprendio });
 }
 
 /* -------------------- Comisiones de vendedores -------------------- */
@@ -1850,9 +2094,29 @@ function telWhatsapp_(t) {
   return d.length === 10 ? '58' + d : '';
 }
 
-function accionVendedores_() {
-  var lista = leer_('Usuarios').filter(function (u) { return rolesDe_(u.rol).indexOf('vendedor') !== -1 && activo_(u); })
-    .map(function (u) { return { id: String(u.id), nombre: String(u.nombre), whatsapp: telWhatsapp_(u.telefono) }; });
+function accionVendedores_(p) {
+  var catFiltro = String((p && p.catalogo) || '').trim().toLowerCase();
+  var rutaFiltro = rutaCanon_(p && (p.ruta || p.zona));
+  var lista = leer_('Usuarios')
+    .filter(function (u) { return rolesDe_(u.rol).indexOf('vendedor') !== -1 && activo_(u); })
+    .map(function (u) {
+      return {
+        id: String(u.id),
+        usuario: String(u.usuario || ''),
+        nombre: String(u.nombre),
+        whatsapp: telWhatsapp_(u.telefono),
+        catalogo: catalogoUsuario_(u.catalogo),
+        rutas: rutasUsuario_(u.rutas)
+      };
+    })
+    .filter(function (u) {
+      if (catFiltro !== 'skala' && catFiltro !== 'distribuidora') return true;
+      return u.catalogo === catFiltro || u.catalogo === 'ambos';
+    })
+    .filter(function (u) {
+      if (!rutaFiltro) return true;
+      return !u.rutas.length || u.rutas.indexOf(rutaFiltro) !== -1;
+    });
   lista.sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
   return { ok: true, vendedores: lista };
 }
@@ -1876,7 +2140,9 @@ function accionBuscarClienteWeb_(p) {
   if (!c) return { ok: true, cliente: null };
   // el teléfono solo se devuelve si lo escribió él (búsqueda por teléfono)
   return { ok: true, cliente: { id: String(c.id), negocio: String(c.nombre), contacto: String(c.contacto), direccion: String(c.direccion),
-    rif_cedula: String(c.rif_cedula), telefono: porTel ? String(c.telefono) : '', ubicacion: c.latitud !== '' && c.longitud !== '' } };
+    rif_cedula: String(c.rif_cedula), telefono: porTel ? String(c.telefono) : '', ubicacion: c.latitud !== '' && c.longitud !== '',
+    ruta: normalizarRuta_(c.ruta, c.nombre, c.direccion),
+    vendedor_id: String(c.vendedor_id || '') } };
 }
 
 function accionPedidoWeb_(p) {
@@ -2043,6 +2309,7 @@ function accionSincronizar_(p, ses) {
   }
   return { ok: true, fecha: ahora_(), usuario: ses, catalogo: { productos: cat.productos, pagos: cat.pagos, cajas_mayor: cat.cajas_mayor, actualizado: cat.actualizado },
     clientes: clientes, pedidos: lista, pedidos_web: toma ? accionPedidosWeb_({}, ses).pedidos : [],
+    visitas: toma ? accionVisitas_({ dias: 7 }, ses).visitas : [],
     despachadores: esGestion_(ses) ? accionDespachadores_().despachadores : [], config: leerConfig_() };
 }
 
@@ -2074,8 +2341,17 @@ function accionResumen_(p, ses) {
     pr.cajas += Number(it.cajas) || 0;
   });
   var orden = function (a, b) { return b.cajas - a.cajas; };
+  // Visitas / atenciones del período por canal (en persona vs. online / teléfono)
+  var desdeDia = desde.slice(0, 10);
+  var porCanal = { en_persona: 0, online_telefono: 0 };
+  leer_('Visitas').forEach(function (v) {
+    if (v.anulada === true || String(v.anulada) === 'true' || String(v.fecha) < desdeDia) return;
+    if (!esGestion_(ses) && String(v.vendedor_id) !== ses.id) return;
+    if (porCanal[v.canal] !== undefined) porCanal[v.canal]++;
+  });
   return {
     ok: true, dias: dias, total_pedidos: pedidos.length, total_cajas: cajas, por_estado: porEstado,
+    visitas_por_canal: porCanal,
     por_vendedor: esGestion_(ses) ? Object.keys(porVendedor).map(function (k) { return porVendedor[k]; }).sort(orden) : [],
     por_producto: Object.keys(porProducto).map(function (k) { return porProducto[k]; }).sort(orden).slice(0, 10)
   };
@@ -2088,6 +2364,8 @@ function accionUsuarios_() {
     o.activo = activo_(u);
     o.tiene_pin = !!u.pin_hash;
     o.telefono = String(u.telefono || '');
+    o.catalogo = catalogoUsuario_(u.catalogo);
+    o.rutas = rutasUsuario_(u.rutas);
     return o;
   });
   return { ok: true, usuarios: lista };
@@ -2120,8 +2398,10 @@ function guardarUsuario_(d, ses) {
   if (!existente && !pin) throw new Error('Asigná una clave al usuario nuevo.');
   if (existente && esMaster && !eraMaster(existente) && !pin) throw new Error('Para pasar a Master asigná una clave nueva de al menos 8 caracteres.');
 
-  var u = existente || { id: 'U' + String(usuarios.reduce(function (m, x) { return Math.max(m, Number(String(x.id).replace(/\D/g, '')) || 0); }, 0) + 1), created_at: ahora_() };
+  var u = existente || { id: 'U' + String(usuarios.reduce(function (m, x) { return Math.max(m, Number(String(x.id).replace(/\D/g, '')) || 0); }, 0) + 1), created_at: ahora_(), catalogo: 'ambos', rutas: '' };
   u.usuario = usuario; u.nombre = nombre; u.rol = roles.join(', '); u.activo = activo;
+  u.catalogo = d.catalogo !== undefined ? catalogoUsuario_(d.catalogo) : catalogoUsuario_(u.catalogo);
+  u.rutas = rutasUsuario_(d.rutas !== undefined ? d.rutas : u.rutas).join(', ');
   if (d.telefono !== undefined) {
     var telU = txt_(d.telefono, 30);
     if (telU && soloDigitos_(telU).length < 7) throw new Error('Revisá el teléfono (WhatsApp) del usuario.');
@@ -2135,11 +2415,29 @@ function guardarUsuario_(d, ses) {
 function accionGuardarUsuario_(p, ses) {
   try {
     var u = guardarUsuario_(p, ses);
-    var o = usuarioPublico_(u); o.activo = activo_(u);
+    var o = usuarioPublico_(u);
+    o.activo = activo_(u);
+    o.catalogo = catalogoUsuario_(u.catalogo);
+    o.rutas = rutasUsuario_(u.rutas);
     return { ok: true, usuario: o };
   } catch (err) {
     return { ok: false, error: err.message, code: 'usuario' };
   }
+}
+
+function accionGuardarMisRutas_(p, ses) {
+  var rutas = rutasUsuario_(p.rutas);
+  if (!rutas.length) return { ok: false, error: 'Marcá al menos una ruta que atendés.', code: 'rutas' };
+  var targetId = esGestion_(ses) && p.id ? String(p.id) : String(ses.id);
+  var u = leer_('Usuarios').filter(function (x) { return String(x.id) === targetId; })[0];
+  if (!u) return { ok: false, error: 'Usuario no encontrado.', code: 'not_found' };
+  u.rutas = rutas.join(', ');
+  actualizar_('Usuarios', u._fila, u);
+  var o = usuarioPublico_(u);
+  o.activo = activo_(u);
+  o.catalogo = catalogoUsuario_(u.catalogo);
+  o.rutas = rutasUsuario_(u.rutas);
+  return { ok: true, rutas: rutas, usuario: o };
 }
 
 /* -------------------- Menú dentro de la hoja -------------------- */
@@ -2148,7 +2446,60 @@ function onOpen() {
     .addItem('1. Preparar hojas', 'prepararHojas')
     .addItem('2. Crear usuario', 'menuCrearUsuario')
     .addItem('3. Cambiar clave', 'menuCambiarPin')
+    .addSeparator()
+    .addItem('4. Copiar datos a Supabase (sin borrar nada)', 'menuMigrarSupabase')
     .addToUi();
+}
+
+/* Exporta todas las hojas en modo SOLO LECTURA (sin modificar ni borrar nada de Google Sheets)
+   para copiarlas íntegramente a Supabase. */
+function armarSnapshotBackup_() {
+  var datos = { crm_secret: secreto_() };
+  Object.keys(HOJAS).forEach(function (nombre) {
+    datos[nombre] = leer_(nombre).map(function (fila) {
+      var limpio = {};
+      HOJAS[nombre].forEach(function (col) {
+        limpio[col] = fila[col] === undefined || fila[col] === null ? '' : String(fila[col]);
+      });
+      return limpio;
+    });
+  });
+  return datos;
+}
+
+function accionExportarBackup_(p, ses) {
+  return { ok: true, fecha: ahora_(), backup: armarSnapshotBackup_() };
+}
+
+function menuMigrarSupabase() {
+  var ui = SpreadsheetApp.getUi();
+  var pedir = function (t, m) { var r = ui.prompt(t, m, ui.ButtonSet.OK_CANCEL); return r.getSelectedButton() === ui.Button.OK ? r.getResponseText().trim() : null; };
+  var url = pedir('Copiar datos a Supabase (1/2)', 'Pegá la URL de tu proyecto Supabase (ej. https://xxxx.supabase.co):');
+  if (!url) return;
+  url = url.replace(/\/+$/, '');
+  var key = pedir('Copiar datos a Supabase (2/2)', 'Pegá la clave pública de Supabase: "publishable" (sb_publishable_...) o "anon" (eyJ...). Project Settings -> API Keys:');
+  if (!key) return;
+  try {
+    var payload = armarSnapshotBackup_();
+    // Las claves nuevas (sb_...) no son JWT: van solo en "apikey". La anon legacy (eyJ...) también como Bearer.
+    var cabeceras = { apikey: key };
+    if (/^eyJ/.test(key)) cabeceras.Authorization = 'Bearer ' + key;
+    var res = UrlFetchApp.fetch(url + '/rest/v1/rpc/skala_importar', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: cabeceras,
+      payload: JSON.stringify({ payload: payload }),
+      muteHttpExceptions: true
+    });
+    var j = JSON.parse(res.getContentText() || '{}');
+    if (res.getResponseCode() >= 200 && res.getResponseCode() < 300 && j.ok) {
+      ui.alert('✅ Datos copiados a Supabase con éxito (tu hoja de Google Sheets sigue intacta):\n' + JSON.stringify(j.importados, null, 2));
+    } else {
+      ui.alert('No se pudo importar: ' + (j.error || j.message || res.getContentText()));
+    }
+  } catch (err) {
+    ui.alert('Error de conexión: ' + err.message);
+  }
 }
 
 /* Crea las hojas y migra la hoja "Vendedores" de la v1 (si existe). */
