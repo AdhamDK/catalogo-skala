@@ -1,7 +1,7 @@
 /* Distribuciones Ontiveros — service worker
    - Guarda la app del equipo para que abra rápido y sin señal.
    - Nunca guarda las llamadas al CRM: esas siempre van a la red. */
-const VERSION = "dist-ontiveros-v41";
+const VERSION = "dist-ontiveros-v44";
 const BASICOS = [
   "panel.html",
   "manifest.webmanifest",

@@ -486,7 +486,8 @@ test("Catálogo Distribuidora: tarjetas con cabecera estilo Skala CRM (.card-top
   assert.match(htmlDist, /<p class="eyebrow" id="fragModalMarca" hidden>/);
   assert.match(htmlDist, /<h3 id="fragModalTitle">Detergente Alive 1kg<\/h3>/);
   assert.match(htmlDist, /<p class="modal-sub" id="fragModalSub" hidden><\/p>/);
-  assert.match(htmlDist, /<div class="frag-toolbar" hidden>/);
+  assert.match(htmlDist, /<div class="frag-toolbar" id="fragToolbar">/);
+  assert.match(htmlDist, /<div class="frag-precios-chips" id="fragPreciosInfo" hidden><\/div>/);
   assert.match(htmlDist, /<p class="frag-hint-banner" id="fragHintBanner" hidden>/);
   assert.match(htmlDist, /<button type="button" class="btn btn-ghost" id="btnLimpiarGrupo">Limpiar<\/button>/);
   assert.match(htmlDist, /<button type="button" class="btn btn-ghost" id="btnIrPedidoDesdeFrag" hidden>Ver pedido<\/button>/);
@@ -800,4 +801,122 @@ test("13. Presentaciones exactas (Aliclean 350/750, Alident 100g/75g, Dorco, Har
   ]) {
     assert.equal(idsPrecios.includes(idEsperado), true, `En #/precios aparece renglón directo para ajustar precio de ${idEsperado}`);
   }
+});
+
+test("14. Selección por Caja y por Unidad / Blíster en #fragModal y Panel (#/nuevo)", () => {
+  const htmlDist = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  const cssDist = fs.readFileSync(path.join(ROOT, "css", "styles.css"), "utf8");
+  const mainDist = fs.readFileSync(path.join(ROOT, "js", "main-distribuidora.js"), "utf8");
+  const panelDist = fs.readFileSync(path.join(ROOT, "js", "panel.js"), "utf8");
+
+  // 1) #fragToolbar y #fragModoSwitch NO están ocultos por CSS forzado en #fragModal
+  assert.doesNotMatch(
+    cssDist,
+    /\.modal-fragancias\s+\.frag-toolbar\s*,/,
+    ".frag-toolbar no debe estar forzado a display:none en #fragModal"
+  );
+  assert.match(htmlDist, /<div class="frag-toolbar" id="fragToolbar">/);
+  assert.match(htmlDist, /id="fragModoSwitch"/);
+  assert.match(htmlDist, /id="btnModoCaja"/);
+  assert.match(htmlDist, /id="btnModoUnidad"/);
+
+  // 2) Evaluar renderFragModalContent en modo "caja" y modo "unidad"
+  const matchRenderFrag = mainDist.match(/function renderFragModalContent\(\) \{[\s\S]*?\n\}/);
+  assert.ok(matchRenderFrag, "Existe renderFragModalContent en main-distribuidora.js");
+
+  const det1kg = GRUPOS_DISTRIBUIDORA.find((g) => g.id === "GRP-ALV-DET-1KG");
+  const mockFragGrid = { innerHTML: "", className: "" };
+  const mockSummary = { innerHTML: "" };
+  const mockHint = { hidden: true, innerHTML: "" };
+  const mockElements = {
+    fragGrid: mockFragGrid,
+    fragSummaryText: mockSummary,
+    fragHintBanner: mockHint,
+  };
+  const stateSim = {
+    grupoActivoId: "GRP-ALV-DET-1KG",
+    modoVentaActual: "caja",
+    cart: {},
+  };
+
+  const fragCtx = {
+    state: stateSim,
+    GRUPOS_DISTRIBUIDORA,
+    MIN_UNIDADES_SUELTAS: 6,
+    document: {
+      getElementById: (id) => mockElements[id] || null,
+    },
+    escapeHtml: (s) => String(s ?? ""),
+    formatUSD: (n) => "$" + Number(n || 0).toFixed(2),
+    esTarifaMayor: () => false,
+    cfgGrupo: () => ({
+      permiteUnidad: true,
+      soloUnidad: false,
+      precioMenor: det1kg.precioMenor,
+      precioMayor: det1kg.precioMayor,
+      precioUnidad: det1kg.precioUnidad,
+    }),
+    getItemQty: (code) => stateSim.cart[code] || { cajas: 0, unidades: 0 },
+    precioVariante: (code) => {
+      const v = det1kg.variantes.find((x) => x.code === code) || det1kg.variantes[0];
+      return {
+        precioMenor: v.precioMenor ?? det1kg.precioMenor,
+        precioMayor: v.precioMayor ?? det1kg.precioMayor,
+        precioUnidad: v.precioUnidad ?? det1kg.precioUnidad,
+      };
+    },
+    esVarianteAgotada: (code) => code === "ALV-DET1K-02",
+    actualizarPieFragModal: () => {},
+  };
+  vm.createContext(fragCtx);
+  vm.runInContext(matchRenderFrag[0] + "\nthis.renderFragModalContent = renderFragModalContent;", fragCtx);
+
+  // En modo caja muestra referencia de precio por caja y también precio por unidad
+  fragCtx.renderFragModalContent();
+  assert.match(mockFragGrid.innerHTML, /\$16\.80 \/ cj · Mayor: \$15\.60 · Und: \$1\.45/);
+
+  // La variante agotada (ALV-DET1K-02) queda al final en gris con etiqueta "Agotado"
+  const ordenCodigos = [...mockFragGrid.innerHTML.matchAll(/data-frag-row="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(ordenCodigos[ordenCodigos.length - 1], "ALV-DET1K-02", "La variante sin existencias queda al final de #fragGrid");
+  assert.match(mockFragGrid.innerHTML, /class="frag-card\s+sin-stock agotado"[^>]*data-frag-row="ALV-DET1K-02"/);
+
+  // Al cambiar a modo unidad muestra precio por unidad ($1.45 / und), botones rápidos (+6, 12, 24) y controles de cantidad
+  stateSim.modoVentaActual = "unidad";
+  stateSim.cart["ALV-DET1K-01"] = { cajas: 0, unidades: 6 };
+  fragCtx.renderFragModalContent();
+  assert.match(mockFragGrid.innerHTML, /\$1\.45 \/ und · Caja: \$16\.80/);
+  assert.match(mockFragGrid.innerHTML, /data-quick-und="6"/);
+  assert.match(mockFragGrid.innerHTML, /data-quick-und="12"/);
+  assert.match(mockFragGrid.innerHTML, /data-quick-und="24"/);
+  assert.match(mockFragGrid.innerHTML, /✓ 6 und/);
+
+  // 3) En panel.js (#/nuevo), permiteUnidades está activo por defecto en el catálogo de Distribuidora
+  assert.match(panelDist, /const permiteUnidades = esDist\s*\|\|/);
+});
+
+test("15. Paridad visual del catálogo en Panel (#/nuevo) y productos sin existencias al final en gris", () => {
+  const panelDist = fs.readFileSync(path.join(ROOT, "js", "panel.js"), "utf8");
+  const panelCss = fs.readFileSync(path.join(ROOT, "css", "panel.css"), "utf8");
+
+  // 1) Las tarjetas de #/nuevo usan la misma estructura visual que el catálogo principal (.pcard-top, .pcard-img-wrap 4:3, .pcard-body, .pcard-qty)
+  assert.match(panelDist, /<div class="pcard-top">/);
+  assert.match(panelDist, /<strong class="pcard-title">\$\{esc\(p\.name\)\}<\/strong>/);
+  assert.match(panelDist, /<div class="pcard-top-right">/);
+  assert.match(panelDist, /<span class="pcard-pack-chip">/);
+  assert.match(panelDist, /<div class="pcard-img-wrap">/);
+  assert.match(panelDist, /<div class="pcard-body">/);
+
+  // 2) En panel.js, los productos sin existencias (.sin-stock / .agotado) se ordenan al final de #nLista preservando data-idx
+  assert.match(panelDist, /const agA = a\.classList\.contains\("sin-stock"\) \? 1 : 0;/);
+  assert.match(panelDist, /const agB = b\.classList\.contains\("sin-stock"\) \? 1 : 0;/);
+  assert.match(panelDist, /return \(Number\(a\.dataset\.idx\) \|\| 0\) - \(Number\(b\.dataset\.idx\) \|\| 0\);/);
+
+  // 3) En panel.css, las tarjetas .pcard.sin-stock / .pcard.agotado tienen order: 1, filtro gris (grayscale(1)) y badge gris (#6b6760)
+  assert.match(panelCss, /\.pcard\.sin-stock[\s\S]*?order:\s*1/);
+  assert.match(panelCss, /filter:\s*grayscale\(1\)/);
+  assert.match(panelCss, /#6b6760/);
+
+  // 4) El catálogo principal no muestra el engranaje de configuración (#btnConfigUnidades), solo se ajusta desde el Panel (#/inventario)
+  const htmlDist = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  assert.doesNotMatch(htmlDist, /id="btnConfigUnidades"/);
 });

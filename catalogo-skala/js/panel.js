@@ -1097,7 +1097,10 @@
     const esDist = typeof GRUPOS_DISTRIBUIDORA !== "undefined" && Array.isArray(GRUPOS_DISTRIBUIDORA);
     const productos = [...BANOS.map((p) => ({ ...p, tipo: p.tipo || "banos", grupo: p.grupoNombre || "Baño de crema 1 kg" })), ...KITS.map((p) => ({ ...p, tipo: "kits", grupo: "Kit shampoo + acond." }))];
     const cfgGrupos = leerConfigGrupos();
-    const permiteUnidades = Object.values(cfgGrupos).some((g) => g && g.permite_unidad) || Object.values(leerModalidadVentaMap()).some((m) => m === "unidad" || m === "ambos");
+    const permiteUnidades = esDist
+      || Object.values(cfgGrupos).some((g) => g && g.permite_unidad)
+      || Object.values(leerModalidadVentaMap()).some((m) => m === "unidad" || m === "ambos")
+      || productos.some((p) => modoVentaProducto(p.code) !== "caja");
     if (!permiteUnidades) modoVentaNuevo = "caja";
     let precios = {};
     const pestanasFiltroNuevo = esDist
@@ -1143,19 +1146,24 @@
         `<button type="button" class="tab${k === filtroNuevo ? " active" : ""}" data-f="${k}">${t}</button>`).join("")}</div>
       <p class="nota-chica nivel-aviso" id="nNivel" aria-live="polite"></p>
       <div class="progreso-mayor" id="nProgresoMayor"><div class="progreso-mayor-fill" id="nProgresoFill"></div></div>
-      <ul class="grilla-prod grilla-catalogo-principal" id="nLista">${productos.map((p) => `
-        <li class="pcard pcard-catalogo" data-code="${p.code}" data-tipo="${p.tipo}" data-linea="${esc(p.line || "")}" data-marca="${esc(p.marca || "")}" data-texto="${esc((p.name + " " + p.code + " " + (p.line || "") + " " + (p.marca || "") + " " + (p.benefit || "")).toLowerCase())}">
+      <ul class="grilla-prod grilla-catalogo-principal" id="nLista">${productos.map((p, idx) => `
+        <li class="pcard pcard-catalogo" data-idx="${idx}" data-code="${p.code}" data-tipo="${p.tipo}" data-linea="${esc(p.line || "")}" data-marca="${esc(p.marca || "")}" data-texto="${esc((p.name + " " + p.code + " " + (p.line || "") + " " + (p.marca || "") + " " + (p.benefit || "") + " " + (p.hair || "")).toLowerCase())}">
           <button type="button" class="pcard-tap" data-act="plus" aria-label="Sumar una caja de ${esc(p.name)}">
+            <div class="pcard-top">
+              <strong class="pcard-title">${esc(p.name)}</strong>
+              <div class="pcard-top-right">
+                <span class="pcard-line">${esc(p.line || p.grupo)}</span>
+                ${!esDist && p.hair ? `<span class="hair-icons">${iconosCabelloHTML(p.hair)}</span>` : `<span class="pcard-pack-chip">${esc(textoUnidadesCorto(p) || textoUnidades(p))}</span>`}
+              </div>
+            </div>
             <div class="pcard-img-wrap">
-              ${fotoHTML(p.code, { ancho: 260, alto: 206 })}
+              ${fotoHTML(p.code, { ancho: 400, alto: 300, grande: true })}
               <span class="pcard-stock" data-stock></span>
             </div>
-            <span class="pcard-line">${esc(p.line || p.grupo)}</span>
-            <strong>${esc(p.name)}</strong>
-            ${p.benefit ? `<span class="pcard-benefit">${esc(p.benefit)}</span>` : ""}
-            <span class="pcard-meta">${!esDist && p.hair ? `<span class="pcard-hair">${esc(p.hair)} ${iconosCabelloHTML(p.hair)}</span> · ` : ""}${esc(textoUnidades(p))}</span>
-            <span class="pcard-sub">Ref. ${p.code} · ${esc(textoUnidades(p))}</span>
-            <span class="pcard-precio" data-precio></span>
+            <div class="pcard-body">
+              <span class="pcard-precio" data-precio></span>
+              <span class="pcard-sub">Ref. ${p.code} · ${esc(textoUnidadesCorto(p) || textoUnidades(p))}</span>
+            </div>
           </button>
           <b class="pcard-n" aria-hidden="true"></b>
           <div class="pcard-qty">
@@ -1188,15 +1196,32 @@
         li.querySelector(".pcard-n").textContent = q ? String(q) : "";
         const pr = precios[code];
         const [it] = conPrecios([{ code, cajas: q }], precios, nivel);
-        li.querySelector("[data-precio]").textContent = pr && it.precio ? `${dinero(it.precio)} / caja` : "";
-        const st = textoStock(pr);
-        const tope = topeStock(pr);
+        const usaUndCard = modoVentaNuevo === "unidad" && pr && Number(pr.precio_unidad) > 0 && modoVentaProducto(code) !== "caja";
+        li.querySelector("[data-precio]").innerHTML = usaUndCard
+          ? `<strong>${dinero(pr.precio_unidad)}</strong> / und · ${dinero(it.precio)} / caja`
+          : (pr && it.precio ? `<strong>${dinero(it.precio)}</strong> / caja` : "");
+        const tope = (pr && pr.agotado) ? 0 : topeStock(pr);
+        const agotado = tope <= 0 && !q;
+        const st = textoStock(pr) || (tope <= 0 ? "Agotado" : "");
         const sp = li.querySelector("[data-stock]");
-        sp.textContent = st; sp.classList.toggle("agotado", st === "Agotado");
-        li.classList.toggle("sin-stock", tope <= 0 && !q);
+        sp.textContent = st;
+        sp.classList.toggle("agotado", st === "Agotado" || agotado);
+        li.classList.toggle("sin-stock", agotado);
+        li.classList.toggle("agotado", agotado);
+        inp.disabled = agotado;
         li.querySelectorAll('[data-act="plus"]').forEach((b) => { b.disabled = q >= tope; });
         if (q) { prods++; monto += q * it.precio; if (!it.precio) faltaPrecio = true; }
       });
+      const actuales = [...lista.querySelectorAll(".pcard")];
+      const ordenadas = [...actuales].sort((a, b) => {
+        const agA = a.classList.contains("sin-stock") ? 1 : 0;
+        const agB = b.classList.contains("sin-stock") ? 1 : 0;
+        if (agA !== agB) return agA - agB;
+        return (Number(a.dataset.idx) || 0) - (Number(b.dataset.idx) || 0);
+      });
+      if (ordenadas.some((el, i) => el !== actuales[i])) {
+        ordenadas.forEach((el) => lista.appendChild(el));
+      }
       $("nTotal").textContent = `${total} caja${total === 1 ? "" : "s"}${monto ? " · " + dinero(monto) : ""}`;
       $("nDetalle").textContent = prods ? ` · ${prods} producto${prods === 1 ? "" : "s"}${faltaPrecio ? " · hay productos sin precio" : ""}` : " · tocá un producto para sumarlo";
       $("nNivel").textContent = !total ? `Precio al por menor; desde ${CAJAS_MAYOR} cajas, precio al mayor.`
@@ -1235,7 +1260,8 @@
     };
     const fijar = (code, n) => {
       const c = carrito();
-      const tope = topeStock(precios[code]);
+      const pr = precios[code];
+      const tope = (pr && pr.agotado) ? 0 : topeStock(pr);
       n = Math.max(0, Math.min(9999, Math.floor(Number(n) || 0)));
       if (n > tope) { n = tope; toast(tope ? `Solo hay ${tope} caja${tope === 1 ? "" : "s"} de ${(allProductsMap()[code] || {}).name || code}.` : "Producto agotado."); }
       if (n) c[code] = n; else delete c[code];
@@ -1272,6 +1298,7 @@
         if (!btn) return;
         modoVentaNuevo = btn.dataset.modoU === "unidad" ? "unidad" : "caja";
         elModoU.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === btn));
+        pintar();
         toast(modoVentaNuevo === "unidad" ? "Modo Por Unidad activo: empieza en 6 unidades por defecto" : "Modo Por Caja activo");
       });
     }
@@ -3494,8 +3521,8 @@
       </div>
       <div class="periodos" id="xFiltros">${[["elegidos", "En el pedido"], ["todos", "Agregar"], ["banos", "Baños"], ["kits", "Kits"]].map(([k, t]) =>
         `<button type="button" class="tab${k === filtroEditar ? " active" : ""}" data-f="${k}">${t}</button>`).join("")}</div>
-      <ul class="grilla-prod" id="xLista">${productos.map((x) => `
-        <li class="pcard" data-code="${x.code}" data-tipo="${x.tipo}" data-texto="${esc((x.name + " " + x.code + " " + x.line).toLowerCase())}">
+      <ul class="grilla-prod" id="xLista">${productos.map((x, idx) => `
+        <li class="pcard" data-idx="${idx}" data-code="${x.code}" data-tipo="${x.tipo}" data-texto="${esc((x.name + " " + x.code + " " + x.line).toLowerCase())}">
           <button type="button" class="pcard-tap" data-act="plus" aria-label="Sumar una caja de ${esc(x.name)}">
             ${fotoHTML(x.code, { ancho: 64, alto: 51 })}
             <strong>${esc(x.name)}</strong>
@@ -3586,11 +3613,26 @@
         if (document.activeElement !== inp) inp.value = q;
         li.classList.toggle("elegido", q > 0);
         li.querySelector(".pcard-n").textContent = q ? String(q) : "";
+        const pr = precios[code];
+        const tope = (pr && pr.agotado) ? 0 : topeStock(pr);
+        const agotado = tope <= 0 && !q;
+        li.classList.toggle("sin-stock", agotado);
+        li.classList.toggle("agotado", agotado);
         const f = fijo(code);
         const it = f ? { ...f, cajas: 1 } : conPrecios([{ code, cajas: 1 }], precios, nivel)[0];
         const u = precioUnitario(it, pagoSel());
         li.querySelector("[data-precio]").textContent = u ? `${dinero(u)} / caja` : "";
       });
+      const actuales = [...lista.querySelectorAll(".pcard")];
+      const ordenadas = [...actuales].sort((a, b) => {
+        const agA = a.classList.contains("sin-stock") ? 1 : 0;
+        const agB = b.classList.contains("sin-stock") ? 1 : 0;
+        if (agA !== agB) return agA - agB;
+        return (Number(a.dataset.idx) || 0) - (Number(b.dataset.idx) || 0);
+      });
+      if (ordenadas.some((el, i) => el !== actuales[i])) {
+        ordenadas.forEach((el) => lista.appendChild(el));
+      }
       const n = Object.values(cant).filter((x) => x > 0).length;
       $("xTotal").textContent = `${t} caja${t === 1 ? "" : "s"}${monto ? " · " + dinero(monto) : ""}`;
       $("xDetalle").textContent = ` · ${n} producto${n === 1 ? "" : "s"}`;

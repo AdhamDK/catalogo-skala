@@ -1846,96 +1846,275 @@ html[data-tema="oscuro"] .cat-hero-panel {
   border-radius: 18px;
   box-shadow: 0 4px 14px rgba(17, 32, 48, 0.06);
 }
+.grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .pcard-tap {
+  padding: 0;
+  gap: 0;
+  align-items: stretch;
+}
+.pcard-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 9px 11px 8px;
+  background: linear-gradient(180deg, rgba(0, 71, 171, 0.04) 0%, rgba(255, 255, 255, 0) 100%);
+  border-bottom: 1px solid var(--borde-suave);
+}
+html[data-tema="oscuro"] .pcard-top {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 100%);
+}
+.pcard-title {
+  margin: 0;
+  font-family: "Baloo 2", sans-serif;
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1.18;
+  color: var(--tinta);
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pcard-top-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.pcard-line {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--verde-suave);
+  color: var(--verde-osc);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+  white-space: nowrap;
+  margin: 0;
+}
+html[data-tema="oscuro"] .pcard-line {
+  color: #b9e08e;
+}
+.pcard-pack-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--crema-2);
+  color: var(--tinta-suave);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+.pcard-top .hair-icons,
+.pcard-hair .hair-icons {
+  display: inline-flex;
+  gap: 2px;
+}
+.pcard-top .hair-icon,
+.pcard-hair .hair-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 0.58rem;
+  color: #fff;
+}
+.hair-icon.hair-liso { background: var(--verde); }
+.hair-icon.hair-ondulado { background: var(--naranja, #f5822a); }
+.hair-icon.hair-cacheado { background: var(--rosa); }
+.hair-icon.hair-crespo { background: #b37fe0; }
 .grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .pcard-img-wrap {
   position: relative;
   width: 100%;
-  background: #f0f6fc;
-  border-radius: 12px;
-  padding: 8px 6px;
-  margin-bottom: 6px;
+  aspect-ratio: 4 / 3;
+  background: #ffffff;
+  background-color: #ffffff;
+  border-radius: 0;
+  border-bottom: 1px solid var(--borde-suave);
+  padding: 6px;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
 }
 html[data-tema="oscuro"] .grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .pcard-img-wrap {
-  background: #1e2f44;
+  background: #ffffff;
 }
 .grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo img {
-  height: 112px;
+  width: 100%;
+  height: 100%;
+  max-height: 126px;
+  object-fit: contain;
+  border-radius: 0;
   margin-bottom: 0;
+  background: #ffffff;
 }
 .grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .pcard-stock {
   position: absolute;
   top: 6px;
   left: 6px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  font-size: 0.68rem;
-  font-weight: 700;
-}
-html[data-tema="oscuro"] .grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .pcard-stock {
-  background: rgba(23, 22, 20, 0.88);
-}
-.pcard-line {
-  display: inline-block;
+  z-index: 2;
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--verde-suave);
-  color: var(--verde-osc);
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--borde-suave);
   font-size: 0.68rem;
   font-weight: 800;
-  margin-bottom: 3px;
+  color: var(--verde-osc);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
-html[data-tema="oscuro"] .pcard-line {
-  color: #b9e08e;
+.pcard-stock:empty {
+  display: none;
 }
-.pcard-benefit {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  font-size: 0.75rem;
-  color: var(--tinta-suave);
-  line-height: 1.25;
-  margin: 2px 0;
+html[data-tema="oscuro"] .grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .pcard-stock {
+  background: rgba(23, 22, 20, 0.9);
+  color: var(--verde-claro);
 }
-.pcard-meta {
-  font-size: 0.72rem;
-  color: var(--tinta-suave);
+.pcard-body {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  margin-top: 2px;
-}
-.pcard-hair {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-weight: 700;
-  color: var(--tinta);
-}
-.pcard-hair .hair-icons {
-  display: inline-flex;
+  justify-content: center;
+  text-align: center;
   gap: 2px;
+  padding: 8px 10px 6px;
+  flex: 1;
 }
-.pcard-hair .hair-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  font-size: 0.58rem;
-  color: #fff;
+.pcard-body .pcard-precio {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--tinta-suave);
+  line-height: 1.2;
 }
-/* Mostrar controles - / + siempre en el catálogo de Nuevo pedido (igual al catálogo principal) */
-.grilla-catalogo-principal .pcard-catalogo .pcard-qty {
+.pcard-body .pcard-precio strong {
+  font-size: 1.02rem;
+  font-weight: 800;
+  color: var(--verde-osc);
+}
+html[data-tema="oscuro"] .pcard-body .pcard-precio strong {
+  color: var(--verde-claro);
+}
+.pcard-body .pcard-sub {
+  font-size: 0.7rem;
+  color: var(--tinta-suave);
+  line-height: 1.2;
+}
+/* Controles - / + en cápsula (igual al catálogo principal) */
+.grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .pcard-qty {
   display: flex;
-  border-top: 1px solid var(--borde-suave);
-  padding-top: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0;
+  margin: 0 8px 8px;
+  padding: 0;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--superficie);
 }
+.grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .qty-btn {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border: 0;
+  border-radius: 0;
+  background: var(--crema-2);
+  color: var(--tinta);
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .qty-input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: var(--superficie);
+  font-weight: 700;
+}
+@media (max-width: 560px) {
+  .grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .pcard-top {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 7px 9px 6px;
+  }
+  .grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .pcard-title {
+    font-size: 0.84rem;
+    line-height: 1.18;
+  }
+  .grilla-catalogo-principal:not(.modo-matriz) .pcard-catalogo .pcard-top-right {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-width: 0;
+    gap: 3px;
+  }
+}
+/* Sin existencias: al final de la grilla y en gris (igual al catálogo principal) */
+.pcard.sin-stock,
+.pcard.agotado {
+  order: 1;
+  opacity: 1;
+  background: var(--crema-2);
+  border-color: var(--borde-suave);
+}
+.pcard.sin-stock .pcard-top,
+.pcard.sin-stock .pcard-img-wrap img,
+.pcard.sin-stock .pcard-title,
+.pcard.sin-stock strong,
+.pcard.sin-stock .pcard-sub,
+.pcard.sin-stock .pcard-precio,
+.pcard.sin-stock .pcard-qty {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.pcard.sin-stock .pcard-stock.agotado,
+.pcard-stock.agotado {
+  background: #6b6760 !important;
+  border-color: #6b6760 !important;
+  color: #ffffff !important;
+  filter: none;
+  opacity: 1;
+}
+.pcard.sin-stock .qty-btn:disabled,
+.pcard.sin-stock .qty-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* Vista Matriz (Lista rápida mayorista) */
+.grilla-prod.modo-matriz .pcard-catalogo .pcard-qty {
+  display: flex;
+}
+.grilla-prod.modo-matriz .pcard-top {
+  grid-column: 2;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.grilla-prod.modo-matriz .pcard-top-right,
 .grilla-prod.modo-matriz .pcard-line,
 .grilla-prod.modo-matriz .pcard-benefit,
 .grilla-prod.modo-matriz .pcard-meta {
   display: none;
+}
+.grilla-prod.modo-matriz .pcard-body {
+  grid-column: 2;
+  padding: 0;
+  align-items: flex-start;
+  text-align: left;
 }
 .grilla-prod.modo-matriz .pcard-img-wrap {
   grid-column: 1;

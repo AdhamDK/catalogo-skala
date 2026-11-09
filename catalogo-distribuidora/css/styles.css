@@ -2079,18 +2079,26 @@ html[data-tema="oscuro"] .card-precio-und {
 .modal-fragancias .frag-head-thumb,
 .modal-fragancias #fragModalMarca,
 .modal-fragancias #fragModalSub,
-.modal-fragancias .frag-toolbar,
+.modal-fragancias #fragPreciosInfo,
 .modal-fragancias #fragHintBanner,
 .modal-fragancias #btnIrPedidoDesdeFrag {
   display: none !important;
 }
+.frag-toolbar[hidden],
+.frag-modo-switch[hidden],
+.modo-toggle-group .modo-btn[hidden] {
+  display: none !important;
+}
 .frag-toolbar {
   display: grid;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 6px;
   border-radius: 14px;
   background: var(--crema);
   border: 1px solid var(--borde);
+}
+.modo-toggle-group:has(> .modo-btn[hidden]) {
+  grid-template-columns: 1fr;
 }
 .frag-precios-chips {
   display: flex;
@@ -4568,4 +4576,32 @@ html[data-tema="oscuro"] .cat-seccion-count {
   font-size: 0.74rem;
   font-weight: 700;
   color: var(--verde-osc);
+}
+
+/* Productos y variantes sin existencias: al final y en gris */
+.card.sin-stock,
+.card.agotado,
+.frag-card.sin-stock,
+.frag-card.agotado {
+  order: 1;
+  background: var(--crema-2);
+  border-color: var(--borde);
+}
+.card.sin-stock .card-top,
+.card.sin-stock .card-img img,
+.card.sin-stock .card-anim-stage,
+.card.sin-stock .card-body,
+.frag-card.sin-stock .frag-card-img-wrap img,
+.frag-card.sin-stock .frag-card-title,
+.frag-card.sin-stock .frag-var-price,
+.frag-card.sin-stock .frag-card-controls {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.card-badge.agotado,
+.frag-card-badge.agotado {
+  background: #6b6760 !important;
+  color: #ffffff !important;
+  filter: none;
+  opacity: 1;
 }

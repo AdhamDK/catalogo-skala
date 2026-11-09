@@ -217,6 +217,26 @@ function precioVariante(code) {
   return cfgGrp;
 }
 
+function esVarianteAgotada(code) {
+  try {
+    const map = allProductsMap();
+    const p = map && map[code];
+    if (p && p.agotado) return true;
+    if (typeof SkalaAPI !== "undefined" && typeof SkalaAPI.preciosMapa === "function") {
+      const m = SkalaAPI.preciosMapa();
+      const pr = m && m[code];
+      if (pr && (pr.agotado || (pr.controlado && Number(pr.disponible) <= 0))) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function esGrupoAgotado(g) {
+  if (!g) return false;
+  if (g.agotado) return true;
+  return Array.isArray(g.variantes) && g.variantes.length > 0 && g.variantes.every((v) => v.agotado || esVarianteAgotada(v.code));
+}
+
 function getItemQty(code) {
   const it = state.cart[code];
   return it ? { cajas: it.cajas || 0, unidades: it.unidades || 0 } : { cajas: 0, unidades: 0 };
@@ -450,13 +470,14 @@ function cardGrupoHTML(g) {
     .filter(Boolean)
     .join("");
 
+  const agotadoGrp = (typeof esGrupoAgotado === "function" ? esGrupoAgotado(g) : !!g.agotado) && !enCarrito;
   return `
-    <article class="card ${enCarrito ? "in-cart elegido" : ""}" data-group-card="${g.id}" data-open-group="${g.id}" style="cursor:pointer" title="Tocá para abrir las ${totalVar} fragancias">
+    <article class="card ${enCarrito ? "in-cart elegido" : ""}${agotadoGrp ? " agotado sin-stock" : ""}" data-group-card="${g.id}" data-open-group="${g.id}" style="cursor:pointer" title="Tocá para abrir las ${totalVar} fragancias">
       <div class="card-top">
         <h3 class="card-name">${escapeHtml(g.nombre)}</h3>
       </div>
       <div class="card-img">
-        <span class="card-badge" data-badge ${enCarrito ? "" : "hidden"}>${escapeHtml(txtBadge)}</span>
+        <span class="card-badge${agotadoGrp ? " agotado" : ""}" data-badge ${enCarrito || agotadoGrp ? "" : "hidden"}>${escapeHtml(agotadoGrp ? "Agotado" : txtBadge)}</span>
         <b class="card-n" data-grupo-badge>${res.refs}/${totalVar} Fragancias</b>
         ${crearStageAnimadoHTML(g, false)}
         <button type="button" class="card-zoom" data-zoom="${g.id}" aria-label="Ver imagen grande de ${escapeHtml(g.nombre)}" title="Ver más grande">
@@ -562,7 +583,11 @@ function renderCatalog() {
   const bloquesHTML = [];
 
   DEFINICION_SECCIONES.forEach((sec) => {
-    const gruposSec = sec.ids.map((id) => mapaVisible[id]).filter(Boolean);
+    const gruposSec = sec.ids.map((id) => mapaVisible[id]).filter(Boolean).sort((a, b) => {
+      const agA = esGrupoAgotado(a) ? 1 : 0;
+      const agB = esGrupoAgotado(b) ? 1 : 0;
+      return agA - agB;
+    });
     if (!gruposSec.length) return;
     gruposSec.forEach((g) => usados.add(g.id));
 
@@ -818,18 +843,26 @@ function openFragModal(grupoId) {
     }
   }
 
+  const toolbar = document.getElementById("fragToolbar") || document.querySelector("#fragModal .frag-toolbar");
+  const modoSwitch = document.getElementById("fragModoSwitch");
   const btnCaja = document.getElementById("btnModoCaja");
   const btnUnidad = document.getElementById("btnModoUnidad");
+  if (toolbar) toolbar.hidden = !cfg.permiteUnidad && !cfg.soloUnidad;
+  if (modoSwitch) modoSwitch.hidden = !cfg.permiteUnidad && !cfg.soloUnidad;
   if (btnCaja) {
+    btnCaja.hidden = Boolean(cfg.soloUnidad);
     btnCaja.textContent = g.id === "GRP-DOR-PACE3"
       ? "📦 Por Caja (=×12 blísters)"
-      : "📦 Por Caja / Bulto";
+      : `📦 Por Caja / Bulto (${g.unidades} und)`;
   }
   if (btnUnidad) {
     btnUnidad.hidden = !cfg.permiteUnidad;
+    const pUndTxt = !g.preciosDistintos && Number(cfg.precioUnidad) > 0
+      ? ` · $${Number(cfg.precioUnidad).toFixed(2)} c/u`
+      : "";
     btnUnidad.textContent = g.id === "GRP-DOR-PACE3"
-      ? "🪒 Por Blíster (1 blíster = ×12 pqts de 3)"
-      : "🧴 Por Unidad (mín. 6 sugerido)";
+      ? `🪒 Por Blíster ($${Number(cfg.precioUnidad).toFixed(2)} c/u)`
+      : `🧴 Por Unidad (mín. 6${pUndTxt})`;
   }
 
   renderFragModalContent();
@@ -898,9 +931,16 @@ function renderFragModalContent() {
   const fragGrid = document.getElementById("fragGrid");
   if (fragGrid) {
     fragGrid.className = "frag-grid frag-cards-grid";
-    fragGrid.innerHTML = g.variantes.map((v) => {
+    const chkAgotada = (v) => !!(v.agotado || (typeof esVarianteAgotada === "function" && esVarianteAgotada(v.code)));
+    const variantesOrdenadas = [...g.variantes].sort((a, b) => {
+      const agA = chkAgotada(a) ? 1 : 0;
+      const agB = chkAgotada(b) ? 1 : 0;
+      return agA - agB;
+    });
+    fragGrid.innerHTML = variantesOrdenadas.map((v) => {
       const q = getItemQty(v.code);
       const pv = precioVariante(v.code);
+      const agotadaVar = chkAgotada(v) && q.cajas <= 0 && q.unidades <= 0;
       const cantModo = modoVentaActual === "unidad" ? q.unidades : q.cajas;
       const otraCant = modoVentaActual === "unidad" ? q.cajas : q.unidades;
       const otraEtiqueta = modoVentaActual === "unidad"
@@ -913,18 +953,19 @@ function renderFragModalContent() {
       const srcVar800 = v.img800 || v.img;
       const srcVarHq = v.imgHq || srcVar800;
 
+      const etqModoUnd = g.id === "GRP-DOR-PACE3" ? "blíster" : "und";
       const precioCard = modoVentaActual === "unidad"
-        ? `$${pv.precioUnidad.toFixed(2)} / ${g.id === "GRP-DOR-PACE3" ? "blíster" : "und"}`
-        : `$${pv.precioMenor.toFixed(2)} / cj · Mayor: $${pv.precioMayor.toFixed(2)}`;
+        ? `$${pv.precioUnidad.toFixed(2)} / ${etqModoUnd} · Caja: $${pv.precioMenor.toFixed(2)}`
+        : `$${pv.precioMenor.toFixed(2)} / cj · Mayor: $${pv.precioMayor.toFixed(2)}${cfg.permiteUnidad && pv.precioUnidad > 0 ? ` · ${g.id === "GRP-DOR-PACE3" ? "Blíster" : "Und"}: $${pv.precioUnidad.toFixed(2)}` : ""}`;
 
       return `
-        <div class="frag-card ${cantModo > 0 ? "is-selected" : ""}" data-frag-row="${v.code}" data-frag-preview="${v.code}">
+        <div class="frag-card ${cantModo > 0 ? "is-selected" : ""}${agotadaVar ? " sin-stock agotado" : ""}" data-frag-row="${v.code}" data-frag-preview="${v.code}">
           <div class="frag-card-img-wrap" data-frag-inc="${v.code}" role="button" tabindex="0" aria-label="Tocar imagen para sumar ${escapeHtml(v.fragancia)}" title="Tocá la imagen para sumar">
             ${cantModo > 0 ? `
               <button type="button" class="frag-img-minus" data-frag-dec="${v.code}" aria-label="Restar ${escapeHtml(v.fragancia)}" title="Restar 1">−</button>
             ` : ""}
-            <span class="frag-card-badge ${cantModo > 0 ? "is-visible" : ""}" data-check-badge="${v.code}">
-              ${cantModo > 0 ? `✓ ${cantModo} ${unidadCorto}` : "+ Tocar"}
+            <span class="frag-card-badge ${cantModo > 0 || agotadaVar ? "is-visible" : ""}${agotadaVar ? " agotado" : ""}" data-check-badge="${v.code}">
+              ${agotadaVar ? "Agotado" : (cantModo > 0 ? `✓ ${cantModo} ${unidadCorto}` : "+ Tocar")}
             </span>
             <img src="${srcVar800}" srcset="${srcVar800} 1x, ${srcVarHq} 2x" alt="${escapeHtml(v.fragancia)}" width="800" height="600" loading="lazy" decoding="async" />
             <button type="button" class="frag-zoom-btn" data-zoom-var="${v.code}" aria-label="Ver en grande ${escapeHtml(v.fragancia)}" title="Ampliar foto">🔍</button>
@@ -936,14 +977,14 @@ function renderFragModalContent() {
             <div class="frag-card-controls">
               <div class="frag-stepper">
                 <button type="button" class="qty-btn" data-frag-dec="${v.code}" aria-label="Restar">−</button>
-                <input type="number" class="qty-input frag-qty-input" data-frag-input="${v.code}" min="0" max="999" inputmode="numeric" pattern="[0-9]*" value="${cantModo}" aria-label="Cantidad de ${escapeHtml(v.fragancia)}" />
-                <button type="button" class="qty-btn" data-frag-inc="${v.code}" aria-label="Sumar">+</button>
+                <input type="number" class="qty-input frag-qty-input" data-frag-input="${v.code}" min="0" max="999" inputmode="numeric" pattern="[0-9]*" value="${cantModo}" ${agotadaVar ? "disabled" : ""} aria-label="Cantidad de ${escapeHtml(v.fragancia)}" />
+                <button type="button" class="qty-btn" data-frag-inc="${v.code}" ${agotadaVar ? "disabled" : ""} aria-label="Sumar">+</button>
               </div>
               ${modoVentaActual === "unidad" ? `
                 <div class="chips-und-rapida">
-                  <button type="button" class="chip-und-btn ${cantModo === 6 ? "is-active" : ""}" data-quick-und="6" data-code="${v.code}">6</button>
-                  <button type="button" class="chip-und-btn ${cantModo === 12 ? "is-active" : ""}" data-quick-und="12" data-code="${v.code}">12</button>
-                  <button type="button" class="chip-und-btn ${cantModo === 24 ? "is-active" : ""}" data-quick-und="24" data-code="${v.code}">24</button>
+                  <button type="button" class="chip-und-btn ${cantModo === 6 ? "is-active" : ""}" data-quick-und="6" data-code="${v.code}" ${agotadaVar ? "disabled" : ""}>6</button>
+                  <button type="button" class="chip-und-btn ${cantModo === 12 ? "is-active" : ""}" data-quick-und="12" data-code="${v.code}" ${agotadaVar ? "disabled" : ""}>12</button>
+                  <button type="button" class="chip-und-btn ${cantModo === 24 ? "is-active" : ""}" data-quick-und="24" data-code="${v.code}" ${agotadaVar ? "disabled" : ""}>24</button>
                 </div>
               ` : ""}
             </div>
@@ -963,7 +1004,9 @@ function sincronizarFilaFragEnVivo(code) {
   const q = getItemQty(code);
   const modoVentaActual = state.modoVentaActual;
   const cantModo = modoVentaActual === "unidad" ? q.unidades : q.cajas;
-  const unidadCorto = modoVentaActual === "unidad" ? "und" : (cantModo === 1 ? "caja" : "cajas");
+  const unidadCorto = modoVentaActual === "unidad"
+    ? (g.id === "GRP-DOR-PACE3" ? "blíster" : "und")
+    : (cantModo === 1 ? "caja" : "cajas");
   const row = document.querySelector(`#fragGrid [data-frag-row="${code}"]`);
   if (row) {
     row.classList.toggle("is-selected", cantModo > 0);
@@ -2375,6 +2418,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (quickBtn) {
         e.stopPropagation();
         const code = quickBtn.getAttribute("data-code");
+        if (esVarianteAgotada(code)) return;
         const cant = Number(quickBtn.getAttribute("data-quick-und")) || 6;
         setFragQty(code, "unidad", cant);
         renderFragModalContent();
@@ -2401,6 +2445,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (incBtn && !e.target.closest("[data-frag-dec], [data-zoom-var], input")) {
         e.stopPropagation();
         const code = incBtn.getAttribute("data-frag-inc");
+        if (esVarianteAgotada(code)) return;
         const q = getItemQty(code);
         const modoVentaActual = state.modoVentaActual;
         const actual = modoVentaActual === "unidad" ? q.unidades : q.cajas;
